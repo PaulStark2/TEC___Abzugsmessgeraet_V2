@@ -1,7 +1,7 @@
-Entwicklungsprojekt für den Abzugsprüfstand (MA Paul Stark)
+# Entwicklungsprojekt für den Abzugsprüfstand (MA Paul Stark)
 
-Ordner "docs":
+## Ordner "docs"
 - enthält Projektspezifikationen und Handlungsanweisungen für den Agenten in Cursor 
 
-Datei "AGENTS.md":
+## Datei "AGENTS.md"
 - fast die Handlungsanweisungen für den Agenten zusammen und verweist auf Dokumente im ordner "docs"
