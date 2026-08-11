@@ -1,0 +1,25 @@
+# CMake build directory
+build/
+
+# IDE / editor files
+.vscode/
+.idea/
+
+# C/C++ generated files
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
