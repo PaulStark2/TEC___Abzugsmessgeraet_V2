@@ -43,3 +43,16 @@ enum class MachineState
     // Fault placeholder state (not automatically triggered in M5).
     Fault
 };
+
+// Process-level state owned by the TestExecutor (Milestone 7).
+enum class ProcessState
+{
+    // No test program is currently executing.
+    Idle,
+    // A test program is sequencing through points.
+    Running,
+    // All program points were reached successfully.
+    Completed,
+    // Execution was aborted (e.g. machine stop).
+    Aborted
+};

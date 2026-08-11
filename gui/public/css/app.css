@@ -37,6 +37,10 @@ body {
   font-size: 0.95rem;
 }
 
+.gui-status--error {
+  color: #e57373;
+}
+
 .app-main {
   display: grid;
   gap: 1rem;

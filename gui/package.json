@@ -2,12 +2,15 @@
   "name": "tec-abzugsmessgeraet-gui",
   "version": "0.1.0",
   "private": true,
-  "description": "Web HMI for the automated tensile testing rig (Phase A G1 scaffold)",
+  "description": "Web HMI for the automated tensile testing rig (Phase A)",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
   }
 }

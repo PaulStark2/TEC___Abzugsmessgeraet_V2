@@ -21,6 +21,11 @@ MachineState Machine::machineState() const
     return machine_state_; // return state
 }
 
+MotionState Machine::motionState() const
+{
+    return motion_planner_.motionState(); // expose planner state only
+}
+
 void Machine::setHostInputs(const HostInputs& inputs)
 {
     host_inputs_ = inputs; // store snapshot only

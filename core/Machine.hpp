@@ -15,6 +15,9 @@ public:
     // Return current machine state. // query state
     MachineState machineState() const; // getter
 
+    // Return current motion state from the owned MotionPlanner. // thin getter
+    MotionState motionState() const; // for TestExecutor AtTarget checks
+
     // Provide host I/O snapshot (no evaluation in M5). // set inputs
     void setHostInputs(const HostInputs& inputs); // assign
 

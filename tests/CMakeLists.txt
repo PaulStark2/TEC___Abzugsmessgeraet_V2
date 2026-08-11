@@ -57,3 +57,18 @@ target_link_libraries(testprogram_tests
 
 # Register the TestProgram tests with CTest.
 add_test(NAME testprogram_tests COMMAND testprogram_tests)
+
+# CMake definition for Core unit tests of TestExecutor (Milestone 7).
+add_executable(testexecutor_tests
+    # Deterministic tests for TestExecutor process sequencing.
+    testexecutor_tests.cpp
+)
+
+# Link tests against the Core library.
+target_link_libraries(testexecutor_tests
+    PRIVATE
+        core
+)
+
+# Register the TestExecutor tests with CTest.
+add_test(NAME testexecutor_tests COMMAND testexecutor_tests)

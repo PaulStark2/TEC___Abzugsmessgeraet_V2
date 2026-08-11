@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: g2-mock-status
     content: "G2: MachineClient + MockMachineClient + Live-Status (State, Motion, XYZ)"
-    status: pending
+    status: completed
   - id: g3-control-loop
     content: "G3: moveTo/Pause/Resume/Stop über HMI → vollständiger Steuerzyklus"
     status: pending

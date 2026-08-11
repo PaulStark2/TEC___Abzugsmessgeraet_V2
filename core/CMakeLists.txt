@@ -8,6 +8,8 @@ add_library(core STATIC
     MotionPlanner.cpp
     # Machine state machine layer for Milestone 5.
     Machine.cpp
+    # Test program sequencing for Milestone 7.
+    TestExecutor.cpp
 )
 
 # Expose the core/ directory so dependents can include Core headers.
