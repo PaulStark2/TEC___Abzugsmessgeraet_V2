@@ -16,7 +16,7 @@ The system shall be controlled automatically using predefined test points.
 
 The final system consists of:
 
-- Raspberry Pi 5
+- Raspberry Pi 3b
 - Node.js web GUI
 - STM32F446RE
 - 3-axis stepper motor system
