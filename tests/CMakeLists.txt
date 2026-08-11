@@ -27,3 +27,18 @@ target_link_libraries(motionplanner_tests
 
 # Register the MotionPlanner tests with CTest.
 add_test(NAME motionplanner_tests COMMAND motionplanner_tests)
+
+# CMake definition for Core unit tests of Machine (Milestone 5).
+add_executable(machine_tests
+    # Deterministic tests for the Core Machine class.
+    machine_tests.cpp
+)
+
+# Link tests against the Core library.
+target_link_libraries(machine_tests
+    PRIVATE
+        core
+)
+
+# Register the Machine tests with CTest.
+add_test(NAME machine_tests COMMAND machine_tests)

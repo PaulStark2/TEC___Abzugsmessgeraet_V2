@@ -28,3 +28,18 @@ enum class MotionState
     // All axes reached their commanded targets.
     AtTarget
 };
+
+// Machine state used by the Core Machine state machine.
+enum class MachineState
+{
+    // No active machine command.
+    Idle,
+    // Machine actively executes motion.
+    Active,
+    // Machine motion is paused (resume-capable).
+    Paused,
+    // Machine motion is stopped/aborted (resume not allowed).
+    Stopped,
+    // Fault placeholder state (not automatically triggered in M5).
+    Fault
+};
