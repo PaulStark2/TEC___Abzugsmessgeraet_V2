@@ -14,8 +14,14 @@ public:
     // Return the commanded target position.
     float target() const;
 
-    // Return the commanded velocity magnitude.
+    // Return the commanded maximum velocity magnitude.
     float velocity() const;
+
+    // Return the current signed velocity.
+    float currentVelocity() const;
+
+    // Return the commanded acceleration magnitude.
+    float acceleration() const;
 
     // Return whether the axis accepts motion updates.
     bool enabled() const;
@@ -26,8 +32,11 @@ public:
     // Set the commanded target position.
     void setTarget(float target);
 
-    // Set the commanded velocity magnitude (must be non-negative).
+    // Set the commanded maximum velocity magnitude (must be non-negative).
     void setVelocity(float velocity);
+
+    // Set the commanded acceleration magnitude (must be non-negative).
+    void setAcceleration(float acceleration);
 
     // Enable or disable axis motion updates.
     void setEnabled(bool enabled);
@@ -35,7 +44,7 @@ public:
     // Return true when the axis is within tolerance of its target.
     bool isAtTarget() const;
 
-    // Advance the axis toward its target using constant velocity.
+    // Advance the axis toward its target using a trapezoidal profile.
     void tick(float dt);
 
 private:
@@ -45,8 +54,14 @@ private:
     // Commanded target position.
     float target_;
 
-    // Commanded velocity magnitude toward the target.
-    float velocity_;
+    // Commanded maximum velocity magnitude toward the target.
+    float max_velocity_;
+
+    // Current signed velocity in the direction of motion.
+    float current_velocity_;
+
+    // Commanded acceleration magnitude.
+    float acceleration_;
 
     // Whether tick() may move the axis.
     bool enabled_;
