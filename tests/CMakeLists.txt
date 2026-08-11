@@ -42,3 +42,18 @@ target_link_libraries(machine_tests
 
 # Register the Machine tests with CTest.
 add_test(NAME machine_tests COMMAND machine_tests)
+
+# CMake definition for Core unit tests of TestProgram (Milestone 6).
+add_executable(testprogram_tests
+    # Deterministic tests for TestPoint / TestProgram data containers.
+    testprogram_tests.cpp
+)
+
+# Link tests against the Core library (header-only types live under core/).
+target_link_libraries(testprogram_tests
+    PRIVATE
+        core
+)
+
+# Register the TestProgram tests with CTest.
+add_test(NAME testprogram_tests COMMAND testprogram_tests)

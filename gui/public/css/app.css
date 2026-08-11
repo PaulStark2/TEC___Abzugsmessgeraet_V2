@@ -1,0 +1,85 @@
+:root {
+  --bg: #1a1d21;
+  --panel: #242830;
+  --text: #e8eaed;
+  --muted: #9aa0a6;
+  --accent: #5b9fd4;
+  --border: #3a404a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.app-header {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.gui-status {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+.app-main {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem 2rem;
+  max-width: 56rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.15rem;
+}
+
+.panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.75rem 1rem;
+  margin: 0;
+}
+
+.status-grid dt {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-grid dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.placeholder-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}

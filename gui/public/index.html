@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zugprüfstand — HMI</title>
+    <link rel="stylesheet" href="/css/app.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Automatisierter 3-Achs-Zugprüfstand</h1>
+      <p id="gui-status" class="gui-status">GUI startet…</p>
+    </header>
+
+    <main class="app-main">
+      <section class="panel" aria-labelledby="status-heading">
+        <h2 id="status-heading">Maschinenstatus</h2>
+        <dl class="status-grid">
+          <div>
+            <dt>MachineState</dt>
+            <dd id="machine-state">—</dd>
+          </div>
+          <div>
+            <dt>MotionState</dt>
+            <dd id="motion-state">—</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel" aria-labelledby="pose-heading">
+        <h2 id="pose-heading">Position</h2>
+        <dl class="status-grid">
+          <div>
+            <dt>X</dt>
+            <dd id="pos-x">—</dd>
+          </div>
+          <div>
+            <dt>Y</dt>
+            <dd id="pos-y">—</dd>
+          </div>
+          <div>
+            <dt>Z</dt>
+            <dd id="pos-z">—</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel" aria-labelledby="controls-heading">
+        <h2 id="controls-heading">Steuerung</h2>
+        <p class="placeholder-note">
+          Platzhalter für moveTo / Pause / Resume / Stop (ab Meilenstein G3).
+        </p>
+      </section>
+    </main>
+
+    <script src="/js/app.js"></script>
+  </body>
+</html>
