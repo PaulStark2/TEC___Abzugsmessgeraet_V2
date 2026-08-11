@@ -2,6 +2,8 @@
 add_library(core STATIC
     # Trivial Core source used by Milestone 1.
     core.cpp
+    # Single-axis motion model for Milestone 2.
+    Axis.cpp
 )
 
 # Expose the core/ directory so dependents can include Core headers.

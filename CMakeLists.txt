@@ -18,3 +18,7 @@ add_subdirectory(core)
 
 # Build the PC Simulation executable that links against Core.
 add_subdirectory(simulation)
+
+# Enable CTest and build Core unit tests.
+enable_testing()
+add_subdirectory(tests)
