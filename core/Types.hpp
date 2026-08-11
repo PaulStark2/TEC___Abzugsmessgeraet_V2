@@ -17,3 +17,14 @@ enum class AxisId
 
 // Position tolerance used when comparing axis position to its target.
 constexpr float kPositionTolerance = 1e-5f;
+
+// Multi-axis motion state used by the Core MotionPlanner.
+enum class MotionState
+{
+    // No active motion command.
+    Idle,
+    // At least one axis is moving toward its target.
+    Moving,
+    // All axes reached their commanded targets.
+    AtTarget
+};

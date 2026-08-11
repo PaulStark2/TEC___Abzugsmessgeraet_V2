@@ -4,6 +4,8 @@ add_library(core STATIC
     core.cpp
     # Single-axis motion model for Milestone 2.
     Axis.cpp
+    # Multi-axis pose motion for Milestone 4.
+    MotionPlanner.cpp
 )
 
 # Expose the core/ directory so dependents can include Core headers.
