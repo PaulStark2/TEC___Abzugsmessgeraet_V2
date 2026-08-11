@@ -83,7 +83,71 @@ body {
 }
 
 .placeholder-note {
-  margin: 0;
+  margin: 0 0 0.85rem;
   color: var(--muted);
   font-size: 0.95rem;
+}
+
+.control-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+  align-items: end;
+}
+
+.control-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.control-form input {
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #2f3540;
+  color: var(--text);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+.btn-stop {
+  background: #5a2a2a;
+  border-color: #8a4040;
+  font-weight: 600;
+}
+
+.command-feedback {
+  margin: 0.75rem 0 0;
+  min-height: 1.2em;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.command-feedback--error {
+  color: #e57373;
 }

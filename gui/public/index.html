@@ -48,8 +48,29 @@
       <section class="panel" aria-labelledby="controls-heading">
         <h2 id="controls-heading">Steuerung</h2>
         <p class="placeholder-note">
-          Platzhalter für moveTo / Pause / Resume / Stop (ab Meilenstein G3).
+          Soft-STOP (kein Hardware-E-Stop). Commands gehen an den Server-Mock.
         </p>
+        <form id="move-form" class="control-form">
+          <label>
+            Ziel X
+            <input id="target-x" name="x" type="number" step="any" value="10" required />
+          </label>
+          <label>
+            Ziel Y
+            <input id="target-y" name="y" type="number" step="any" value="20" required />
+          </label>
+          <label>
+            Ziel Z
+            <input id="target-z" name="z" type="number" step="any" value="30" required />
+          </label>
+          <button type="submit" id="btn-moveto">Move To</button>
+        </form>
+        <div class="control-actions">
+          <button type="button" id="btn-pause">Pause</button>
+          <button type="button" id="btn-resume">Resume</button>
+          <button type="button" id="btn-stop" class="btn-stop">STOP</button>
+        </div>
+        <p id="command-feedback" class="command-feedback" aria-live="polite"></p>
       </section>
     </main>
 

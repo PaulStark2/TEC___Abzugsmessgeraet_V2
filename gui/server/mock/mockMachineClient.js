@@ -1,22 +1,14 @@
 'use strict';
 
 /**
- * MockMachineClient — sole MachineClient implementation in G2.
+ * MockMachineClient — sole MachineClient implementation (G2/G3).
  * Owns machine/motion state and pose; browser only displays snapshots.
  *
- * Behaviour: move linearly along a closed waypoint loop.
- * At each waypoint: MotionState AtTarget / MachineState Idle briefly, then continue.
+ * G3: command-driven moveTo / pause / resume / stop (M5-aligned semantics).
+ * No autonomous waypoint loop — idle until a command arrives.
  */
 
-const WAYPOINTS = [
-  { x: 0, y: 0, z: 0 },
-  { x: 40, y: 10, z: 0 },
-  { x: 40, y: 10, z: 50 },
-  { x: 10, y: 30, z: 50 },
-];
-
 const SPEED_UNITS_PER_SEC = 15;
-const HOLD_AT_TARGET_SEC = 0.8;
 
 function dist(a, b) {
   const dx = b.x - a.x;
@@ -26,44 +18,86 @@ function dist(a, b) {
 }
 
 function createMockMachineClient() {
-  let targetIndex = 1;
-  let pose = { ...WAYPOINTS[0] };
-  let target = { ...WAYPOINTS[targetIndex] };
-  let machineState = 'Active';
-  let motionState = 'Moving';
-  let holdRemaining = 0;
+  let pose = { x: 0, y: 0, z: 0 };
+  let target = { x: 0, y: 0, z: 0 };
+  let machineState = 'Idle';
+  let motionState = 'Idle';
 
-  function beginHoldAtTarget() {
-    pose = { ...target };
-    machineState = 'Idle';
-    motionState = 'AtTarget';
-    holdRemaining = HOLD_AT_TARGET_SEC;
+  function getStatus() {
+    return {
+      machineState,
+      motionState,
+      x: pose.x,
+      y: pose.y,
+      z: pose.z,
+    };
   }
 
-  function beginNextSegment() {
-    targetIndex = (targetIndex + 1) % WAYPOINTS.length;
-    target = { ...WAYPOINTS[targetIndex] };
+  function moveTo(x, y, z) {
+    const nx = Number(x);
+    const ny = Number(y);
+    const nz = Number(z);
+    if (![nx, ny, nz].every(Number.isFinite)) {
+      return { ok: false, error: 'moveTo requires finite x, y, z' };
+    }
+
+    target = { x: nx, y: ny, z: nz };
+
+    if (dist(pose, target) <= 1e-3) {
+      pose = { ...target };
+      machineState = 'Idle';
+      motionState = 'AtTarget';
+      return { ok: true, status: getStatus() };
+    }
+
     machineState = 'Active';
     motionState = 'Moving';
-    holdRemaining = 0;
+    return { ok: true, status: getStatus() };
+  }
+
+  function pause() {
+    if (machineState !== 'Active') {
+      return { ok: true, status: getStatus() };
+    }
+    machineState = 'Paused';
+    // Pose frozen; motion not advancing while Paused.
+    motionState = 'Idle';
+    return { ok: true, status: getStatus() };
+  }
+
+  function resume() {
+    if (machineState !== 'Paused') {
+      return { ok: true, status: getStatus() };
+    }
+
+    if (dist(pose, target) <= 1e-3) {
+      pose = { ...target };
+      machineState = 'Idle';
+      motionState = 'AtTarget';
+      return { ok: true, status: getStatus() };
+    }
+
+    machineState = 'Active';
+    motionState = 'Moving';
+    return { ok: true, status: getStatus() };
+  }
+
+  function stop() {
+    if (machineState === 'Stopped' || machineState === 'Fault') {
+      return { ok: true, status: getStatus() };
+    }
+    // Soft stop: freeze pose in place. Not a hardware E-Stop.
+    machineState = 'Stopped';
+    motionState = 'Idle';
+    return { ok: true, status: getStatus() };
   }
 
   function tick(dt) {
     if (!(dt > 0)) {
       return;
     }
-
-    if (holdRemaining > 0) {
-      holdRemaining -= dt;
-      if (holdRemaining > 0) {
-        machineState = 'Idle';
-        motionState = 'AtTarget';
-        return;
-      }
-      beginNextSegment();
-    }
-
-    if (motionState !== 'Moving') {
+    // Only Active advances motion (Paused/Stopped/Idle/Fault do not).
+    if (machineState !== 'Active' || motionState !== 'Moving') {
       return;
     }
 
@@ -71,7 +105,9 @@ function createMockMachineClient() {
     const step = SPEED_UNITS_PER_SEC * dt;
 
     if (remaining <= 1e-3 || step >= remaining) {
-      beginHoldAtTarget();
+      pose = { ...target };
+      machineState = 'Idle';
+      motionState = 'AtTarget';
       return;
     }
 
@@ -85,19 +121,13 @@ function createMockMachineClient() {
     motionState = 'Moving';
   }
 
-  function getStatus() {
-    return {
-      machineState,
-      motionState,
-      x: pose.x,
-      y: pose.y,
-      z: pose.z,
-    };
-  }
-
   return {
     getStatus,
     tick,
+    moveTo,
+    pause,
+    resume,
+    stop,
   };
 }
 

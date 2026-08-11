@@ -29,13 +29,99 @@ function setGuiStatus(text, isError) {
   el.classList.toggle('gui-status--error', Boolean(isError));
 }
 
+function setCommandFeedback(text, isError) {
+  const el = $('command-feedback');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('command-feedback--error', Boolean(isError));
+}
+
+/**
+ * Send a command to the server. Browser does not simulate motion.
+ * @param {object} body
+ */
+async function sendCommand(body) {
+  const response = await fetch('/api/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  if (result.status) {
+    applyStatus(result.status);
+  }
+  return result;
+}
+
+function wireControls() {
+  const form = $('move-form');
+  if (form) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const x = Number($('target-x').value);
+      const y = Number($('target-y').value);
+      const z = Number($('target-z').value);
+      try {
+        await sendCommand({ command: 'moveTo', x, y, z });
+        setCommandFeedback(`moveTo(${x}, ${y}, ${z}) gesendet`, false);
+      } catch (err) {
+        setCommandFeedback(err.message || String(err), true);
+      }
+    });
+  }
+
+  const pauseBtn = $('btn-pause');
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', async () => {
+      try {
+        await sendCommand({ command: 'pause' });
+        setCommandFeedback('pause gesendet', false);
+      } catch (err) {
+        setCommandFeedback(err.message || String(err), true);
+      }
+    });
+  }
+
+  const resumeBtn = $('btn-resume');
+  if (resumeBtn) {
+    resumeBtn.addEventListener('click', async () => {
+      try {
+        await sendCommand({ command: 'resume' });
+        setCommandFeedback('resume gesendet', false);
+      } catch (err) {
+        setCommandFeedback(err.message || String(err), true);
+      }
+    });
+  }
+
+  const stopBtn = $('btn-stop');
+  if (stopBtn) {
+    stopBtn.addEventListener('click', async () => {
+      try {
+        await sendCommand({ command: 'stop' });
+        setCommandFeedback('STOP gesendet (Soft-Stop)', false);
+      } catch (err) {
+        setCommandFeedback(err.message || String(err), true);
+      }
+    });
+  }
+}
+
 function connectStatusSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${window.location.host}/ws/status`;
   const socket = new WebSocket(url);
 
   socket.addEventListener('open', () => {
-    setGuiStatus('GUI läuft — Live-Status verbunden (G2 Mock)', false);
+    setGuiStatus('GUI läuft — Live-Status verbunden (G3 Mock)', false);
   });
 
   socket.addEventListener('message', (event) => {
@@ -59,12 +145,12 @@ function connectStatusSocket() {
   });
 
   socket.addEventListener('error', () => {
-    // close handler performs reconnect
     socket.close();
   });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   setGuiStatus('GUI läuft — verbinde Live-Status…', false);
+  wireControls();
   connectStatusSocket();
 });

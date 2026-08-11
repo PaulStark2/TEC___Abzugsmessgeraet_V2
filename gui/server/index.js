@@ -40,9 +40,88 @@ function resolvePublicPath(urlPath) {
   return absolute;
 }
 
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (!raw) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJson(res, statusCode, body) {
+  const payload = JSON.stringify(body);
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
+
+/**
+ * Dispatch a command object to the MachineClient.
+ * @returns {{ ok: boolean, status?: object, error?: string }}
+ */
+function handleCommand(body) {
+  const command = body && body.command;
+  if (typeof command !== 'string') {
+    return { ok: false, error: 'Missing command' };
+  }
+
+  switch (command) {
+    case 'moveTo':
+      if (typeof machineClient.moveTo !== 'function') {
+        return { ok: false, error: 'moveTo not supported by client' };
+      }
+      return machineClient.moveTo(body.x, body.y, body.z);
+    case 'pause':
+      if (typeof machineClient.pause !== 'function') {
+        return { ok: false, error: 'pause not supported by client' };
+      }
+      return machineClient.pause();
+    case 'resume':
+      if (typeof machineClient.resume !== 'function') {
+        return { ok: false, error: 'resume not supported by client' };
+      }
+      return machineClient.resume();
+    case 'stop':
+      if (typeof machineClient.stop !== 'function') {
+        return { ok: false, error: 'stop not supported by client' };
+      }
+      return machineClient.stop();
+    default:
+      return { ok: false, error: `Unknown command: ${command}` };
+  }
+}
+
 const machineClient = createMachineClient();
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
+  const urlPath = (req.url || '/').split('?')[0];
+
+  if (req.method === 'POST' && urlPath === '/api/command') {
+    try {
+      const body = await readJsonBody(req);
+      const result = handleCommand(body);
+      broadcastStatus();
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Method Not Allowed');
@@ -110,4 +189,5 @@ server.listen(PORT, () => {
   console.log(`GUI server listening on http://localhost:${PORT}`);
   console.log(`Machine client: ${clientKind}`);
   console.log(`Status WebSocket: ws://localhost:${PORT}/ws/status (~${STATUS_HZ} Hz)`);
+  console.log('Command API: POST /api/command');
 });

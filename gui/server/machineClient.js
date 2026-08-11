@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * GUI-side machine status contract (semantic alignment with Core M5).
+ * GUI-side machine status/command contract (semantic alignment with Core M5).
  * Not imported from C++; no dependency on core/.
  *
  * @typedef {'Idle' | 'Active' | 'Paused' | 'Stopped' | 'Fault'} MachineState
@@ -14,20 +14,19 @@
  * @property {number} y
  * @property {number} z
  *
- * MachineClient contract (G2):
- * - getStatus() → MachineStatus snapshot (authority is the client impl, not the browser)
- * - tick(dtSeconds)? → advance mock/sim time (optional; ProtocolMachineClient later may omit)
+ * MachineClient contract:
+ * - getStatus() → MachineStatus
+ * - tick(dtSeconds)? → advance mock time
+ * - moveTo(x,y,z) / pause() / resume() / stop() → { ok, status?, error? } (G3)
  * - close()? → release resources
  *
- * Later (G12): ProtocolMachineClient behind the same factory key `protocol`.
+ * Later (G12): ProtocolMachineClient behind factory key `protocol`.
  */
 
 const { createMockMachineClient } = require('./mock/mockMachineClient');
 
 /**
- * Create a MachineClient by name.
- * @param {string} [kind] defaults to env MACHINE_CLIENT or 'mock'
- * @returns {{ getStatus: () => MachineStatus, tick?: (dt: number) => void, close?: () => void }}
+ * @param {string} [kind]
  */
 function createMachineClient(kind) {
   const selected = (kind || process.env.MACHINE_CLIENT || 'mock').toLowerCase();
@@ -36,12 +35,11 @@ function createMachineClient(kind) {
     case 'mock':
       return createMockMachineClient();
     case 'protocol':
-      // Placeholder for G12 — keep factory shape stable.
       throw new Error(
         'ProtocolMachineClient is not implemented yet (planned for G12). Use MACHINE_CLIENT=mock.'
       );
     default:
-      throw new Error(`Unknown MACHINE_CLIENT="${selected}". Supported in G2: mock`);
+      throw new Error(`Unknown MACHINE_CLIENT="${selected}". Supported: mock`);
   }
 }
 

@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: g3-control-loop
     content: "G3: moveTo/Pause/Resume/Stop über HMI → vollständiger Steuerzyklus"
-    status: pending
+    status: completed
   - id: g4-hmi-shell
     content: "G4: Hauptmenü, Navigation, Statusleiste, Seiten-Platzhalter"
     status: pending

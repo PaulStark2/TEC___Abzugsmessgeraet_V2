@@ -24,7 +24,7 @@ set PORT=3000
 npm start
 ```
 
-(`MACHINE_CLIENT=protocol` ist für G12 vorgesehen und wirft in G2 noch einen Fehler.)
+(`MACHINE_CLIENT=protocol` ist für G12 vorgesehen und wirft noch einen Fehler.)
 
 ## Meilensteine
 
@@ -35,18 +35,22 @@ npm start
 
 ### G2 — Mock Machine + Live-Status
 
-- `MachineClient`-Vertrag + Factory (`gui/server/machineClient.js`)
-- `MockMachineClient` (`gui/server/mock/mockMachineClient.js`)
-- WebSocket-Statuskanal `ws://<host>/ws/status` (~5 Hz)
-- HMI zeigt Live-`machineState`, `motionState`, `x/y/z`
+- `MachineClient`-Vertrag + Factory
+- `MockMachineClient`
+- WebSocket `/ws/status` (~5 Hz)
+- Live-Anzeige von `machineState`, `motionState`, `x/y/z`
 
-Noch keine Steuercommands (kommen in G3).
+### G3 — Maschinensteuerung (M5-äquivalent)
+
+- Commands: `moveTo`, `pause`, `resume`, `stop`
+- HTTP `POST /api/command`
+- HMI-Eingaben für Zielpose + Pause/Resume/STOP
+- Soft-STOP ≠ Hardware-E-Stop
+- Browser sendet nur Commands; Mock bleibt Zustandsautorität
 
 ## Status-WebSocket-Format
 
 Pfad: `/ws/status`
-
-JSON-Nachricht (ca. 5× pro Sekunde):
 
 ```json
 {
@@ -59,7 +63,24 @@ JSON-Nachricht (ca. 5× pro Sekunde):
 }
 ```
 
-Semantik angelehnt an Core M5; Werte kommen ausschließlich vom Server/`MachineClient`, nicht aus Browser-Logik.
+## Command-API
+
+`POST /api/command` mit JSON-Body:
+
+```json
+{ "command": "moveTo", "x": 10, "y": 20, "z": 30 }
+{ "command": "pause" }
+{ "command": "resume" }
+{ "command": "stop" }
+```
+
+Antwort:
+
+```json
+{ "ok": true, "status": { "machineState": "...", "motionState": "...", "x": 0, "y": 0, "z": 0 } }
+```
+
+oder `{ "ok": false, "error": "..." }`.
 
 ## Architekturgrenzen
 
@@ -67,3 +88,4 @@ Semantik angelehnt an Core M5; Werte kommen ausschließlich vom Server/`MachineC
 - Keine Anbindung an `core/`, CMake, UART oder STM32 in frühen Meilensteinen
 - Der Browser ist niemals Autorität über Machine-/Motion-State
 - Später: derselbe Vertrag hinter `ProtocolMachineClient` (G12)
+- Phase-B-HMI (Menüs) ab G4
