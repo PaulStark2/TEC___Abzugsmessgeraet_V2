@@ -44,7 +44,7 @@ void TestExecutor::tick(float dt)
     }
 
     // External or prior Machine stop aborts the process. // stop detect
-    if (machine_.machineState() == MachineState::Stopped)
+    if (machine_.machineState() == MachineState::Stopped || machine_.machineState() == MachineState::Fault)
     {
         process_state_ = ProcessState::Aborted; // abort
         return; // no further motion
@@ -61,7 +61,7 @@ void TestExecutor::tick(float dt)
     machine_.tick(dt);
 
     // Stop may have been applied during tick by an external caller pattern; re-check. // recheck
-    if (machine_.machineState() == MachineState::Stopped)
+    if (machine_.machineState() == MachineState::Stopped || machine_.machineState() == MachineState::Fault)
     {
         process_state_ = ProcessState::Aborted; // abort
         return; // done

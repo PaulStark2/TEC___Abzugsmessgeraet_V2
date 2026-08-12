@@ -33,6 +33,55 @@ export async function sendCommand(body) {
 }
 
 /**
+ * Upload and validate a TestProgram JSON (G5).
+ * Browser must not perform motion logic; server is validation authority.
+ * @param {object} program
+ * @returns {Promise<{ok:boolean, summary?:object, errors?:Array}>}
+ */
+export async function uploadProgram(program) {
+  const response = await fetch('/api/program/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(program),
+  });
+
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+
+  // Wichtig: Validierungsfehler sollen im UI als Liste darstellbar sein.
+  // Deshalb nicht werfen, sondern das result-Objekt zurückgeben.
+  if (!response.ok) {
+    return result;
+  }
+
+  return result;
+}
+
+/**
+ * Fetch the currently loaded program (G6-prep).
+ * @returns {Promise<{ok:boolean, current?:object, error?:string}>}
+ */
+export async function fetchCurrentProgram() {
+  const response = await fetch('/api/program/current', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+
+  if (!response.ok) {
+    return result;
+  }
+
+  return result;
+}
+
+/**
  * @param {(status: object) => void} onStatus
  * @param {(connected: boolean, message?: string) => void} [onConnection]
  */

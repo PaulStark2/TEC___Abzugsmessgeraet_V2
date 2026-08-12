@@ -37,6 +37,13 @@ void MotionPlanner::moveTo(float x, float y, float z)
     motion_state_ = all_at_target ? MotionState::AtTarget : MotionState::Moving;
 }
 
+void MotionPlanner::setXYTargets(float x, float y)
+{
+    // Only update axis targets; do not touch motion_state_ or axis positions.
+    axis_x_.setTarget(x);
+    axis_y_.setTarget(y);
+}
+
 void MotionPlanner::tick(float dt)
 {
     // Do not advance time with non-positive dt.

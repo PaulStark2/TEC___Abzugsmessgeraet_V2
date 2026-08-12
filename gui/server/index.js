@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createMachineClient } = require('./machineClient');
+const { validateTestProgram } = require('./program/validateTestProgram');
+const programStore = require('./program/programStore');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -124,6 +126,31 @@ function handleCommand(body) {
 
 const machineClient = createMachineClient();
 
+function buildSummaryFromProgram(normalizedProgram) {
+  const testPoints = normalizedProgram.testPoints || [];
+  const xs = testPoints.map((p) => p.x);
+  const ys = testPoints.map((p) => p.y);
+  const zs = testPoints.map((p) => p.z);
+
+  const previewCount = Math.min(5, testPoints.length);
+
+  return {
+    programName: normalizedProgram.programName ?? null,
+    version: normalizedProgram.version,
+    count: testPoints.length,
+    pointsPreview: testPoints.slice(0, previewCount).map((p) => ({
+      name: p.name,
+      sequenceNumber: p.sequenceNumber,
+      x: p.x,
+      y: p.y,
+      z: p.z,
+    })),
+    xRange: { min: Math.min(...xs), max: Math.max(...xs) },
+    yRange: { min: Math.min(...ys), max: Math.max(...ys) },
+    zRange: { min: Math.min(...zs), max: Math.max(...zs) },
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
 
@@ -136,6 +163,46 @@ const server = http.createServer(async (req, res) => {
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
     }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/program/upload') {
+    try {
+      const body = await readJsonBody(req);
+      const validation = validateTestProgram(body);
+
+      if (!validation.ok) {
+        // Invalid upload must not overwrite store.
+        sendJson(res, 400, { ok: false, errors: validation.errors });
+        return;
+      }
+
+      programStore.setProgram(validation.value);
+      sendJson(res, 200, { ok: true, summary: buildSummaryFromProgram(validation.value) });
+      return;
+    } catch {
+      sendJson(res, 400, { ok: false, errors: [{ path: '', message: 'Invalid JSON body' }] });
+      return;
+    }
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/program/current') {
+    const current = programStore.getProgram();
+    if (!current) {
+      sendJson(res, 404, { ok: false, error: 'No program loaded' });
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      current: {
+        meta: {
+          programName: current.programName ?? null,
+          version: current.version,
+        },
+        testPoints: current.testPoints,
+      },
+    });
     return;
   }
 

@@ -235,6 +235,76 @@ button:hover {
   color: #e57373;
 }
 
+.upload-card {
+  margin-bottom: 1rem;
+}
+
+.file-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.summary-root {
+  margin-top: 0.75rem;
+}
+
+.success-card,
+.error-card {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #12151a;
+}
+
+.error-card h3 {
+  color: #e57373;
+}
+
+.success-card h3 {
+  color: var(--accent);
+}
+
+.error-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.error-list li {
+  margin: 0.35rem 0;
+  font-size: 0.95rem;
+}
+
+.error-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  color: var(--muted);
+}
+
+.program-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.6rem;
+}
+
+.program-table th,
+.program-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.35rem 0.25rem;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+.program-table th {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 @media (max-width: 900px) {
   .app-layout {
     grid-template-columns: 1fr;

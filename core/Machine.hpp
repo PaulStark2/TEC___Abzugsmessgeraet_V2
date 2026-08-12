@@ -9,8 +9,38 @@
 class Machine
 {
 public:
+    // Deterministic parameters for M10 force control.
+    // Default values are chosen so that M10 stays effectively disabled unless tests/hosts override parameters.
+    struct ForceControlParams
+    {
+        // XY hysteresis thresholds [N] (force magnitude).
+        float fx_threshold_on_N = 100000.0f;
+        float fx_threshold_off_N = 50000.0f;
+        float fy_threshold_on_N = 100000.0f;
+        float fy_threshold_off_N = 50000.0f;
+
+        // Deterministic target step sizes for XY corrections [machine position units].
+        float dx_step_units = 0.05f;
+        float dy_step_units = 0.05f;
+
+        // Maximum deviation of corrected X/Y targets from the commanded moveTo() targets [machine position units].
+        // X and Y are clamped independently around the original commanded target.
+        float max_x_correction_units = 1000000.0f;
+        float max_y_correction_units = 1000000.0f;
+
+        // Distance-to-Z-target threshold (absolute) for enabling slow Z approach / XY control.
+        float slow_z_distance_threshold_units = 1e-3f;
+
+        // Safety threshold for Fz [N].
+        // M10 uses abs(Fz) >= fz_safety_threshold_N for Safety-Fault.
+        float fz_safety_threshold_N = 1000000.0f;
+    };
+
     // Construct machine with deterministic default motion parameters. // init defaults
     Machine(); // create
+
+    // Construct machine with deterministic M10 ForceControl parameters. // init defaults
+    explicit Machine(const ForceControlParams& params);
 
     // Return current machine state. // query state
     MachineState machineState() const; // getter
@@ -46,6 +76,12 @@ public:
     float z() const; // getter
 
 private:
+    enum class ForceControlPhase
+    {
+        NormalZApproach,
+        SlowZApproach
+    };
+
     MotionPlanner motion_planner_; // direct composition
     MachineState machine_state_; // state
 
@@ -57,6 +93,16 @@ private:
     float stored_target_x_; // stored X
     float stored_target_y_; // stored Y
     float stored_target_z_; // stored Z
+
+    // Original X/Y targets from moveTo(); XY correction is clamped relative to these. // commanded baseline
+    float commanded_target_x_; // baseline X
+    float commanded_target_y_; // baseline Y
+
+    // M10 force control parameters and internal phase.
+    ForceControlParams force_params_; // deterministic params
+    ForceControlPhase force_phase_; // current phase
+    bool x_force_correction_active_; // hysteresis state for X
+    bool y_force_correction_active_; // hysteresis state for Y
 
     // Host I/O containers (no evaluation). // placeholders
     HostInputs host_inputs_; // last inputs

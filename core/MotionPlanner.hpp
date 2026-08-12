@@ -12,6 +12,10 @@ public:
     // Set pose targets for X/Y/Z.
     void moveTo(float x, float y, float z);
 
+    // Update only the X/Y targets (for force-based XY corrections).
+    // Must not change current axis positions, must not modify Z targets, and must not force a new MotionState.
+    void setXYTargets(float x, float y);
+
     // Non-blocking progress update.
     void tick(float dt);
 

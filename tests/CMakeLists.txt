@@ -84,3 +84,15 @@ target_link_libraries(hostinputs_tests
 )
 
 add_test(NAME hostinputs_tests COMMAND hostinputs_tests)
+
+# CMake definition for Core unit tests of force control (Milestone 10).
+add_executable(forcecontrol_tests
+    forcecontrol_tests.cpp
+)
+
+target_link_libraries(forcecontrol_tests
+    PRIVATE
+    core
+)
+
+add_test(NAME forcecontrol_tests COMMAND forcecontrol_tests)
