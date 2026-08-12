@@ -66,5 +66,6 @@ For automated tests, see `tests/bridge_*_tests.cpp`.
 
 ## M14 / M15
 
-- **M14:** Node.js `ProtocolMachineClient` targeting port 8766.
+- **M14:** Node.js `ProtocolMachineClient` (`MACHINE_CLIENT=protocol`) targeting port 8766.
+  See [`gui/README.md`](../gui/README.md) for start instructions.
 - **M15:** Same M12 frames over UART on STM32; transport changes, bridge mapping concept stays on the firmware side.

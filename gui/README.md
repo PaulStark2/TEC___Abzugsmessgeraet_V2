@@ -61,7 +61,63 @@ Three.js wird lokal per npm eingebunden und unter `/vendor/three/` ausgeliefert 
 
 Koordinatensystem: Core `(x,y,z)` → Three.js `(x,y,z)` 1:1, Kamera **Z-up**.
 
-(`MACHINE_CLIENT=protocol` ist für G12 vorgesehen und wirft noch einen Fehler.)
+(`MACHINE_CLIENT=protocol` → M14 ProtocolMachineClient, siehe unten.)
+
+### M14 — ProtocolMachineClient (M12 Binary TCP)
+
+GUI spricht mit `simulation_protocol` über das **M12-Binärprotokoll** (nicht JSON).
+
+| Mode | Env | Transport | Port | Host |
+|------|-----|-----------|------|------|
+| `mock` | `MACHINE_CLIENT=mock` | In-process JS | — | MockMachineClient |
+| `sim` | `MACHINE_CLIENT=sim` | TCP newline JSON (M8.5) | **8765** | `simulation_interactive` |
+| `protocol` | `MACHINE_CLIENT=protocol` | TCP M12 binary (M14) | **8766** | `simulation_protocol` |
+
+1. Core-Host bauen und starten:
+
+```bash
+cmake --build build --target simulation_protocol
+.\build\simulation_protocol\simulation_protocol.exe
+```
+
+Optional Port: `simulation_protocol.exe 8766`
+
+2. GUI:
+
+```bash
+cd gui
+set MACHINE_CLIENT=protocol
+set PROTOCOL_HOST=127.0.0.1
+set PROTOCOL_PORT=8766
+npm start
+```
+
+Weitere Env-Vars:
+
+| Variable | Default | Bedeutung |
+|----------|---------|-----------|
+| `PROTOCOL_HOST` | `127.0.0.1` | TCP-Host |
+| `PROTOCOL_PORT` | `8766` | TCP-Port |
+| `PROTOCOL_ACK_TIMEOUT_MS` | `3000` | Wartezeit auf RSP_ACK/NACK |
+
+**Single-Client:** `simulation_protocol` akzeptiert einen Client; ein neuer Connect ersetzt den vorherigen.
+
+**Unterschiede zu Mock:**
+
+- `setSpeed` → `{ ok: false, error: 'Not supported over protocol' }` (kein M12-Command)
+- `home` → Workaround `moveTo(0,0,0)` (kein echtes Homing in Core)
+- `jog` → `moveTo` relativ zur aktuellen Pose
+- Kein `tick()` in Node.js — Host treibt die Simulation
+
+Tests:
+
+```bash
+npm run test:protocol
+# mit laufendem simulation_protocol + GUI (MACHINE_CLIENT=protocol):
+npm run smoke:g14
+```
+
+Siehe auch [`docs/M13_Sim_Protocol.md`](../docs/M13_Sim_Protocol.md).
 
 ## Meilensteine
 

@@ -91,9 +91,10 @@ function sendJson(res, statusCode, body) {
 
 /**
  * Dispatch a command object to the MachineClient.
- * @returns {{ ok: boolean, status?: object, error?: string }}
+ * Supports sync clients (mock/sim) and async clients (protocol ACK wait).
+ * @returns {Promise<{ ok: boolean, status?: object, error?: string }>}
  */
-function handleCommand(body) {
+async function handleCommand(body) {
   const command = body && body.command;
   if (typeof command !== 'string') {
     return { ok: false, error: 'Missing command' };
@@ -183,7 +184,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && urlPath === '/api/command') {
     try {
       const body = await readJsonBody(req);
-      const result = handleCommand(body);
+      const result = await handleCommand(body);
       broadcastStatus();
       sendJson(res, result.ok ? 200 : 400, result);
     } catch {
