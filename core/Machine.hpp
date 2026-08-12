@@ -21,6 +21,9 @@ public:
     // Provide host I/O snapshot (no evaluation in M5). // set inputs
     void setHostInputs(const HostInputs& inputs); // assign
 
+    // Return the last host inputs snapshot (M9: read force without evaluation). // get inputs
+    const HostInputs& hostInputs() const; // getter
+
     // Provide current host outputs snapshot (placeholders in M5). // query outputs
     HostOutputs hostOutputs() const; // getter
 

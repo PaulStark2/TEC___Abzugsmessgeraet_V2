@@ -90,8 +90,30 @@ Koordinatensystem: Core `(x,y,z)` → Three.js `(x,y,z)` 1:1, Kamera **Z-up**.
 - `MACHINE_CLIENT=sim` → TCP zu `simulation_interactive`
 - Bewegung nur im C++ `Machine` / MotionPlanner / Axis
 - Three.js 3D-Viewport (npm lokal): Achsen, Ursprung, TCP-Punkt, Linie Ursprung→TCP
-- Keine Trajektorie, keine G4-Menüs
 - TCP/JSON = **temporärer Pre-Protocol-Simulations-Transport** (ersetzt später durch M12/M13)
+
+### G4 — HMI-Struktur und Navigation
+
+- Persistente App-Shell: Header, globale Statusleiste, 3D-Viewport
+- Hash-Router (`#menu`, `#manual`, …) ohne SPA-Framework
+- Platzhalter-Seiten für alle Prüfstandsbereiche (G5+)
+- G3-Steuerung auf `#manual`; globaler Soft-STOP in der Statusleiste
+- Fx/Fy/Fz in Statusleiste vorbereitet (`—` bis Server liefert Werte)
+
+Navigation:
+
+| Hash | Seite |
+|------|--------|
+| `#menu` | Hauptmenü (Default) |
+| `#load-points` | Prüftstellen laden (Stub) |
+| `#select-points` | Prüfstellen auswählen (Stub) |
+| `#procedure` | Prüf-/Alterungsprozedur (Stub) |
+| `#results` | Prüfergebnisse (Stub) |
+| `#manual` | Handmodus (G3-Steuerung) |
+| `#plate` | Bauplatte wechseln (Stub) |
+| `#calibrate` | Kalibrieren (Stub) |
+
+Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss laufen).
 
 ## Status-WebSocket-Format
 
@@ -132,4 +154,4 @@ oder `{ "ok": false, "error": "..." }`.
 - Browser ist niemals Autorität über Machine-/Motion-State und integriert keine Pose
 - Mock bleibt für Offline; Sim-Pfad delegiert an Core
 - Später: derselbe HMI-Vertrag hinter `ProtocolMachineClient` (G12) über echtes M12/M13-Protokoll
-- Phase-B-HMI (Menüs) ab G4
+- Phase-B-HMI ab G4 (Navigation); Fachlogik ab G5+

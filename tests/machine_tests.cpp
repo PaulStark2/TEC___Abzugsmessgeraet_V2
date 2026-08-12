@@ -264,16 +264,38 @@ int main()
         }
     }
 
-    // Test 11 – Host I/O: setHostInputs accepts data; hostOutputs available.
+    // Test 11 – Host I/O: 3D force roundtrip; no motion/state change from inputs alone.
     {
         Machine m; // create
+        const float x0 = m.x();
+        const float y0 = m.y();
+        const float z0 = m.z();
+        const MachineState ms0 = m.machineState();
+        const MotionState mot0 = m.motionState();
+
         HostInputs in{}; // default POD
-        in.force = 12.34f; // example input
+        in.force = {12.34f, -5.67f, 89.01f}; // 3D force [N]
         in.limitXMin = true; // example limit placeholder
         in.e_stop = true; // example e-stop placeholder
         m.setHostInputs(in); // store only
 
-        // No evaluation in M5, just ensure outputs getter exists.
+        const HostInputs& stored = m.hostInputs();
+        if (!nearEqual(stored.force.fx, 12.34f) || !nearEqual(stored.force.fy, -5.67f) ||
+            !nearEqual(stored.force.fz, 89.01f))
+        {
+            return 27; // fail force roundtrip
+        }
+
+        // Force input must not affect pose or states in M9.
+        if (!nearEqual(m.x(), x0) || !nearEqual(m.y(), y0) || !nearEqual(m.z(), z0))
+        {
+            return 28; // fail pose unchanged
+        }
+        if (m.machineState() != ms0 || m.motionState() != mot0)
+        {
+            return 29; // fail states unchanged
+        }
+
         HostOutputs out = m.hostOutputs(); // query outputs
         (void)out; // suppress unused warning
     }

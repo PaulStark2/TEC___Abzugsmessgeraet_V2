@@ -72,3 +72,15 @@ target_link_libraries(testexecutor_tests
 
 # Register the TestExecutor tests with CTest.
 add_test(NAME testexecutor_tests COMMAND testexecutor_tests)
+
+# CMake definition for Core unit tests of HostInputs (Milestone 9).
+add_executable(hostinputs_tests
+    hostinputs_tests.cpp
+)
+
+target_link_libraries(hostinputs_tests
+    PRIVATE
+        core
+)
+
+add_test(NAME hostinputs_tests COMMAND hostinputs_tests)

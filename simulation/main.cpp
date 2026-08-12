@@ -69,6 +69,15 @@ static bool nearEqual(float a, float b, float epsilon = 1e-3f)
     return std::fabs(a - b) <= epsilon;
 }
 
+// M9 deterministic 3D force stub [N]: fx=kx*x, fy=ky*y, fz=kz*z (not a physical sensor model).
+static ForceVector demoForceFromPose(float x, float y, float z)
+{
+    constexpr float kx = 1.0f; // N per machine unit along +X
+    constexpr float ky = 1.0f; // N per machine unit along +Y
+    constexpr float kz = 1.0f; // N per machine unit along +Z
+    return ForceVector{kx * x, ky * y, kz * z};
+}
+
 int main()
 {
     // Linkage sanity (kept from M1).
@@ -109,9 +118,10 @@ int main()
 
     while (executor.processState() == ProcessState::Running && tick_count < kMaxTicks)
     {
-        // Host fills I/O boundary each cycle (no force/safety evaluation in M8).
+        // M9: pose -> deterministic 3D force stub; Machine stores only (no evaluation).
+        const ForceVector force = demoForceFromPose(machine.x(), machine.y(), machine.z());
         HostInputs inputs{};
-        inputs.force = 0.0f;
+        inputs.force = force;
         inputs.e_stop = false;
         machine.setHostInputs(inputs);
 
@@ -138,7 +148,8 @@ int main()
             {
                 std::cout << " target=(" << cur.x << "," << cur.y << "," << cur.z << ")";
             }
-            std::cout << std::endl;
+            std::cout << " force=(Fx=" << force.fx << ", Fy=" << force.fy << ", Fz=" << force.fz << ")"
+                      << std::endl;
         }
     }
 

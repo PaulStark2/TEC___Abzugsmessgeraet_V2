@@ -1,10 +1,23 @@
 #pragma once
 
-// HostInputs is a pure data container for later Host/Hardware integration. // container only
+// 3D force vector from the host force sensor (physical Newton values in Core).
+struct ForceVector
+{
+    // Force component along machine +X axis [N].
+    float fx;
+    // Force component along machine +Y axis [N].
+    float fy;
+    // Force component along machine +Z axis [N].
+    float fz;
+};
+
+// HostInputs is a pure data container for later Host/Hardware integration.
 struct HostInputs
 {
-    // Example force reading from the force sensor (units are defined later). // placeholder field
-    float force; // force value placeholder
+    // 3D force in Newton [N]: fx/fy/fz along machine +X/+Y/+Z.
+    // Positive values follow positive machine axis direction; negatives are valid.
+    // {0,0,0} means zero force vector.
+    ForceVector force;
 
     // Limit switch flags (evaluated later, not in M5). // placeholder limits
     bool limitXMin; // X minimum limit
@@ -17,4 +30,3 @@ struct HostInputs
     // Emergency stop flag (not evaluated in M5). // placeholder E-Stop
     bool e_stop; // e-stop state placeholder
 };
-

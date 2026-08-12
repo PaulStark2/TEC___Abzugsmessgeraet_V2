@@ -31,6 +31,11 @@ void Machine::setHostInputs(const HostInputs& inputs)
     host_inputs_ = inputs; // store snapshot only
 }
 
+const HostInputs& Machine::hostInputs() const
+{
+    return host_inputs_; // return stored snapshot only
+}
+
 HostOutputs Machine::hostOutputs() const
 {
     return host_outputs_; // return placeholders only

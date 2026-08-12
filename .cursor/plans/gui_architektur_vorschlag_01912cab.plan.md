@@ -16,7 +16,7 @@ todos:
     status: pending
   - id: g4-hmi-shell
     content: "G4: Hauptmenü, Navigation, Statusleiste, Seiten-Platzhalter"
-    status: pending
+    status: completed
   - id: g5-load-points
     content: "G5: Prüftstellen laden"
     status: pending

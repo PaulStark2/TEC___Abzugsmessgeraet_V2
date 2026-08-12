@@ -30,8 +30,8 @@ todos:
     content: "M8.5: Interactive Machine TCP host + G3.5 GUI bridge (pre-protocol)"
     status: pending
   - id: m9-force-input
-    content: "M9: Force value on HostInputs (Sim stub, no ForceSensor class)"
-    status: pending
+    content: "M9: 3D force vector Fx/Fy/Fz on HostInputs (Sim stub, Machine stores only)"
+    status: completed
   - id: m10-force-control
     content: "M10: Force control + force-dependent XY correction (simplified)"
     status: pending
@@ -341,25 +341,28 @@ STM32 path: M12 → M15 (parallel; does not block GUI).
 
 ---
 
-## Milestone 9 — Force input stub
+## Milestone 9 — 3D force input stub
 
-**Objective:** Force as data on `HostInputs`; Sim provides a simple fake force (e.g. from Z). No `ForceSensor` class.
+**Objective:** 3D force vector on `HostInputs` (`ForceVector` with `fx`, `fy`, `fz` in Newton [N]); Sim provides a deterministic fake force for all three axes. Machine stores the snapshot only — no force evaluation or control. No `ForceSensor` class.
 
 **Files/modules:**
 
-- `core/HostInputs.hpp` — `force` field used
-- `simulation/main.cpp` — write force into inputs each tick; print force
+- `core/HostInputs.hpp` — `ForceVector force` replaces scalar `force`
+- `core/Machine.hpp/.cpp` — `hostInputs()` getter; `setHostInputs()` unchanged (snapshot store)
+- `simulation/main.cpp` — deterministic 3D stub each tick; print Fx/Fy/Fz
+- `simulation_interactive/main.cpp` — same stub internally; TCP/JSON status unchanged (no force fields)
+- `tests/hostinputs_tests.cpp`, `tests/machine_tests.cpp`
 
 **Dependencies:** Milestone 8.
 
-**Expected behavior:** Force visible in output; Core can read it each tick via Machine/HostInputs.
+**Expected behavior:** Force visible in M8 console output; Core reads `machine.hostInputs().force.{fx,fy,fz}`; MotionPlanner/Axis unchanged; no closed-loop force control.
 
-**How to test:** Move Z; assert stub force matches chosen formula.
+**How to test:** `hostinputs_tests`, machine roundtrip test; move axes — stub force follows `fx=kx*x`, `fy=ky*y`, `fz=kz*z`; setting force does not change pose or motion state.
 
 **Definition of done:**
 
-- Sensing path only (no closed-loop force control yet)
-- No detailed physics
+- 3D sensing path only (M10 takes force control)
+- No detailed physics; no GUI/protocol changes
 
 ---
 

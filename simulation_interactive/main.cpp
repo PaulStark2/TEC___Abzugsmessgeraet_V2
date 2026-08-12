@@ -69,6 +69,15 @@ static const char* toString(MotionState s)
     }
 }
 
+// M9 deterministic 3D force stub [N]: fx=kx*x, fy=ky*y, fz=kz*z (not a physical sensor model).
+static ForceVector demoForceFromPose(float x, float y, float z)
+{
+    constexpr float kx = 1.0f; // N per machine unit along +X
+    constexpr float ky = 1.0f; // N per machine unit along +Y
+    constexpr float kz = 1.0f; // N per machine unit along +Z
+    return ForceVector{kx * x, ky * y, kz * z};
+}
+
 // Build one newline-terminated status JSON line from Machine.
 static std::string buildStatusLine(const Machine& machine)
 {
@@ -356,7 +365,7 @@ int main(int argc, char** argv)
         if (now >= next_tick)
         {
             HostInputs inputs{};
-            inputs.force = 0.0f;
+            inputs.force = demoForceFromPose(machine.x(), machine.y(), machine.z());
             inputs.e_stop = false;
             machine.setHostInputs(inputs);
             machine.tick(kDt);
