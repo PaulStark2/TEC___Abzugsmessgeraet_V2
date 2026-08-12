@@ -7,6 +7,7 @@ const { WebSocketServer } = require('ws');
 const { createMachineClient } = require('./machineClient');
 const { validateTestProgram } = require('./program/validateTestProgram');
 const programStore = require('./program/programStore');
+const selectionStore = require('./program/selectionStore');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -119,6 +120,31 @@ function handleCommand(body) {
         return { ok: false, error: 'stop not supported by client' };
       }
       return machineClient.stop();
+    case 'setSpeed':
+      if (typeof machineClient.setSpeed !== 'function') {
+        return { ok: false, error: 'setSpeed not supported by client' };
+      }
+      return machineClient.setSpeed(body.speed);
+    case 'jog':
+      if (typeof machineClient.jog !== 'function') {
+        return { ok: false, error: 'jog not supported by client' };
+      }
+      return machineClient.jog(body.axis, body.direction, body.step);
+    case 'pneumaticOpen':
+      if (typeof machineClient.pneumaticOpen !== 'function') {
+        return { ok: false, error: 'pneumaticOpen not supported by client' };
+      }
+      return machineClient.pneumaticOpen();
+    case 'pneumaticClose':
+      if (typeof machineClient.pneumaticClose !== 'function') {
+        return { ok: false, error: 'pneumaticClose not supported by client' };
+      }
+      return machineClient.pneumaticClose();
+    case 'home':
+      if (typeof machineClient.home !== 'function') {
+        return { ok: false, error: 'home not supported by client' };
+      }
+      return machineClient.home();
     default:
       return { ok: false, error: `Unknown command: ${command}` };
   }
@@ -178,6 +204,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       programStore.setProgram(validation.value);
+      selectionStore.clear();
       sendJson(res, 200, { ok: true, summary: buildSummaryFromProgram(validation.value) });
       return;
     } catch {
@@ -203,6 +230,44 @@ const server = http.createServer(async (req, res) => {
         testPoints: current.testPoints,
       },
     });
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/program/selection') {
+    const selection = selectionStore.getSelection();
+    if (!selection) {
+      sendJson(res, 404, { ok: false, error: 'No program loaded' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, selection });
+    return;
+  }
+
+  if (req.method === 'PUT' && urlPath === '/api/program/selection') {
+    try {
+      const body = await readJsonBody(req);
+      const result = selectionStore.setDraft(body);
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/program/selection/confirm') {
+    const result = selectionStore.confirmSelection();
+    sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+  if (req.method === 'DELETE' && urlPath === '/api/program/selection') {
+    selectionStore.clear();
+    const selection = selectionStore.getSelection();
+    if (!selection) {
+      sendJson(res, 404, { ok: false, error: 'No program loaded' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, selection });
     return;
   }
 

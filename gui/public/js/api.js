@@ -82,6 +82,89 @@ export async function fetchCurrentProgram() {
 }
 
 /**
+ * Fetch current point selection draft/confirmed state (G6).
+ * @returns {Promise<{ok:boolean, selection?:object, error?:string}>}
+ */
+export async function fetchProgramSelection() {
+  const response = await fetch('/api/program/selection', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+
+  if (!response.ok) {
+    return result;
+  }
+
+  return result;
+}
+
+/**
+ * Update selection draft (G6).
+ * @param {{ selectedSequenceNumbers?: number[], selectAll?: boolean }} body
+ */
+export async function updateProgramSelection(body) {
+  const response = await fetch('/api/program/selection', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+
+  if (!response.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+
+  return result;
+}
+
+/**
+ * Confirm current selection (G6).
+ */
+export async function confirmProgramSelection() {
+  const response = await fetch('/api/program/selection/confirm', { method: 'POST' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+
+  if (!response.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+
+  return result;
+}
+
+/**
+ * Clear selection draft (G6).
+ */
+export async function clearProgramSelection() {
+  const response = await fetch('/api/program/selection', { method: 'DELETE' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+
+  if (!response.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+
+  return result;
+}
+
+/**
  * @param {(status: object) => void} onStatus
  * @param {(connected: boolean, message?: string) => void} [onConnection]
  */

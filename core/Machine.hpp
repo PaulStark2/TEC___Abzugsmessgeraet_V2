@@ -70,6 +70,13 @@ public:
     // Stop motion from any non-terminal state. // stop
     void stop(); // command
 
+    // Clear latched Fault after e_stop is released (M11). // clear fault
+    void clearFault(); // command
+
+    // Pneumatic commands (independent actuators, M11 stub). // pneumatics
+    void setSpreaderExtend(bool extend); // Spreizer aktiv/inaktiv
+    void setFixtureExtend(bool extend); // Bauplattenhalter offen/geschlossen
+
     // Pose getters (delegated from MotionPlanner). // read pose
     float x() const; // getter
     float y() const; // getter
@@ -107,5 +114,10 @@ private:
     // Host I/O containers (no evaluation). // placeholders
     HostInputs host_inputs_; // last inputs
     HostOutputs host_outputs_; // produced outputs
+
+    // M11 safety helpers.
+    bool isCommandedIntoActiveLimit() const; // directional limit check
+    void enterSafetyFault(); // stopMotion + Fault only (no pneumatic changes)
+    void updatePneumaticStub(); // mirror Extend -> Extended for both actuators
 };
 

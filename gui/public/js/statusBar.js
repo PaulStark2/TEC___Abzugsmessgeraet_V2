@@ -40,6 +40,9 @@ export function applyStatus(status) {
   const xEl = $('pos-x');
   const yEl = $('pos-y');
   const zEl = $('pos-z');
+  const speedEl = $('manual-speed-display');
+  const pneumaticEl = $('pneumatic-state');
+  const homingEl = $('homing-state');
   const fxEl = $('force-fx');
   const fyEl = $('force-fy');
   const fzEl = $('force-fz');
@@ -49,6 +52,33 @@ export function applyStatus(status) {
   if (xEl) xEl.textContent = formatPose(status.x);
   if (yEl) yEl.textContent = formatPose(status.y);
   if (zEl) zEl.textContent = formatPose(status.z);
+
+  if (speedEl) {
+    speedEl.textContent =
+      status.manualSpeed !== undefined && Number.isFinite(Number(status.manualSpeed))
+        ? Number(status.manualSpeed).toFixed(0)
+        : '—';
+  }
+
+  if (pneumaticEl) {
+    if (status.pneumaticExtended === true) {
+      pneumaticEl.textContent = 'Offen';
+    } else if (status.pneumaticExtended === false) {
+      pneumaticEl.textContent = 'Geschlossen';
+    } else {
+      pneumaticEl.textContent = '—';
+    }
+  }
+
+  if (homingEl) {
+    if (status.homingInProgress === true || status.machineState === 'Homing') {
+      homingEl.textContent = 'Aktiv';
+    } else if (status.machineState === 'Idle' && status.motionState === 'AtTarget') {
+      homingEl.textContent = 'Bereit';
+    } else {
+      homingEl.textContent = '—';
+    }
+  }
 
   const fx = readForce(status, ['fx', 'forceX', 'forceFx']);
   const fy = readForce(status, ['fy', 'forceY', 'forceFy']);

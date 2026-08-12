@@ -105,15 +105,37 @@ Navigation:
 | Hash | Seite |
 |------|--------|
 | `#menu` | Hauptmenü (Default) |
-| `#load-points` | Prüftstellen laden (Stub) |
-| `#select-points` | Prüfstellen auswählen (Stub) |
-| `#procedure` | Prüf-/Alterungsprozedur (Stub) |
-| `#results` | Prüfergebnisse (Stub) |
-| `#manual` | Handmodus (G3-Steuerung) |
-| `#plate` | Bauplatte wechseln (Stub) |
+| `#load-points` | Prüftstellen laden (G5) |
+| `#select-points` | Prüfstellen auswählen (G6) |
+| `#procedure` | Prüf-/Alterungsprozedur (Stub G8) |
+| `#results` | Prüfergebnisse (Stub G9) |
+| `#manual` | Handmodus (G3 + G7) |
+| `#plate` | Bauplatte wechseln (Stub G10) |
 | `#calibrate` | Kalibrieren (Stub) |
 
 Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss laufen).
+
+### G5 — Prüftstellen laden
+
+- `POST /api/program/upload` — Validierung + RAM-Store
+- `GET /api/program/current` — geladenes Programm oder 404
+- Tests: `g5_validate_testprogram.js`, `g5_program_store_tests.js`, `g5_upload_smoke.js`
+
+### G6 — Prüfstellen auswählen
+
+- Datenquelle: `GET /api/program/current`
+- Server-Store: `selectionStore` (RAM, bestätigte Auswahl für G8)
+- APIs: `GET/PUT/DELETE /api/program/selection`, `POST /api/program/selection/confirm`
+- Neuer Program-Upload setzt Auswahl zurück
+- UI `#select-points`: Tabelle, Checkboxen, Alles auswählen, Bestätigen; 3D nur Platzhalter
+- Tests: `g6_selection_tests.js`, `g6_select_smoke.js` (Server ohne geladenes Programm starten)
+
+### G7 — Handmodus
+
+- Mock-Commands: `setSpeed`, `jog`, `pneumaticOpen`, `pneumaticClose`, `home` (+ bestehende G3-Commands)
+- UI `#manual`: Geschwindigkeit, Jog ±X/Y/Z, Spreizer, Homing-Stub
+- Status erweitert um `manualSpeed`, `pneumaticExtended`, `homingInProgress`
+- Test: `g7_manual_smoke.js`
 
 ## Status-WebSocket-Format
 
@@ -126,9 +148,21 @@ Pfad: `/ws/status`
   "motionState": "Idle | Moving | AtTarget",
   "x": 0.0,
   "y": 0.0,
-  "z": 0.0
+  "z": 0.0,
+  "manualSpeed": 15,
+  "pneumaticExtended": false,
+  "homingInProgress": false
 }
 ```
+
+## Program-API (G5/G6)
+
+`POST /api/program/upload` — Testprogramm JSON  
+`GET /api/program/current` — aktuelles Programm  
+`GET /api/program/selection` — Auswahl-Entwurf/bestätigt  
+`PUT /api/program/selection` — `{ "selectedSequenceNumbers": [1,2] }` oder `{ "selectAll": true }`  
+`POST /api/program/selection/confirm` — Auswahl bestätigen (min. 1 Punkt)  
+`DELETE /api/program/selection` — Entwurf löschen  
 
 ## Command-API
 
@@ -139,6 +173,11 @@ Pfad: `/ws/status`
 { "command": "pause" }
 { "command": "resume" }
 { "command": "stop" }
+{ "command": "setSpeed", "speed": 15 }
+{ "command": "jog", "axis": "X", "direction": 1, "step": 1 }
+{ "command": "pneumaticOpen" }
+{ "command": "pneumaticClose" }
+{ "command": "home" }
 ```
 
 Antwort:

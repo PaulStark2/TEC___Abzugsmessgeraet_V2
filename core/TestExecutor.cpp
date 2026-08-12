@@ -50,10 +50,14 @@ void TestExecutor::tick(float dt)
         return; // no further motion
     }
 
-    // While the machine is paused, do not advance process points. // pause respect
+    // While the machine is paused, tick for safety inputs (e.g. E-Stop) but do not advance points. // pause respect
     if (machine_.machineState() == MachineState::Paused)
     {
-        machine_.tick(dt); // harmless no-op while paused
+        machine_.tick(dt); // evaluate safety; motion remains frozen
+        if (machine_.machineState() == MachineState::Stopped || machine_.machineState() == MachineState::Fault)
+        {
+            process_state_ = ProcessState::Aborted; // M11: safety during pause
+        }
         return; // no AtTarget advancement
     }
 

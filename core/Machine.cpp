@@ -67,11 +67,105 @@ const HostInputs& Machine::hostInputs() const
 
 HostOutputs Machine::hostOutputs() const
 {
-    return host_outputs_; // return placeholders only
+    return host_outputs_; // return outputs snapshot
+}
+
+void Machine::setSpreaderExtend(bool extend)
+{
+    // Pneumatic commands are no-op while Fault is latched. // M11 fault guard
+    if (machine_state_ == MachineState::Fault)
+    {
+        return; // no-op
+    }
+
+    host_outputs_.spreaderExtend = extend; // command Spreizer
+    updatePneumaticStub(); // deterministic feedback
+}
+
+void Machine::setFixtureExtend(bool extend)
+{
+    // Pneumatic commands are no-op while Fault is latched. // M11 fault guard
+    if (machine_state_ == MachineState::Fault)
+    {
+        return; // no-op
+    }
+
+    host_outputs_.fixtureExtend = extend; // command Bauplattenhalter
+    updatePneumaticStub(); // deterministic feedback
+}
+
+void Machine::updatePneumaticStub()
+{
+    // Deterministic stub: Extended mirrors Extend immediately. // M11 stub
+    host_outputs_.spreaderExtended = host_outputs_.spreaderExtend;
+    host_outputs_.fixtureExtended = host_outputs_.fixtureExtend;
+}
+
+bool Machine::isCommandedIntoActiveLimit() const
+{
+    const float pos_x = motion_planner_.x(); // current X
+    const float pos_y = motion_planner_.y(); // current Y
+    const float pos_z = motion_planner_.z(); // current Z
+
+    // Directional limit: fault only when commanding motion toward an active limit. // M11 limits
+    if (host_inputs_.limitXMin && stored_target_x_ < pos_x - kPositionTolerance)
+    {
+        return true; // commanding further -X into min limit
+    }
+    if (host_inputs_.limitXMax && stored_target_x_ > pos_x + kPositionTolerance)
+    {
+        return true; // commanding further +X into max limit
+    }
+    if (host_inputs_.limitYMin && stored_target_y_ < pos_y - kPositionTolerance)
+    {
+        return true; // commanding further -Y into min limit
+    }
+    if (host_inputs_.limitYMax && stored_target_y_ > pos_y + kPositionTolerance)
+    {
+        return true; // commanding further +Y into max limit
+    }
+    if (host_inputs_.limitZMin && stored_target_z_ < pos_z - kPositionTolerance)
+    {
+        return true; // commanding further -Z into min limit
+    }
+    if (host_inputs_.limitZMax && stored_target_z_ > pos_z + kPositionTolerance)
+    {
+        return true; // commanding further +Z into max limit
+    }
+
+    return false; // no limit violation
+}
+
+void Machine::enterSafetyFault()
+{
+    // Safety-Fault stops motion only; pneumatic outputs are never modified here. // M11 safety
+    motion_planner_.stopMotion(); // freeze pose deterministically
+    machine_state_ = MachineState::Fault; // latched safety fault
+}
+
+void Machine::clearFault()
+{
+    // Fault clears only when latched and e_stop is released. // M11 clear
+    if (machine_state_ != MachineState::Fault)
+    {
+        return; // no-op
+    }
+    if (host_inputs_.e_stop)
+    {
+        return; // e_stop still active
+    }
+
+    machine_state_ = MachineState::Idle; // clear latched fault; pneumatics unchanged
 }
 
 void Machine::moveTo(float x, float y, float z)
 {
+    // moveTo is no-op while Fault is latched. // M11 fault guard
+    if (machine_state_ == MachineState::Fault)
+    {
+        return; // no-op
+    }
+
     // Store target for possible resume after pause. // store
     stored_target_x_ = x; // store x
     stored_target_y_ = y; // store y
@@ -104,22 +198,44 @@ void Machine::tick(float dt)
         return; // no progress
     }
 
+    // Motion-Safety is independent of pneumatic actuators (never modified by safety). // M11 doc
+    // Software STOP (stop()) => MachineState::Stopped; hardware E-Stop (e_stop) => Fault.
+
+    // Latched Fault: no further motion/safety evaluation until clearFault(). // M11 fault latch
+    if (machine_state_ == MachineState::Fault)
+    {
+        return; // no-op while fault latched
+    }
+
+    // 1. E-Stop (highest priority): Idle, Active, Paused, Stopped => Fault. // M11 e-stop
+    if (host_inputs_.e_stop)
+    {
+        enterSafetyFault(); // stop motion only; pneumatics unchanged
+        return; // strict priority
+    }
+
+    // 2. Directional limits while Active. // M11 limits
+    if (machine_state_ == MachineState::Active && isCommandedIntoActiveLimit())
+    {
+        enterSafetyFault(); // stop motion only; pneumatics unchanged
+        return; // strict priority
+    }
+
     // Only Active state advances the MotionPlanner and evaluates M10. // active only
     if (machine_state_ != MachineState::Active)
     {
-        return; // no motion while paused/stopped/idle/fault
+        return; // no motion while paused/stopped/idle
     }
 
-    // 2. Fz-Safety first: abs(Fz) >= threshold => Fault + freeze + no completion. // M10 safety
+    // 3. Fz-Safety: abs(Fz) >= threshold => Fault + freeze + no completion. // M10 safety
     const float fz = host_inputs_.force.fz;
     if (std::fabs(fz) >= force_params_.fz_safety_threshold_N)
     {
-        motion_planner_.stopMotion(); // freeze pose deterministically
-        machine_state_ = MachineState::Fault; // safety fault
+        enterSafetyFault(); // stop motion only; pneumatics unchanged
         return; // strict priority: no XY correction and no planner tick in this tick
     }
 
-    // 3. Detect SlowZApproach for XY control. // M10 slow phase detection
+    // Detect SlowZApproach for XY control. // M10 slow phase detection
     const float z_remaining = stored_target_z_ - motion_planner_.z();
     const bool slow_z = std::fabs(z_remaining) <= force_params_.slow_z_distance_threshold_units;
     force_phase_ = slow_z ? ForceControlPhase::SlowZApproach : ForceControlPhase::NormalZApproach;
@@ -131,7 +247,7 @@ void Machine::tick(float dt)
         y_force_correction_active_ = false;
     }
 
-    // 4. Fx-Korrektur (continuous, independent, hysteresis) before MotionPlanner tick. // M10 XY X
+    // Fx-Korrektur (continuous, independent, hysteresis) before MotionPlanner tick. // M10 XY X
     if (force_phase_ == ForceControlPhase::SlowZApproach)
     {
         const float fx = host_inputs_.force.fx;
@@ -172,7 +288,7 @@ void Machine::tick(float dt)
         }
     }
 
-    // 5. Fy-Korrektur (continuous, independent, hysteresis) before MotionPlanner tick. // M10 XY Y
+    // Fy-Korrektur (continuous, independent, hysteresis) before MotionPlanner tick. // M10 XY Y
     if (force_phase_ == ForceControlPhase::SlowZApproach)
     {
         const float fy = host_inputs_.force.fy;
@@ -216,7 +332,7 @@ void Machine::tick(float dt)
     // Update only X/Y targets; must not touch Z targets. // M10 setXYTargets
     motion_planner_.setXYTargets(stored_target_x_, stored_target_y_);
 
-    // 6. Normal MotionPlanner tick last. // delegate tick
+    // Normal MotionPlanner tick last. // delegate tick
     motion_planner_.tick(dt); // tick planner
 
     // When motion completes, return to Idle (no TestExecutor in M5). // done
@@ -257,14 +373,14 @@ void Machine::resume()
 
 void Machine::stop()
 {
-    // Stop works from any non-terminal state in M5. // policy
+    // Software STOP: operator command => Stopped (distinct from E-Stop => Fault). // M11 doc
     if (machine_state_ == MachineState::Stopped)
     {
         return; // already stopped
     }
     if (machine_state_ == MachineState::Fault)
     {
-        return; // keep fault placeholder unchanged in M5
+        return; // keep fault latched
     }
 
     // Freeze planner and switch to Stopped (resume must not reactivate). // stop behavior
@@ -286,4 +402,3 @@ float Machine::z() const
 {
     return motion_planner_.z(); // delegate
 }
-

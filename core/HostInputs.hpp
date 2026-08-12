@@ -19,7 +19,7 @@ struct HostInputs
     // {0,0,0} means zero force vector.
     ForceVector force;
 
-    // Limit switch flags (evaluated later, not in M5). // placeholder limits
+    // Limit switch flags (M11: directional evaluation in Machine::tick()).
     bool limitXMin; // X minimum limit
     bool limitXMax; // X maximum limit
     bool limitYMin; // Y minimum limit
@@ -27,6 +27,6 @@ struct HostInputs
     bool limitZMin; // Z minimum limit
     bool limitZMax; // Z maximum limit
 
-    // Emergency stop flag (not evaluated in M5). // placeholder E-Stop
-    bool e_stop; // e-stop state placeholder
+    // Emergency stop flag (M11: highest-priority safety input in Machine::tick()).
+    bool e_stop; // hardware e-stop active
 };
