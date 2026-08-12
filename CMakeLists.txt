@@ -25,6 +25,10 @@ add_subdirectory(simulation)
 # Build the interactive Machine TCP host (M8.5 pre-protocol bridge).
 add_subdirectory(simulation_interactive)
 
+# Build the M13 M12 binary protocol simulation bridge.
+add_subdirectory(simulation_bridge)
+add_subdirectory(simulation_protocol)
+
 # Enable CTest and build Core unit tests.
 enable_testing()
 add_subdirectory(tests)

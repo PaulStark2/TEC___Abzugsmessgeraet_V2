@@ -120,3 +120,43 @@ target_link_libraries(protocol_tests
 )
 
 add_test(NAME protocol_tests COMMAND protocol_tests)
+
+# M13 simulation bridge tests.
+add_executable(bridge_stream_tests
+    bridge_stream_tests.cpp
+)
+target_link_libraries(bridge_stream_tests PRIVATE simulation_bridge)
+add_test(NAME bridge_stream_tests COMMAND bridge_stream_tests)
+
+add_executable(bridge_status_tests
+    bridge_status_tests.cpp
+)
+target_link_libraries(bridge_status_tests PRIVATE simulation_bridge)
+add_test(NAME bridge_status_tests COMMAND bridge_status_tests)
+
+add_executable(bridge_command_tests
+    bridge_command_tests.cpp
+)
+target_link_libraries(bridge_command_tests PRIVATE simulation_bridge)
+add_test(NAME bridge_command_tests COMMAND bridge_command_tests)
+
+add_executable(bridge_integration_tests
+    bridge_integration_tests.cpp
+)
+target_link_libraries(bridge_integration_tests PRIVATE simulation_bridge)
+add_test(NAME bridge_integration_tests COMMAND bridge_integration_tests)
+
+add_executable(bridge_tcp_tests
+    bridge_tcp_tests.cpp
+)
+target_link_libraries(bridge_tcp_tests PRIVATE communication)
+if(WIN32)
+    target_link_libraries(bridge_tcp_tests PRIVATE ws2_32)
+endif()
+add_dependencies(bridge_tcp_tests simulation_protocol)
+target_compile_definitions(bridge_tcp_tests PRIVATE
+    SIMULATION_PROTOCOL_EXE="$<TARGET_FILE:simulation_protocol>"
+)
+add_test(NAME bridge_tcp_tests COMMAND bridge_tcp_tests)
+set_tests_properties(bridge_tcp_tests PROPERTIES TIMEOUT 30)
+
