@@ -11,6 +11,9 @@ todos:
   - id: g3-control-loop
     content: "G3: moveTo/Pause/Resume/Stop über HMI → vollständiger Steuerzyklus"
     status: completed
+  - id: g35-sim-threejs
+    content: "G3.5: SimMachineClient + Three.js TCP view against simulation_interactive (M8.5)"
+    status: pending
   - id: g4-hmi-shell
     content: "G4: Hauptmenü, Navigation, Statusleiste, Seiten-Platzhalter"
     status: pending
@@ -61,7 +64,7 @@ flowchart LR
     G1[G1_Scaffold]
     G2[G2_Mock_Status]
     G3[G3_Steuerung]
-    G1 --> G2 --> G3
+    G1 --> G2 --> G3 --> G35[G3_5_Sim_ThreeJS]
   end
   subgraph phaseB [Phase_B_Pruefstands_HMI]
     G4[G4_HMI_Struktur]

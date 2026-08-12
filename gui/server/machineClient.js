@@ -16,14 +16,16 @@
  *
  * MachineClient contract:
  * - getStatus() → MachineStatus
- * - tick(dtSeconds)? → advance mock time
- * - moveTo(x,y,z) / pause() / resume() / stop() → { ok, status?, error? } (G3)
+ * - tick(dtSeconds)? → advance mock time only (never used for MACHINE_CLIENT=sim)
+ * - moveTo(x,y,z) / pause() / resume() / stop() → { ok, status?, error? }
  * - close()? → release resources
  *
- * Later (G12): ProtocolMachineClient behind factory key `protocol`.
+ * G3.5: MACHINE_CLIENT=sim → SimMachineClient (TCP to simulation_interactive).
+ * G12: ProtocolMachineClient after Core M12/M13 (not this pre-protocol TCP).
  */
 
 const { createMockMachineClient } = require('./mock/mockMachineClient');
+const { createSimMachineClient } = require('./sim/simMachineClient');
 
 /**
  * @param {string} [kind]
@@ -34,12 +36,14 @@ function createMachineClient(kind) {
   switch (selected) {
     case 'mock':
       return createMockMachineClient();
+    case 'sim':
+      return createSimMachineClient();
     case 'protocol':
       throw new Error(
-        'ProtocolMachineClient is not implemented yet (planned for G12). Use MACHINE_CLIENT=mock.'
+        'ProtocolMachineClient is not implemented yet (planned for G12). Use MACHINE_CLIENT=mock or sim.'
       );
     default:
-      throw new Error(`Unknown MACHINE_CLIENT="${selected}". Supported: mock`);
+      throw new Error(`Unknown MACHINE_CLIENT="${selected}". Supported: mock, sim`);
   }
 }
 

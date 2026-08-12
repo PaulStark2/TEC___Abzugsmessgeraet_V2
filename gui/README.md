@@ -16,13 +16,50 @@ npm start
 
 Browser: [http://localhost:3000](http://localhost:3000)
 
-Optional:
+Optional Mock (Offline, JS-Kinematik nur im Mock):
 
 ```bash
 set MACHINE_CLIENT=mock
 set PORT=3000
 npm start
 ```
+
+### G3.5 — Core-Sim (M8.5)
+
+Temporärer Pre-Protocol-Transport (TCP/JSON) — **nicht** das spätere M12/M13-Kommunikationsprotokoll.
+
+1. Core-Host bauen und starten (eigener Prozess):
+
+```bash
+cmake --build build --target simulation_interactive
+.\build\simulation_interactive\simulation_interactive.exe
+```
+
+Optional Port: `simulation_interactive.exe 8765`
+
+2. GUI gegen den Host:
+
+```bash
+cd gui
+set MACHINE_CLIENT=sim
+set SIM_HOST=127.0.0.1
+set SIM_PORT=8765
+npm start
+```
+
+Three.js wird lokal per npm eingebunden und unter `/vendor/three/` ausgeliefert (kein CDN).
+
+#### Manueller Gate-Test (3D-Viewport)
+
+1. MoveTo `(10,0,0)` dann `(20,0,0)` — TCP nur entlang X  
+2. MoveTo `(20,10,0)` — entlang Y  
+3. MoveTo `(20,10,10)` — entlang Z  
+4. MoveTo `(30,20,20)` — kombinierte XYZ-Bewegung  
+5. Pause während Bewegung — Pose friert  
+6. Resume — Core setzt fort  
+7. Stop — `Stopped`; Resume wirkungslos; neues MoveTo erlaubt  
+
+Koordinatensystem: Core `(x,y,z)` → Three.js `(x,y,z)` 1:1, Kamera **Z-up**.
 
 (`MACHINE_CLIENT=protocol` ist für G12 vorgesehen und wirft noch einen Fehler.)
 
@@ -47,6 +84,14 @@ npm start
 - HMI-Eingaben für Zielpose + Pause/Resume/STOP
 - Soft-STOP ≠ Hardware-E-Stop
 - Browser sendet nur Commands; Mock bleibt Zustandsautorität
+
+### G3.5 — SimMachineClient + Three.js TCP-View (M8.5 Gate)
+
+- `MACHINE_CLIENT=sim` → TCP zu `simulation_interactive`
+- Bewegung nur im C++ `Machine` / MotionPlanner / Axis
+- Three.js 3D-Viewport (npm lokal): Achsen, Ursprung, TCP-Punkt, Linie Ursprung→TCP
+- Keine Trajektorie, keine G4-Menüs
+- TCP/JSON = **temporärer Pre-Protocol-Simulations-Transport** (ersetzt später durch M12/M13)
 
 ## Status-WebSocket-Format
 
@@ -84,8 +129,7 @@ oder `{ "ok": false, "error": "..." }`.
 
 ## Architekturgrenzen
 
-- Nur Arbeit unter `gui/`
-- Keine Anbindung an `core/`, CMake, UART oder STM32 in frühen Meilensteinen
-- Der Browser ist niemals Autorität über Machine-/Motion-State
-- Später: derselbe Vertrag hinter `ProtocolMachineClient` (G12)
+- Browser ist niemals Autorität über Machine-/Motion-State und integriert keine Pose
+- Mock bleibt für Offline; Sim-Pfad delegiert an Core
+- Später: derselbe HMI-Vertrag hinter `ProtocolMachineClient` (G12) über echtes M12/M13-Protokoll
 - Phase-B-HMI (Menüs) ab G4

@@ -1,5 +1,7 @@
 'use strict';
 
+import { setupTcpView, setTcpPose } from './tcpView.js';
+
 function $(id) {
   return document.getElementById(id);
 }
@@ -20,6 +22,9 @@ function applyStatus(status) {
   if (xEl) xEl.textContent = formatPose(status.x);
   if (yEl) yEl.textContent = formatPose(status.y);
   if (zEl) zEl.textContent = formatPose(status.z);
+
+  // Display-only: set Three.js TCP from Core pose (no interpolation).
+  setTcpPose(status);
 }
 
 function setGuiStatus(text, isError) {
@@ -121,7 +126,7 @@ function connectStatusSocket() {
   const socket = new WebSocket(url);
 
   socket.addEventListener('open', () => {
-    setGuiStatus('GUI läuft — Live-Status verbunden (G3 Mock)', false);
+    setGuiStatus('GUI läuft — Live-Status verbunden', false);
   });
 
   socket.addEventListener('message', (event) => {
@@ -151,6 +156,7 @@ function connectStatusSocket() {
 
 document.addEventListener('DOMContentLoaded', () => {
   setGuiStatus('GUI läuft — verbinde Live-Status…', false);
+  setupTcpView();
   wireControls();
   connectStatusSocket();
 });

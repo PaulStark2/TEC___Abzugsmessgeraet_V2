@@ -8,6 +8,7 @@ const { createMachineClient } = require('./machineClient');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const THREE_DIR = path.join(__dirname, '..', 'node_modules', 'three');
 const STATUS_HZ = 5;
 const STATUS_INTERVAL_MS = 1000 / STATUS_HZ;
 const TICK_HZ = 20;
@@ -28,12 +29,28 @@ function contentTypeFor(filePath) {
   return MIME_TYPES[ext] || 'application/octet-stream';
 }
 
+function isPathInside(rootDir, candidate) {
+  const rel = path.relative(rootDir, candidate);
+  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 function resolvePublicPath(urlPath) {
   const decoded = decodeURIComponent(urlPath.split('?')[0]);
+
+  // Serve local npm three package offline (no CDN) under /vendor/three/
+  if (decoded === '/vendor/three' || decoded.startsWith('/vendor/three/')) {
+    const relative = decoded === '/vendor/three' ? '/' : decoded.slice('/vendor/three'.length);
+    const absolute = path.normalize(path.join(THREE_DIR, relative));
+    if (!isPathInside(THREE_DIR, absolute) && absolute !== THREE_DIR) {
+      return null;
+    }
+    return absolute;
+  }
+
   const relative = decoded === '/' ? '/index.html' : decoded;
   const absolute = path.normalize(path.join(PUBLIC_DIR, relative));
 
-  if (!absolute.startsWith(PUBLIC_DIR)) {
+  if (!isPathInside(PUBLIC_DIR, absolute) && absolute !== PUBLIC_DIR) {
     return null;
   }
 

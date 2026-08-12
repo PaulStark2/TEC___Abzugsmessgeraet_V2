@@ -25,6 +25,9 @@ todos:
     status: pending
   - id: m8-sim-loop
     content: "M8: Simulation host end-to-end demo loop"
+    status: completed
+  - id: m85-gui-sim-gate
+    content: "M8.5: Interactive Machine TCP host + G3.5 GUI bridge (pre-protocol)"
     status: pending
   - id: m9-force-input
     content: "M9: Force value on HostInputs (Sim stub, no ForceSensor class)"
@@ -62,14 +65,16 @@ Revised after documentation review: clear **Machine / MotionPlanner / TestExecut
 
 ## Core module responsibilities
 
-| Module | Responsibility |
-|--------|----------------|
-| `Axis` | Single-axis kinematic state (position, velocity, acceleration, target); optional single-axis `tick` |
-| `MotionPlanner` | Multi-axis motion toward a target pose each `tick`; owns `MotionState` |
-| `Machine` | Operational/safety state machine; STOP/PAUSE; applies `HostInputs`; exposes `HostOutputs`; commands MotionPlanner |
-| `TestExecutor` | Process sequencing over `TestProgram`; owns `ProcessState`; advances on motion AtTarget |
-| `TestPoint` / `TestProgram` | Fixed-capacity test data (no heap) |
-| `HostInputs` / `HostOutputs` | Thin I/O snapshot filled by Sim today, STM32 later (force, limits, E-Stop in; setpoints/pneumatic out) |
+
+| Module                       | Responsibility                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `Axis`                       | Single-axis kinematic state (position, velocity, acceleration, target); optional single-axis `tick`               |
+| `MotionPlanner`              | Multi-axis motion toward a target pose each `tick`; owns `MotionState`                                            |
+| `Machine`                    | Operational/safety state machine; STOP/PAUSE; applies `HostInputs`; exposes `HostOutputs`; commands MotionPlanner |
+| `TestExecutor`               | Process sequencing over `TestProgram`; owns `ProcessState`; advances on motion AtTarget                           |
+| `TestPoint` / `TestProgram`  | Fixed-capacity test data (no heap)                                                                                |
+| `HostInputs` / `HostOutputs` | Thin I/O snapshot filled by Sim today, STM32 later (force, limits, E-Stop in; setpoints/pneumatic out)            |
+
 
 No dedicated `ForceSensor` class — force is a field on `HostInputs`.
 
@@ -90,7 +95,8 @@ flowchart LR
   M5 --> M6[M6 Test Data]
   M6 --> M7[M7 TestExecutor]
   M7 --> M8[M8 Sim Loop]
-  M8 --> M9[M9 Force Input]
+  M8 --> M85[M8_5 GUI Sim Gate]
+  M85 --> M9[M9 Force Input]
   M9 --> M10[M10 Force Control]
   M10 --> M11[M11 Safety]
   M11 --> M12[M12 Protocol]
@@ -99,7 +105,11 @@ flowchart LR
   M12 --> M15[M15 STM32]
 ```
 
-GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block GUI).
+
+
+GUI path: M12 → M13 → M14 (formal protocol). **M8.5 / G3.5** is an early interactive gate using temporary TCP/JSON (pre-protocol), not a substitute for M12/M13.
+
+STM32 path: M12 → M15 (parallel; does not block GUI).
 
 ---
 
@@ -108,6 +118,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Smallest possible project that compiles and runs on the PC.
 
 **Files/modules:**
+
 - `CMakeLists.txt` (root)
 - `core/CMakeLists.txt`
 - `core/Types.hpp` (minimal placeholder)
@@ -122,6 +133,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Configure, build, run executable; check exit code 0.
 
 **Definition of done:**
+
 - Out-of-source build works on the development PC
 - Simulation links against Core
 - No GUI / UART / STM32 code present
@@ -133,6 +145,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Shared types and an `Axis` that holds kinematic state and accepts a target, without integrating motion.
 
 **Files/modules:**
+
 - `core/Types.hpp` — `AxisId` (X/Y/Z); placeholders for state enums as needed later
 - `core/Axis.hpp`, `core/Axis.cpp` — position, velocity, acceleration, target; getters/setters; `setTarget`; `isAtTarget`; `tick` no-op
 
@@ -143,6 +156,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Asserts in `simulation/main.cpp`: equal position/target → at target; different target → not at target.
 
 **Definition of done:**
+
 - Axis state readable/writable
 - Tests pass
 - No MotionPlanner, Machine, or Test* yet
@@ -154,6 +168,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** One axis moves toward its target with simple non-blocking kinematics (minimal profile; no detailed motor physics).
 
 **Files/modules:**
+
 - `core/Axis.hpp/.cpp` — implement `tick(float dt)`; update velocity/position; clamp at target; clear velocity when arrived
 
 **Dependencies:** Milestone 2.
@@ -163,6 +178,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Loop `tick(0.01f)` until `isAtTarget` within max steps; assert `dt=0` freeze.
 
 **Definition of done:**
+
 - Non-blocking single-axis motion works
 - Deterministic enough for repeatable console tests
 - No multi-axis orchestration yet
@@ -174,12 +190,14 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Dedicated multi-axis motion planning as listed in the project specification (separate from Machine and TestExecutor).
 
 **Files/modules:**
+
 - `core/Types.hpp` — `MotionState` (Idle, Moving, AtTarget)
 - `core/MotionPlanner.hpp/.cpp` — holds/uses three `Axis` (or references); `moveTo(x,y,z)`; `tick(dt)`; `stopMotion` / freeze; query `MotionState` and positions
 
 **Dependencies:** Milestone 3.
 
 **Expected behavior:**
+
 - Idle → Moving on `moveTo`
 - Moving → AtTarget when all axes at target
 - `stopMotion` halts motion and leaves a defined MotionState
@@ -188,6 +206,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Command a pose; tick until AtTarget; mid-move stop; assert positions stable after stop.
 
 **Definition of done:**
+
 - Motion math and MotionState live in MotionPlanner only
 - Machine does not embed axis integration
 - No operational MachineState yet
@@ -199,6 +218,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Operational/safety state machine; thin host I/O boundary so Sim and later STM32 feed Core the same way; STOP/PAUSE without blocking.
 
 **Files/modules:**
+
 - `core/Types.hpp` — `MachineState` (Idle, Active, Paused, Stopped, Fault) — **no Moving**
 - `core/HostInputs.hpp` — force, limit flags, e_stop (fields may be unused until later milestones)
 - `core/HostOutputs.hpp` — axis command/status mirrors as needed, pneumatic command/state placeholders
@@ -207,6 +227,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Dependencies:** Milestone 4.
 
 **Expected behavior:**
+
 - Idle → Active when a move is commanded
 - Active stays Active while MotionState is Moving; returns toward Idle when motion AtTarget and no higher-level process (executor comes later)
 - Active → Paused on `pause` (planner frozen)
@@ -217,6 +238,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Scripted move, partial tick, pause (stable pose), stop mid-move; verify MachineState vs MotionState separately.
 
 **Definition of done:**
+
 - Three state layers documented in code via distinct enums
 - STOP/PAUSE interrupt without blocking
 - Host I/O structs exist (even if some fields unused)
@@ -229,6 +251,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Fixed-capacity list of XYZ test points without dynamic allocation.
 
 **Files/modules:**
+
 - `core/TestPoint.hpp` — POD: x, y, z
 - `core/TestProgram.hpp` — fixed array + count; `add` / `clear` / `size` / `pointAt`
 
@@ -239,6 +262,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Add/read asserts; over-capacity add fails cleanly.
 
 **Definition of done:**
+
 - No heap allocation
 - No execution logic
 
@@ -249,12 +273,14 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Process-level sequencing of a `TestProgram` through Machine/MotionPlanner.
 
 **Files/modules:**
+
 - `core/Types.hpp` — `ProcessState` (Idle, Running, Completed, Aborted)
 - `core/TestExecutor.hpp/.cpp` — references Machine + program; `start`; `tick`; advances on **MotionState AtTarget**; respects Machine Stopped/Paused
 
 **Dependencies:** Milestones 5 and 6.
 
 **Expected behavior:**
+
 - `start` commands first point via Machine
 - On AtTarget, command next point
 - After last point → Completed
@@ -263,6 +289,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** 2–3 point program to Completed; mid-run STOP → Aborted, not Completed.
 
 **Definition of done:**
+
 - ProcessState separate from MachineState/MotionState
 - Non-blocking; STOP aborts cleanly
 
@@ -273,6 +300,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Simulation as PC host: fixed dt, fills HostInputs, calls tick, prints Machine/Motion/Process/axis state, runs one demo program.
 
 **Files/modules:**
+
 - `simulation/main.cpp` — wire Core objects, hardcoded demo program, loop until Completed/Aborted/timeout
 
 **Dependencies:** Milestone 7.
@@ -282,9 +310,34 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Run sim; assert final positions match last point within tolerance within max ticks.
 
 **Definition of done:**
+
 - Full Core exercise on PC
 - Same Core entrypoints intended for STM32 later
 - Still no GUI / UART / STM32
+
+---
+
+## Milestone 8.5 — Interactive Sim Host + G3.5 GUI gate (pre-protocol)
+
+**Objective:** Long-running `simulation_interactive` drives Core `Machine` over temporary localhost TCP/JSON so G3 HMI (`MACHINE_CLIENT=sim`) can MoveTo/Pause/Resume/Stop and display TCP in Three.js. Motion stays entirely in Core.
+
+**Files/modules:**
+
+- `simulation_interactive/` — TCP host, `Machine::tick` only (no TestExecutor)
+- `gui/server/sim/simMachineClient.js` — command forward + status cache (no JS kinematics)
+- G3 HMI Three.js viewport (npm `three`, Z-up 1:1)
+
+**Dependencies:** M5 Machine + M8 demo kept as regression; G3 HTTP/WS UI.
+
+**Expected behavior:** Independent host process on port 8765; GUI sim client; X→Y→Z and combined XYZ moves visible; Pause/Resume/Stop match Machine semantics.
+
+**Definition of done:**
+
+- No Core M1–M7 API changes
+- No Force/Safety/HAL/UART/`communication/`
+- TCP/JSON documented as **temporary pre-protocol** (not M12/M13)
+- M8 `simulation.exe` unchanged behavior
+- Mock client still works offline
 
 ---
 
@@ -293,6 +346,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Force as data on `HostInputs`; Sim provides a simple fake force (e.g. from Z). No `ForceSensor` class.
 
 **Files/modules:**
+
 - `core/HostInputs.hpp` — `force` field used
 - `simulation/main.cpp` — write force into inputs each tick; print force
 
@@ -303,6 +357,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Move Z; assert stub force matches chosen formula.
 
 **Definition of done:**
+
 - Sensing path only (no closed-loop force control yet)
 - No detailed physics
 
@@ -313,6 +368,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Cover Spec “force control” and Architecture “force-dependent XY correction” in simplified form (no physics engine).
 
 **Files/modules:**
+
 - Core logic under Machine and/or MotionPlanner (keep classes single-purpose: e.g. Machine decides corrections/commands; MotionPlanner executes poses)
 - Optional force-related fields on `TestPoint` if required for the chosen simple control law
 - Simulation continues to supply force via HostInputs
@@ -320,12 +376,14 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Dependencies:** Milestone 9.
 
 **Expected behavior:**
+
 - Defined simple force-control behavior during Z-related motion (e.g. stop/hold when force threshold reached — exact law kept minimal and documented in milestone notes when implementing)
 - Simplified force-dependent XY correction applied when force condition requires it
 
 **How to test:** Scripted Z move with stub force ramp; assert stop/hold/correction triggers; XY correction only when force condition met.
 
 **Definition of done:**
+
 - Force control is real Core behavior, not display-only
 - XY correction present in simplified form
 - Still no HAL / GUI / UART
@@ -337,6 +395,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Architecture “later” plant I/O: limit switches, emergency stop handling (Spec), pneumatic cylinder — stubs only.
 
 **Files/modules:**
+
 - `HostInputs` — limit flags, `e_stop`
 - `HostOutputs` — pneumatic command/state
 - `Machine` — E-Stop → immediate safe stop / Fault or Stopped per chosen rule; limit violation → Fault/Stop; pneumatic command path
@@ -345,6 +404,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Dependencies:** Milestone 10 (or after M8 if force control deferred — prefer after force control so safety interacts with active motion/force).
 
 **Expected behavior:**
+
 - Software STOP (command) remains available
 - E-Stop input forces immediate safe halt even if a test is running
 - Limit hit → Fault/Stop
@@ -353,6 +413,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Inject e_stop mid-move; drive past soft limit; command pneumatic; assert states.
 
 **Definition of done:**
+
 - Documented distinction: protocol/GUI STOP vs E-Stop input
 - Still no HAL
 
@@ -363,6 +424,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Serializable command/status messages for Pi ↔ controller without UART drivers.
 
 **Files/modules:**
+
 - `communication/` — message IDs; pack/unpack start/stop/pause, load/run program summaries, status, positions, force, fault flags
 - PC round-trip harness under `simulation/` or `tests/`
 
@@ -373,6 +435,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Round-trip vectors.
 
 **Definition of done:**
+
 - Protocol usable by Sim bridge, GUI, and STM32
 - Core control logic remains inside Core; protocol is boundary only
 
@@ -383,6 +446,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** PC simulation speaks the protocol so Node.js GUI can connect without hardware.
 
 **Files/modules:**
+
 - `simulation/` bridge (e.g. TCP/stdio framing of protocol messages — transport chosen at implementation time, kept simple)
 - Maps protocol commands ↔ Machine/TestExecutor; status from Core + Host I/O
 
@@ -393,6 +457,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Small script or netcat-style client sending packed messages; assert state changes.
 
 **Definition of done:**
+
 - GUI path unblocked without STM32
 - No STM32 code required
 
@@ -403,6 +468,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Web GUI loads/validates JSON test programs, sends protocol commands, displays status — against Sim bridge.
 
 **Files/modules:**
+
 - `gui/` — Node server + frontend; JSON validation; protocol client targeting Sim bridge
 
 **Dependencies:** Milestone 13 only (not STM32).
@@ -412,6 +478,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Manual UI tests vs Sim; invalid JSON rejected.
 
 **Definition of done:**
+
 - Pi/GUI remains non-real-time
 - Works fully without STM32 hardware
 
@@ -422,6 +489,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12.
 
 **Files/modules:**
+
 - `firmware/` / `stm32/` — timer tick → Core `tick`; map HAL sensors/actuators ↔ HostInputs/HostOutputs; protocol over UART
 
 **Dependencies:** Milestone 12 + Core behavior through M11.
@@ -431,6 +499,7 @@ GUI path: M12 → M13 → M14. STM32 path: M12 → M15 (parallel; does not block
 **How to test:** Compare UART status stream to known Sim trace; E-Stop and STOP on target.
 
 **Definition of done:**
+
 - Core remains platform-independent (no HAL inside Core classes)
 - STM32 remains authority for real-time motion/safety when hardware is used
 - Architectural shape unchanged from Sim host pattern (tick + Host I/O + protocol)
