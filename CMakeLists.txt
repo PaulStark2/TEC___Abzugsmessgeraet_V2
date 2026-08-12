@@ -16,6 +16,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Build the platform-independent Core library.
 add_subdirectory(core)
 
+# Build the M12 host-agnostic communication protocol library.
+add_subdirectory(communication)
+
 # Build the PC Simulation executable that links against Core.
 add_subdirectory(simulation)
 

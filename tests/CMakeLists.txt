@@ -108,3 +108,15 @@ target_link_libraries(safety_tests
 )
 
 add_test(NAME safety_tests COMMAND safety_tests)
+
+# CMake definition for M12 communication protocol tests.
+add_executable(protocol_tests
+    protocol_tests.cpp
+)
+
+target_link_libraries(protocol_tests
+    PRIVATE
+        communication
+)
+
+add_test(NAME protocol_tests COMMAND protocol_tests)
