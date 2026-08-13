@@ -365,6 +365,85 @@ button:hover {
   color: var(--muted);
 }
 
+.capability-card,
+.progress-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #12151a;
+}
+
+.capability-card h3,
+.progress-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.capability-warn {
+  color: #e0b35a;
+}
+
+.capability-notes {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: #e0b35a;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.procedure-form select,
+.procedure-form input {
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.progress-bar {
+  margin-top: 0.5rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #2a3038;
+  overflow: hidden;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+a.btn-link {
+  display: inline-block;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #2f3540;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+a.btn-link:hover {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 @media (max-width: 900px) {
   .app-layout {
     grid-template-columns: 1fr;

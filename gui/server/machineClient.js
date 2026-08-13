@@ -34,17 +34,33 @@ const { createProtocolMachineClient } = require('./protocol/protocolMachineClien
  */
 function createMachineClient(kind) {
   const selected = (kind || process.env.MACHINE_CLIENT || 'mock').toLowerCase();
+  console.log(`[MACHINE] client mode = ${selected}`);
 
+  let client;
   switch (selected) {
     case 'mock':
-      return createMockMachineClient();
+      client = createMockMachineClient();
+      break;
     case 'sim':
-      return createSimMachineClient();
+      client = createSimMachineClient();
+      break;
     case 'protocol':
-      return createProtocolMachineClient();
+      client = createProtocolMachineClient();
+      break;
     default:
       throw new Error(`Unknown MACHINE_CLIENT="${selected}". Supported: mock, sim, protocol`);
   }
+
+  // Runtime identity for diagnostics (must not be spoofable by Core status).
+  client.machineClientMode = selected;
+  client.implementationName =
+    selected === 'mock'
+      ? 'MockMachineClient'
+      : selected === 'sim'
+        ? 'SimMachineClient'
+        : 'ProtocolMachineClient';
+
+  return client;
 }
 
 module.exports = {

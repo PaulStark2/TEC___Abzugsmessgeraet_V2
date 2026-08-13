@@ -54,3 +54,9 @@ Later the simulation shall model:
 The simulation is intentionally simplified.
 
 Do NOT implement detailed physical motor models unless explicitly requested.
+
+## Architecture verification (M14.2)
+
+See [`docs/M14_2_Architecture.md`](M14_2_Architecture.md) for the as-built
+GUI / Core / Simulation separation, command/status data flows, and runtime
+independence of HMI vs. controller host.

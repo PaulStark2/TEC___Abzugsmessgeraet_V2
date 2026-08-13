@@ -88,6 +88,29 @@ export function applyStatus(status) {
   if (fyEl) fyEl.textContent = formatForce(fy);
   if (fzEl) fzEl.textContent = formatForce(fz);
 
+  // Protocol/mock identity from server (authoritative).
+  if (status.machineClientMode || status.implementation) {
+    const modeEl = $('machine-client-mode');
+    if (modeEl) {
+      const mode = status.machineClientMode || '?';
+      const impl = status.implementation || '';
+      const tick = status.hasTick ? ' tick=yes' : '';
+      modeEl.textContent = `${mode}${impl ? ` (${impl})` : ''}${tick}`;
+    }
+  }
+
+  // Protocol client exposes machine TCP liveness via status.connected.
+  // Mock/sim omit the field — leave GUI WebSocket status message unchanged.
+  if (Object.prototype.hasOwnProperty.call(status, 'connected')) {
+    if (status.connected === false) {
+      setConnectionStatus('Maschine offline — TCP getrennt (keine Bewegung)', true);
+    } else if (status.connected === true) {
+      setConnectionStatus('Maschine verbunden (Protocol TCP)', false);
+    }
+  }
+
+  // Display-only: never invent motion. Pose stays at last reported values when offline.
+  // ONLY call site that moves the Three.js TCP mesh (besides initial 0,0,0).
   setTcpPose(status);
 }
 

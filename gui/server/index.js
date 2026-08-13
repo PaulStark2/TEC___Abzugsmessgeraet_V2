@@ -8,6 +8,8 @@ const { createMachineClient } = require('./machineClient');
 const { validateTestProgram } = require('./program/validateTestProgram');
 const programStore = require('./program/programStore');
 const selectionStore = require('./program/selectionStore');
+const resultsStore = require('./results/resultsStore');
+const { createProcedureService } = require('./procedure/procedureService');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -92,7 +94,7 @@ function sendJson(res, statusCode, body) {
 /**
  * Dispatch a command object to the MachineClient.
  * Supports sync clients (mock/sim) and async clients (protocol ACK wait).
- * @returns {Promise<{ ok: boolean, status?: object, error?: string }>}
+ * @returns {Promise<{ ok: boolean, status?: object, error?: string, machineClientMode?: string, implementation?: string }>}
  */
 async function handleCommand(body) {
   const command = body && body.command;
@@ -100,58 +102,102 @@ async function handleCommand(body) {
     return { ok: false, error: 'Missing command' };
   }
 
+  const implementation =
+    machineClient.implementationName ||
+    (typeof machineClient.tick === 'function' ? 'MockMachineClient?' : 'Unknown');
+  const mode = machineClient.machineClientMode || process.env.MACHINE_CLIENT || 'mock';
+  console.log(`[MACHINE] implementation = ${implementation} (mode=${mode}) command=${command}`);
+
+  let result;
   switch (command) {
     case 'moveTo':
       if (typeof machineClient.moveTo !== 'function') {
         return { ok: false, error: 'moveTo not supported by client' };
       }
-      return machineClient.moveTo(body.x, body.y, body.z);
+      result = await machineClient.moveTo(body.x, body.y, body.z);
+      break;
     case 'pause':
       if (typeof machineClient.pause !== 'function') {
         return { ok: false, error: 'pause not supported by client' };
       }
-      return machineClient.pause();
+      result = await machineClient.pause();
+      break;
     case 'resume':
       if (typeof machineClient.resume !== 'function') {
         return { ok: false, error: 'resume not supported by client' };
       }
-      return machineClient.resume();
+      result = await machineClient.resume();
+      break;
     case 'stop':
       if (typeof machineClient.stop !== 'function') {
         return { ok: false, error: 'stop not supported by client' };
       }
-      return machineClient.stop();
+      // Soft-STOP also aborts an active G8 procedure (mock or protocol adapter).
+      if (procedureService) {
+        try {
+          await procedureService.stop();
+        } catch {
+          // ignore procedure stop errors; machine stop still proceeds
+        }
+      }
+      result = await machineClient.stop();
+      break;
     case 'setSpeed':
       if (typeof machineClient.setSpeed !== 'function') {
         return { ok: false, error: 'setSpeed not supported by client' };
       }
-      return machineClient.setSpeed(body.speed);
+      result = await machineClient.setSpeed(body.speed);
+      break;
     case 'jog':
       if (typeof machineClient.jog !== 'function') {
         return { ok: false, error: 'jog not supported by client' };
       }
-      return machineClient.jog(body.axis, body.direction, body.step);
+      result = await machineClient.jog(body.axis, body.direction, body.step);
+      break;
     case 'pneumaticOpen':
       if (typeof machineClient.pneumaticOpen !== 'function') {
         return { ok: false, error: 'pneumaticOpen not supported by client' };
       }
-      return machineClient.pneumaticOpen();
+      result = await machineClient.pneumaticOpen();
+      break;
     case 'pneumaticClose':
       if (typeof machineClient.pneumaticClose !== 'function') {
         return { ok: false, error: 'pneumaticClose not supported by client' };
       }
-      return machineClient.pneumaticClose();
+      result = await machineClient.pneumaticClose();
+      break;
     case 'home':
       if (typeof machineClient.home !== 'function') {
         return { ok: false, error: 'home not supported by client' };
       }
-      return machineClient.home();
+      result = await machineClient.home();
+      break;
     default:
       return { ok: false, error: `Unknown command: ${command}` };
   }
+
+  // Always stamp identity so the browser/tests can see which backend answered.
+  if (result && typeof result === 'object') {
+    result.machineClientMode = mode;
+    result.implementation = implementation;
+    if (result.status && typeof result.status === 'object') {
+      result.status = {
+        ...result.status,
+        machineClientMode: mode,
+        implementation,
+      };
+    }
+    console.log(
+      `[MACHINE] command=${command} ok=${Boolean(result.ok)}` +
+        (result.error ? ` error=${result.error}` : '') +
+        (result.status ? ` pose=(${result.status.x},${result.status.y},${result.status.z})` : '')
+    );
+  }
+  return result;
 }
 
 const machineClient = createMachineClient();
+const procedureService = createProcedureService(machineClient);
 
 function buildSummaryFromProgram(normalizedProgram) {
   const testPoints = normalizedProgram.testPoints || [];
@@ -272,6 +318,118 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && urlPath === '/api/machine') {
+    const status = machineClient.getStatus();
+    sendJson(res, 200, {
+      ok: true,
+      machineClientMode: machineClient.machineClientMode || process.env.MACHINE_CLIENT || 'mock',
+      implementation: machineClient.implementationName || 'Unknown',
+      hasTick: typeof machineClient.tick === 'function',
+      pid: process.pid,
+      port: PORT,
+      envMachineClient: process.env.MACHINE_CLIENT || null,
+      envProtocolPort: process.env.PROTOCOL_PORT || null,
+      status,
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/procedure/status') {
+    sendJson(res, 200, { ok: true, status: procedureService.getStatus() });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/procedure/start') {
+    try {
+      const body = await readJsonBody(req);
+      const result = await procedureService.start(body);
+      broadcastStatus();
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/procedure/pause') {
+    const result = await procedureService.pause();
+    broadcastStatus();
+    sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/procedure/resume') {
+    const result = await procedureService.resume();
+    broadcastStatus();
+    sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/procedure/stop') {
+    const result = await procedureService.stop();
+    broadcastStatus();
+    sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/results/current') {
+    const current = resultsStore.getResults();
+    if (!current) {
+      sendJson(res, 404, { ok: false, error: 'No results available' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, results: current });
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/results/export') {
+    const current = resultsStore.getResults();
+    if (!current) {
+      sendJson(res, 404, { ok: false, error: 'No results available' });
+      return;
+    }
+
+    const header = [
+      'sequenceNumber',
+      'name',
+      'iteration',
+      'x',
+      'y',
+      'z',
+      'fx',
+      'fy',
+      'fz',
+      'pass',
+      'source',
+    ];
+    const lines = [header.join(',')];
+    for (const row of current.rows || []) {
+      lines.push(
+        [
+          row.sequenceNumber,
+          JSON.stringify(row.name ?? ''),
+          row.iteration ?? '',
+          row.x ?? '',
+          row.y ?? '',
+          row.z ?? '',
+          row.fx ?? '',
+          row.fy ?? '',
+          row.fz ?? '',
+          row.pass === null || row.pass === undefined ? '' : row.pass,
+          row.source ?? '',
+        ].join(',')
+      );
+    }
+    const csv = `${lines.join('\n')}\n`;
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="results-stub.csv"',
+      'Content-Length': Buffer.byteLength(csv),
+    });
+    res.end(csv);
+    return;
+  }
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Method Not Allowed');
@@ -307,9 +465,14 @@ const wss = new WebSocketServer({ server, path: '/ws/status' });
 
 function buildStatusMessage() {
   const status = machineClient.getStatus();
+  const mode = machineClient.machineClientMode || process.env.MACHINE_CLIENT || 'mock';
+  const implementation = machineClient.implementationName || 'Unknown';
   return JSON.stringify({
     type: 'status',
     ...status,
+    machineClientMode: mode,
+    implementation,
+    hasTick: typeof machineClient.tick === 'function',
   });
 }
 
@@ -334,10 +497,26 @@ setInterval(() => {
 
 setInterval(broadcastStatus, STATUS_INTERVAL_MS);
 
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`[GUI] ERROR: Port ${PORT} is already in use.`);
+    console.error('Another GUI instance may already be running.');
+    console.error('Consider:');
+    console.error('    npm run dev:stop');
+    process.exit(1);
+  }
+  throw err;
+});
+
 server.listen(PORT, () => {
-  const clientKind = (process.env.MACHINE_CLIENT || 'mock').toLowerCase();
+  const clientKind = machineClient.machineClientMode || (process.env.MACHINE_CLIENT || 'mock').toLowerCase();
+  const implementation = machineClient.implementationName || 'Unknown';
+  console.log(`[MACHINE] client mode = ${clientKind}`);
+  console.log(`[MACHINE] implementation = ${implementation}`);
+  console.log(`[MACHINE] pid = ${process.pid}`);
+  console.log(`[MACHINE] hasTick = ${typeof machineClient.tick === 'function'}`);
   console.log(`GUI server listening on http://localhost:${PORT}`);
-  console.log(`Machine client: ${clientKind}`);
   console.log(`Status WebSocket: ws://localhost:${PORT}/ws/status (~${STATUS_HZ} Hz)`);
   console.log('Command API: POST /api/command');
+  console.log('Machine debug: GET /api/machine');
 });

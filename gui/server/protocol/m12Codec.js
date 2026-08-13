@@ -16,6 +16,7 @@ const {
   ACK_PAYLOAD_WIRE_SIZE,
   NACK_PAYLOAD_WIRE_SIZE,
   STATUS_REPORT_PAYLOAD_WIRE_SIZE,
+  LOAD_PROGRAM_MAX_POINT_COUNT,
   MessageId,
   DecodeResult,
   NO_CURRENT_POINT_INDEX,
@@ -320,6 +321,42 @@ function encodeBoolMessage(messageId, value) {
 }
 
 /**
+ * Encode CMD_LOAD_PROGRAM payload (mirrors tecomm::encodeLoadProgramPayload).
+ * @param {Array<{x:number,y:number,z:number}>} points
+ * @returns {Buffer|null}
+ */
+function encodeLoadProgramPayload(points) {
+  if (!Array.isArray(points)) {
+    return null;
+  }
+  if (points.length > LOAD_PROGRAM_MAX_POINT_COUNT) {
+    return null;
+  }
+  const out = Buffer.alloc(1 + points.length * MOVE_TO_PAYLOAD_WIRE_SIZE);
+  out[0] = points.length & 0xff;
+  let offset = 1;
+  for (const point of points) {
+    if (
+      !writeF32LE(out, offset, Number(point.x)) ||
+      !writeF32LE(out, offset + 4, Number(point.y)) ||
+      !writeF32LE(out, offset + 8, Number(point.z))
+    ) {
+      return null;
+    }
+    offset += MOVE_TO_PAYLOAD_WIRE_SIZE;
+  }
+  return out;
+}
+
+function encodeLoadProgramMessage(points) {
+  const payload = encodeLoadProgramPayload(points);
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdLoadProgram, payload);
+}
+
+/**
  * Decode one complete frame from a buffer prefix.
  * Mirrors tecomm::decodeFrame.
  * @returns {{ result: string, frame?: object, bytesConsumed: number }}
@@ -376,6 +413,8 @@ module.exports = {
   encodeEmptyMessage,
   encodeMoveToMessage,
   encodeBoolMessage,
+  encodeLoadProgramPayload,
+  encodeLoadProgramMessage,
   encodeMoveToPayload,
   decodeMoveToPayload,
   encodeBoolPayload,

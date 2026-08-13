@@ -6,6 +6,8 @@ const {
   encodeEmptyMessage,
   encodeMoveToMessage,
   encodeBoolMessage,
+  encodeLoadProgramMessage,
+  encodeLoadProgramPayload,
   encodeMoveToPayload,
   decodeMoveToPayload,
   encodeBoolPayload,
@@ -152,6 +154,25 @@ function testPayloadHelpers() {
   assert.deepStrictEqual(decodeBoolPayload(encodeBoolPayload(false)), { value: 0 });
 }
 
+function testLoadProgramEncode() {
+  const payload = encodeLoadProgramPayload([
+    { x: 1, y: 2, z: 3 },
+    { x: 4, y: 5, z: 6 },
+  ]);
+  assert.ok(payload);
+  assert.strictEqual(payload[0], 2);
+  assert.strictEqual(payload.length, 1 + 2 * 12);
+  const encoded = encodeLoadProgramMessage([
+    { x: 1, y: 2, z: 3 },
+    { x: 4, y: 5, z: 6 },
+  ]);
+  assert.ok(encoded.ok);
+  const decoded = decodeFrame(encoded.frame);
+  assert.strictEqual(decoded.result, DecodeResult.Ok);
+  assert.strictEqual(decoded.frame.messageId, MessageId.CmdLoadProgram);
+  assert.strictEqual(decoded.frame.payload[0], 2);
+}
+
 testMoveToRoundtrip();
 testBoolRoundtrip();
 testEmptyCommand();
@@ -161,4 +182,5 @@ testCrcError();
 testPartialNeedMore();
 testCrcMatchesKnownPattern();
 testPayloadHelpers();
+testLoadProgramEncode();
 console.log('m12Codec.test.js: PASS');

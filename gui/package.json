@@ -6,8 +6,19 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
+    "dev:start": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-start-all.ps1",
+    "dev:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-stop-all.ps1",
+    "dev:start-all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-start-all.ps1",
+    "dev:stop-all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-stop-all.ps1",
+    "dev:start-gui": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-start-gui.ps1",
+    "dev:stop-gui": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-stop-gui.ps1",
+    "dev:start-simulation": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-start-simulation.ps1",
+    "dev:stop-simulation": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-stop-simulation.ps1",
     "test:protocol": "node server/protocol/crc16.test.js && node server/protocol/m12Codec.test.js && node server/protocol/frameStreamBuffer.test.js && node server/protocol/protocolMachineClient.test.js",
-    "smoke:g14": "node scripts/g14_protocol_smoke.js"
+    "smoke:g14": "node scripts/g14_protocol_smoke.js",
+    "diagnose:g14": "node scripts/g14_diagnose_runtime.js",
+    "proof:offline": "node scripts/g14_offline_move_proof.js",
+    "proof:architecture": "node scripts/m14_2_architecture_proof.js"
   },
   "engines": {
     "node": ">=18"

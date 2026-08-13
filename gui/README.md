@@ -16,6 +16,66 @@ npm start
 
 Browser: [http://localhost:3000](http://localhost:3000)
 
+## Development Runtime
+
+GUI und Simulation/Controller-Host haben **unabhängige** Lebenszyklen (M14.2).
+
+| Command | Wirkung |
+|---------|---------|
+| `npm run dev:start-gui` | Nur GUI (`MACHINE_CLIENT=protocol`, Port 3000) |
+| `npm run dev:start-simulation` | Nur `simulation_protocol` (Port 8766) |
+| `npm run dev:stop-gui` | Nur Projekt-GUI beenden |
+| `npm run dev:stop-simulation` | Nur Projekt-`simulation_protocol` beenden |
+| `npm run dev:start-all` | Convenience: Simulation, dann GUI |
+| `npm run dev:stop-all` | Beide Projektprozesse beenden |
+
+Aliase: `dev:start` → `start-all`, `dev:stop` → `stop-all`.
+
+```bash
+cd gui
+npm run dev:start-simulation   # Controller/Host ohne GUI
+npm run dev:start-gui          # HMI ohne erzwungenen Host (dann offline)
+npm run dev:stop-gui           # Simulation bleibt laufen
+npm run dev:stop-simulation    # GUI bleibt laufen (offline)
+```
+
+| Port | Dienst |
+|------|--------|
+| **3000** | Node GUI (`server/index.js`) |
+| **8766** | M12 `simulation_protocol` (Core-Host) |
+
+**Sicherheit:** Es werden **keine** fremden Node-Prozesse pauschal beendet. Nur Prozesse, die eindeutig zu diesem Repository gehören. PID-Dateien unter `gui/.dev-runtime/` sind Hilfsmittel und werden vor dem Kill erneut geprüft.
+
+Architektur-Nachweis (ohne Browser):
+
+```bash
+npm run proof:architecture
+```
+
+Siehe auch [`docs/M14_2_Architecture.md`](../docs/M14_2_Architecture.md).
+
+Bei `EADDRINUSE`:
+
+```bash
+npm run dev:stop-all
+```
+
+### Manueller Fallback
+
+Nur GUI (wie bisher):
+
+```bash
+npm start
+```
+
+Host manuell:
+
+```bash
+.\build\simulation_protocol\simulation_protocol.exe
+```
+
+Dann GUI mit Env wie unter M14.
+
 Optional Mock (Offline, JS-Kinematik nur im Mock):
 
 ```bash
@@ -102,6 +162,42 @@ Weitere Env-Vars:
 
 **Single-Client:** `simulation_protocol` akzeptiert einen Client; ein neuer Connect ersetzt den vorherigen.
 
+**Disconnect / Offline:** Wenn `simulation_protocol` beendet wird oder die TCP-Verbindung abreißt:
+
+- `status.connected === false`
+- mutierende Commands (`moveTo`, `jog`, `pause`, …) liefern `{ ok: false, error: 'Machine connection unavailable' }`
+- Pose bleibt auf dem letzten bekannten Wert (keine lokale Simulation)
+- Statusleiste zeigt „Maschine offline“
+- nach Neustart des Hosts reconnectet der Client automatisch; Commands sind erst wieder erlaubt, wenn TCP steht **und** ein Status empfangen wurde
+
+**Wichtig bei manueller Abnahme (Port-Konflikte):**
+
+Wenn `npm start` mit `EADDRINUSE :::3000` fehlschlägt, läuft noch ein **alter** GUI-Prozess. Der Browser spricht dann weiter mit diesem alten Prozess — nicht mit dem neu gestarteten.
+
+**Empfohlen:** `npm run dev:stop` bzw. den Workflow unter [Development Runtime](#development-runtime).
+
+Ebenso: Wenn nach dem „Beenden“ von `simulation_protocol` weiterhin Moves funktionieren, prüfe ob noch ein **zweiter** Host auf 8766 läuft (z. B. Restprozess aus früheren Tests):
+
+```powershell
+netstat -ano | findstr ":3000"
+netstat -ano | findstr ":8766"
+Get-CimInstance Win32_Process -Filter "Name = 'simulation_protocol.exe'" | Select ProcessId,CommandLine
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'server/index.js' } | Select ProcessId,CommandLine
+```
+
+Diagnose gegen laufende GUI:
+
+```bash
+npm run diagnose:g14
+# erwartet u.a. GET /api/machine → machineClientMode=protocol
+```
+
+Offline-Beweis (eigener Ephemeral-Port, ohne 3000/8766):
+
+```bash
+npm run proof:offline
+```
+
 **Unterschiede zu Mock:**
 
 - `setSpeed` → `{ ok: false, error: 'Not supported over protocol' }` (kein M12-Command)
@@ -163,8 +259,8 @@ Navigation:
 | `#menu` | Hauptmenü (Default) |
 | `#load-points` | Prüftstellen laden (G5) |
 | `#select-points` | Prüfstellen auswählen (G6) |
-| `#procedure` | Prüf-/Alterungsprozedur (Stub G8) |
-| `#results` | Prüfergebnisse (Stub G9) |
+| `#procedure` | Prüf-/Alterungsprozedur (G8) |
+| `#results` | Prüfergebnisse (G9) |
 | `#manual` | Handmodus (G3 + G7) |
 | `#plate` | Bauplatte wechseln (Stub G10) |
 | `#calibrate` | Kalibrieren (Stub) |
@@ -192,6 +288,24 @@ Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss l
 - UI `#manual`: Geschwindigkeit, Jog ±X/Y/Z, Spreizer, Homing-Stub
 - Status erweitert um `manualSpeed`, `pneumaticExtended`, `homingInProgress`
 - Test: `g7_manual_smoke.js`
+
+### G8 — Prüf-/Alterungsprozedur
+
+- UI `#procedure`: Modus, Eingliederungskraft, Iterationen, Fortschritt, Start/Pause/Resume/Stop
+- APIs: `GET /api/procedure/status`, `POST /api/procedure/start|pause|resume|stop`
+- **Mock:** vollständige HMI-Simulation (Iterationen, Kräfte, Completion → Results)
+- **Protocol:** `CmdLoadProgram` + `CmdStart` an Core-TestExecutor; Fortschritt aus StatusReport
+- Modus/Kraft/Iterationen beim Protocol-Pfad: GUI-Parameter, Core führt sie **nicht** aus (transparent gekennzeichnet)
+- Keine Completed→start()-Iterationsschleife in der GUI
+- `MACHINE_CLIENT=sim`: Prozedur nicht unterstützt (Hinweis in UI/API)
+- Tests: `g8_procedure_tests.js`, `g8_procedure_smoke.js`, `g8_protocol_procedure_smoke.js`
+
+### G9 — Prüfergebnisse
+
+- UI `#results`: Tabelle + CSV-Export-Stub (`GET /api/results/export`)
+- `GET /api/results/current`
+- Mock: volle simulierte Zeilen; Protocol: nur beobachtete Controller-Daten (`dataCompleteness: partial`)
+- Test: `g9_results_smoke.js`
 
 ## Status-WebSocket-Format
 

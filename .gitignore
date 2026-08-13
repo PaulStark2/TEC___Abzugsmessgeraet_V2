@@ -20,6 +20,9 @@ __pycache__/
 # Node.js
 node_modules/
 
+# M14.1 local development runtime (PID files)
+gui/.dev-runtime/
+
 # OS files
 .DS_Store
 Thumbs.db

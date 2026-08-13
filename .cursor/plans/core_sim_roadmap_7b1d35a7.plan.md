@@ -47,6 +47,12 @@ todos:
   - id: m14-gui
     content: "M14: Node.js GUI against Sim bridge"
     status: pending
+  - id: m14-1-dev-runtime
+    content: "M14.1: Development runtime lifecycle (dev:start/stop, process ownership)"
+    status: completed
+  - id: m14-2-architecture
+    content: "M14.2: Architecture verification + runtime separation (GUI vs Core vs Sim)"
+    status: completed
   - id: m15-stm32
     content: "M15: STM32 firmware hosts Core (parallel to GUI path)"
     status: pending
@@ -102,12 +108,15 @@ flowchart LR
   M11 --> M12[M12 Protocol]
   M12 --> M13[M13 Sim Bridge]
   M13 --> M14[M14 GUI]
-  M12 --> M15[M15 STM32]
+  M14 --> M141[M14_1 Dev Runtime]
+  M141 --> M142[M14_2 Architecture]
+  M142 --> M15[M15 STM32]
+  M12 --> M15
 ```
 
 
 
-GUI path: M12 → M13 → M14 (formal protocol). **M8.5 / G3.5** is an early interactive gate using temporary TCP/JSON (pre-protocol), not a substitute for M12/M13.
+GUI path: M12 → M13 → M14 (formal protocol). **M14.1** hardens local dev start/stop; **M14.2** verifies and documents GUI/Core/Simulation separation with independent runtime lifecycles. **M8.5 / G3.5** is an early interactive gate using temporary TCP/JSON (pre-protocol), not a substitute for M12/M13.
 
 STM32 path: M12 → M15 (parallel; does not block GUI).
 
@@ -484,6 +493,86 @@ STM32 path: M12 → M15 (parallel; does not block GUI).
 
 - Pi/GUI remains non-real-time
 - Works fully without STM32 hardware
+
+---
+
+## Milestone 14.1 — Development runtime lifecycle
+
+**Objective:** Reproducible local dev start/stop without orphan `simulation_protocol` or GUI processes; no accidental killing of unrelated Node processes.
+
+**Scope (dev infrastructure only):** `gui/scripts/`, `gui/package.json`, `gui/README.md`, `.gitignore` for runtime PID artifacts. No changes to Core, communication, bridge, or ProtocolMachineClient logic.
+
+**Files/modules:**
+
+- `gui/scripts/dev-common.ps1` — shared helpers (port checks, process ownership, repo-relative paths)
+- `gui/scripts/dev-start-all.ps1`, `dev-stop-all.ps1` — convenience: simulation then GUI
+- Aliases: `dev-start.ps1` → start-all, `dev-stop.ps1` → stop-all
+- `gui/.dev-runtime/` — PID files (gitignored); validated before kill
+- `gui/server/index.js` — clearer `EADDRINUSE` message (suggest `npm run dev:stop`)
+
+**Dependencies:** Milestone 14 (protocol GUI path in use).
+
+**Expected behavior:**
+
+- `npm run dev:start` / `dev:stop` start and stop **project** GUI (:3000) and `simulation_protocol` (:8766) only
+- Idempotent stop; port readiness polling (not fixed sleep only)
+- Re-start after forgotten processes cleans up safely
+- Ctrl+C on start script cleans up owned PIDs; explicit `dev:stop` documented as fallback
+
+**Safety rules:**
+
+- Never `Stop-Process -Name node` globally
+- Kill only when CommandLine / WorkingDirectory / port + PID file confirm repo ownership
+- If ownership unclear → warn, do not kill
+
+**How to test:** Clean start/stop; double start; orphan recovery; offline/reconnect smoke unchanged; `test:protocol`, `smoke:g14`, CTest 14/14.
+
+**Definition of done:**
+
+- Dev environment start/stop is reproducible
+- M14 protocol behavior unchanged
+- No unrelated process termination
+
+---
+
+## Milestone 14.2 — Architecture verification & runtime separation
+
+**Objective:** Document and prove that **GUI = HMI**, **Core = controller**, **simulation host = outer world/runtime** — not a second controller. Decouple GUI and simulation **development lifecycles** so either can run without the other.
+
+**Scope:** Architecture documentation, dev-script separation, automated proofs. No M15/STM32, no large Core refactor, no new M12 commands.
+
+**Files/modules:**
+
+- `docs/M14_2_Architecture.md` — components, responsibilities, command/status flows, MOVE_TO sequences, STM32 outlook, honest controller vs simulation classification
+- `gui/scripts/dev-start-gui.ps1`, `dev-stop-gui.ps1` — GUI only
+- `gui/scripts/dev-start-simulation.ps1`, `dev-stop-simulation.ps1` — controller host only
+- `gui/scripts/m14_2_architecture_proof.js` — `npm run proof:architecture` (GUI without controller, controller without GUI, combined, disconnect/reconnect, independent stop)
+- `gui/README.md` — independent runtime commands
+
+**Dependencies:** Milestones 14 and 14.1.
+
+**Expected behavior:**
+
+- GUI with `MACHINE_CLIENT=protocol` runs offline; MOVE_TO rejected; pose frozen
+- `simulation_protocol` alone accepts M12 MOVE_TO; status changes without browser/GUI
+- `dev:stop-simulation` does **not** stop GUI; `dev:stop-gui` does **not** stop simulation
+- Three.js pose updates only from received status (`setTcpPose`); no local kinematics in protocol path
+
+**Central verification question (documented answer):**
+
+- Command authority: Core (`Machine`, `TestExecutor`) via bridge mapping
+- GUI/ProtocolClient: transport + display only
+- Nuance documented: simplified axis integration currently in Core (`MotionPlanner`/`Axis`); virtual sensors in `SimHostInputProvider`
+
+**How to test:** `npm run proof:architecture`, `proof:offline`, `test:protocol`, `smoke:g14`, CTest 14/14; manual independent start/stop of GUI vs simulation.
+
+**Definition of done:**
+
+- Architecture documented in `docs/M14_2_Architecture.md`
+- GUI and controller host independently start/stop
+- Automated separation proofs pass
+- Existing M13/M14 functionality preserved
+- No unnecessary large refactor
 
 ---
 

@@ -6,15 +6,15 @@
 
 const assert = require('assert');
 const net = require('net');
-const { createProtocolMachineClient } = require('./protocolMachineClient');
+const {
+  createProtocolMachineClient,
+  MACHINE_UNAVAILABLE,
+} = require('./protocolMachineClient');
 const {
   encodeFrame,
-  encodeEmptyMessage,
-  encodeMoveToMessage,
   encodeAckPayload,
   encodeNackPayload,
   encodeStatusReportPayload,
-  decodeFrame,
   decodeMoveToPayload,
   decodeBoolPayload,
 } = require('./m12Codec');
@@ -54,12 +54,22 @@ function makeStatusPayload(overrides = {}) {
   });
 }
 
+function replyAck(socket, messageId, resultCode = AckResultCode.Ok) {
+  const ack = encodeFrame(
+    MessageId.RspAck,
+    encodeAckPayload({ refMessageId: messageId, resultCode })
+  );
+  socket.write(ack.frame);
+}
+
 function startMockHost(handler) {
   return new Promise((resolve, reject) => {
+    /** @type {import('net').Socket[]} */
+    const sockets = [];
     const server = net.createServer((socket) => {
+      sockets.push(socket);
       const stream = new FrameStreamBuffer();
 
-      // Hello status
       const hello = encodeFrame(MessageId.MsgStatusReport, makeStatusPayload({ x: 1, y: 2, z: 3 }));
       socket.write(hello.frame);
 
@@ -75,14 +85,52 @@ function startMockHost(handler) {
           }
         }
       });
+
+      socket.on('close', () => {
+        const idx = sockets.indexOf(socket);
+        if (idx >= 0) {
+          sockets.splice(idx, 1);
+        }
+      });
     });
 
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();
-      resolve({ server, port });
+      resolve({
+        server,
+        port,
+        dropClients() {
+          for (const s of [...sockets]) {
+            s.destroy();
+          }
+        },
+      });
     });
     server.on('error', reject);
   });
+}
+
+async function waitUntilConnected(client, timeoutMs = 2000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const s = client.getStatus();
+    if (s.connected) {
+      return s;
+    }
+    await sleep(20);
+  }
+  throw new Error('Timeout waiting for protocol sessionReady');
+}
+
+async function waitUntilDisconnected(client, timeoutMs = 2000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (!client.getStatus().connected) {
+      return;
+    }
+    await sleep(20);
+  }
+  throw new Error('Timeout waiting for disconnect');
 }
 
 async function withClient(port, fn, options = {}) {
@@ -92,14 +140,7 @@ async function withClient(port, fn, options = {}) {
     ackTimeoutMs: options.ackTimeoutMs || 1000,
   });
   try {
-    // Wait for hello status
-    for (let i = 0; i < 50; i += 1) {
-      const s = client.getStatus();
-      if (s.connected && (s.x !== 0 || s.y !== 0 || s.z !== 0)) {
-        break;
-      }
-      await sleep(20);
-    }
+    await waitUntilConnected(client);
     return await fn(client);
   } finally {
     client.close();
@@ -126,15 +167,12 @@ async function testMoveToAck() {
     assert.strictEqual(frame.messageId, MessageId.CmdMoveTo);
     const move = decodeMoveToPayload(frame.payload);
     assert.strictEqual(move.x, 10);
-    const ack = encodeFrame(
-      MessageId.RspAck,
-      encodeAckPayload({ refMessageId: MessageId.CmdMoveTo, resultCode: AckResultCode.Ok })
-    );
+    replyAck(socket, MessageId.CmdMoveTo);
     const status = encodeFrame(
       MessageId.MsgStatusReport,
       makeStatusPayload({ machineState: 1, motionState: 1, x: 10, y: 0, z: 0 })
     );
-    socket.write(Buffer.concat([ack.frame, status.frame]));
+    socket.write(status.frame);
   });
 
   try {
@@ -153,19 +191,12 @@ async function testStatusDuringAckWait() {
     if (frame.messageId !== MessageId.CmdPause) {
       return;
     }
-    // Push status before ACK
     const mid = encodeFrame(
       MessageId.MsgStatusReport,
       makeStatusPayload({ machineState: 1, motionState: 1, x: 7 })
     );
     socket.write(mid.frame);
-    setTimeout(() => {
-      const ack = encodeFrame(
-        MessageId.RspAck,
-        encodeAckPayload({ refMessageId: MessageId.CmdPause, resultCode: AckResultCode.Ok })
-      );
-      socket.write(ack.frame);
-    }, 50);
+    setTimeout(() => replyAck(socket, MessageId.CmdPause), 50);
   });
 
   try {
@@ -205,14 +236,7 @@ async function testNack() {
 
 async function testAckRejected() {
   const { server, port } = await startMockHost((socket, frame) => {
-    const ack = encodeFrame(
-      MessageId.RspAck,
-      encodeAckPayload({
-        refMessageId: frame.messageId,
-        resultCode: AckResultCode.FaultLatched,
-      })
-    );
-    socket.write(ack.frame);
+    replyAck(socket, frame.messageId, AckResultCode.FaultLatched);
   });
 
   try {
@@ -226,7 +250,7 @@ async function testAckRejected() {
   }
 }
 
-async function testAckTimeout() {
+async function testAckTimeoutMarksUnavailable() {
   const { server, port } = await startMockHost(() => {
     // never reply
   });
@@ -237,11 +261,101 @@ async function testAckTimeout() {
       async (client) => {
         const result = await client.pause();
         assert.strictEqual(result.ok, false);
-        assert.strictEqual(result.error, 'Protocol ACK timeout');
+        assert.strictEqual(result.error, MACHINE_UNAVAILABLE);
+        assert.strictEqual(client.getStatus().connected, false);
       },
       { ackTimeoutMs: 200 }
     );
   } finally {
+    server.close();
+  }
+}
+
+async function testDisconnectedCommandRejected() {
+  // A) Client never becomes ready (nothing listening) → moveTo fails.
+  const client = createProtocolMachineClient({
+    host: '127.0.0.1',
+    port: 59999,
+    ackTimeoutMs: 300,
+  });
+  await sleep(100);
+  assert.strictEqual(client.getStatus().connected, false);
+  const result = await client.moveTo(1, 2, 3);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.error, MACHINE_UNAVAILABLE);
+  client.close();
+}
+
+async function testDisconnectThenMoveRejected() {
+  // B) Connect → status → drop socket → connected=false → moveTo fails
+  const { server, port, dropClients } = await startMockHost((socket, frame) => {
+    replyAck(socket, frame.messageId);
+  });
+
+  const client = createProtocolMachineClient({
+    host: '127.0.0.1',
+    port,
+    ackTimeoutMs: 500,
+  });
+
+  try {
+    await waitUntilConnected(client);
+    const before = client.getStatus();
+    assert.ok(before.connected);
+
+    dropClients();
+    await waitUntilDisconnected(client);
+    assert.strictEqual(client.getStatus().connected, false);
+
+    const frozenX = client.getStatus().x;
+    const result = await client.moveTo(99, 0, 0);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.error, MACHINE_UNAVAILABLE);
+    // Pose must not change locally after disconnect.
+    assert.strictEqual(client.getStatus().x, frozenX);
+  } finally {
+    client.close();
+    server.close();
+  }
+}
+
+async function testReconnectAllowsCommandsAgain() {
+  // C) Drop → fail → host still listening → reconnect → status → command ok
+  const { server, port, dropClients } = await startMockHost((socket, frame) => {
+    replyAck(socket, frame.messageId);
+    if (frame.messageId === MessageId.CmdMoveTo) {
+      const move = decodeMoveToPayload(frame.payload);
+      const status = encodeFrame(
+        MessageId.MsgStatusReport,
+        makeStatusPayload({ x: move.x, y: move.y, z: move.z, machineState: 1, motionState: 1 })
+      );
+      socket.write(status.frame);
+    }
+  });
+
+  const client = createProtocolMachineClient({
+    host: '127.0.0.1',
+    port,
+    ackTimeoutMs: 500,
+  });
+
+  try {
+    await waitUntilConnected(client);
+    dropClients();
+    await waitUntilDisconnected(client);
+
+    const failed = await client.moveTo(5, 0, 0);
+    assert.strictEqual(failed.ok, false);
+    assert.strictEqual(failed.error, MACHINE_UNAVAILABLE);
+
+    // Server still listening — client reconnects automatically.
+    await waitUntilConnected(client, 5000);
+    assert.ok(client.getStatus().connected);
+
+    const ok = await client.moveTo(12, 0, 0);
+    assert.ok(ok.ok, ok.error);
+  } finally {
+    client.close();
     server.close();
   }
 }
@@ -251,15 +365,12 @@ async function testPneumaticAndSetSpeed() {
     if (frame.messageId === MessageId.CmdSetSpreader) {
       const bool = decodeBoolPayload(frame.payload);
       assert.strictEqual(bool.value, 1);
-      const ack = encodeFrame(
-        MessageId.RspAck,
-        encodeAckPayload({ refMessageId: MessageId.CmdSetSpreader, resultCode: AckResultCode.Ok })
-      );
+      replyAck(socket, MessageId.CmdSetSpreader);
       const status = encodeFrame(
         MessageId.MsgStatusReport,
         makeStatusPayload({ spreaderExtend: 1, spreaderExtended: 1 })
       );
-      socket.write(Buffer.concat([ack.frame, status.frame]));
+      socket.write(status.frame);
     }
   });
 
@@ -282,13 +393,8 @@ async function testJogMapsToMoveTo() {
   const { server, port } = await startMockHost((socket, frame) => {
     assert.strictEqual(frame.messageId, MessageId.CmdMoveTo);
     const move = decodeMoveToPayload(frame.payload);
-    // hello status was x=1; jog +X step 1 => 2
     assert.strictEqual(move.x, 2);
-    const ack = encodeFrame(
-      MessageId.RspAck,
-      encodeAckPayload({ refMessageId: MessageId.CmdMoveTo, resultCode: AckResultCode.Ok })
-    );
-    socket.write(ack.frame);
+    replyAck(socket, MessageId.CmdMoveTo);
   });
 
   try {
@@ -304,7 +410,7 @@ async function testJogMapsToMoveTo() {
 async function testCloseStopsReconnect() {
   const { server, port } = await startMockHost(() => {});
   const client = createProtocolMachineClient({ host: '127.0.0.1', port, ackTimeoutMs: 500 });
-  await sleep(50);
+  await waitUntilConnected(client);
   client.close();
   await sleep(100);
   assert.strictEqual(client.getStatus().connected, false);
@@ -317,7 +423,10 @@ async function main() {
   await testStatusDuringAckWait();
   await testNack();
   await testAckRejected();
-  await testAckTimeout();
+  await testAckTimeoutMarksUnavailable();
+  await testDisconnectedCommandRejected();
+  await testDisconnectThenMoveRejected();
+  await testReconnectAllowsCommandsAgain();
   await testPneumaticAndSetSpeed();
   await testJogMapsToMoveTo();
   await testCloseStopsReconnect();

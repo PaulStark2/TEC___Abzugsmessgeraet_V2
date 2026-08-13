@@ -72,6 +72,7 @@ function request(base, method, urlPath, body) {
 async function startSmokeServer(options = {}) {
   const port = options.port || (await findFreePort());
   const timeoutMs = options.timeoutMs || 20000;
+  const machineClient = options.machineClient || 'mock';
   const base = `http://127.0.0.1:${port}`;
   const serverEntry = path.join(__dirname, '..', '..', 'server', 'index.js');
 
@@ -79,7 +80,8 @@ async function startSmokeServer(options = {}) {
     env: {
       ...process.env,
       PORT: String(port),
-      MACHINE_CLIENT: 'mock',
+      MACHINE_CLIENT: machineClient,
+      ...(options.env || {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

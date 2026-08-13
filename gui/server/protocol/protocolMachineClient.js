@@ -4,6 +4,8 @@
  * ProtocolMachineClient — TCP client for M13 simulation_protocol (M12 binary).
  *
  * Transport/mapping only. No motion, safety, or process logic in Node.js.
+ * Mutating commands require a live TCP session that has received at least one
+ * MSG_STATUS_REPORT after connect (sessionReady).
  */
 
 const net = require('net');
@@ -12,6 +14,7 @@ const {
   encodeEmptyMessage,
   encodeMoveToMessage,
   encodeBoolMessage,
+  encodeLoadProgramMessage,
   decodeAckPayload,
   decodeNackPayload,
   decodeStatusReportPayload,
@@ -21,6 +24,7 @@ const { MessageId, AckResultCode, NackErrorCode, DecodeResult } = require('./pro
 
 const DEFAULT_JOG_STEP = 1;
 const RECONNECT_DELAY_MS = 2000;
+const MACHINE_UNAVAILABLE = 'Machine connection unavailable';
 
 function createDefaultStatus(connected = false) {
   return {
@@ -86,15 +90,45 @@ function createProtocolMachineClient(options = {}) {
   let status = createDefaultStatus(false);
   let socket = null;
   let connected = false;
+  /** True only after TCP connect AND at least one valid status report in this session. */
+  let sessionReady = false;
   let closed = false;
   let reconnectTimer = null;
   const streamBuffer = new FrameStreamBuffer();
 
-  /** @type {Map<number, { resolve: Function, reject: Function, timer: NodeJS.Timeout }>} */
+  /** @type {Map<number, { resolve: Function, timer: NodeJS.Timeout }>} */
   const pendingByMessageId = new Map();
 
   function getStatus() {
-    return { ...status, connected };
+    return { ...status, connected: connected && sessionReady };
+  }
+
+  function rejectPending(errorMessage) {
+    for (const [, pending] of pendingByMessageId) {
+      clearTimeout(pending.timer);
+      pending.resolve({ ok: false, error: errorMessage, status: getStatus() });
+    }
+    pendingByMessageId.clear();
+  }
+
+  function markDisconnected(reason) {
+    const wasLive = connected || sessionReady;
+    connected = false;
+    sessionReady = false;
+    status = { ...status, connected: false };
+    streamBuffer.clear();
+    rejectPending(reason || MACHINE_UNAVAILABLE);
+    return wasLive;
+  }
+
+  function isLiveSession() {
+    return (
+      Boolean(socket) &&
+      !socket.destroyed &&
+      connected &&
+      sessionReady &&
+      socket.writable
+    );
   }
 
   function applyStatusReport(payload) {
@@ -102,15 +136,11 @@ function createProtocolMachineClient(options = {}) {
     if (!decoded) {
       return;
     }
-    status = statusReportToGuiStatus(decoded, connected);
-  }
-
-  function rejectPending(errorMessage) {
-    for (const [, pending] of pendingByMessageId) {
-      clearTimeout(pending.timer);
-      pending.resolve({ ok: false, error: errorMessage });
+    // First valid status after TCP connect arms the session for mutating commands.
+    if (connected) {
+      sessionReady = true;
     }
-    pendingByMessageId.clear();
+    status = statusReportToGuiStatus(decoded, connected && sessionReady);
   }
 
   function handleInboundFrame(frame, decodeResult) {
@@ -173,27 +203,73 @@ function createProtocolMachineClient(options = {}) {
   }
 
   function sendFrameAndWait(messageId, frame) {
-    if (!socket || !connected) {
-      return Promise.resolve({ ok: false, error: 'Not connected to simulation_protocol' });
+    if (!isLiveSession()) {
+      return Promise.resolve({
+        ok: false,
+        error: MACHINE_UNAVAILABLE,
+        status: getStatus(),
+      });
     }
     if (pendingByMessageId.has(messageId)) {
-      return Promise.resolve({ ok: false, error: 'Command already pending for this message id' });
+      return Promise.resolve({
+        ok: false,
+        error: 'Command already pending for this message id',
+        status: getStatus(),
+      });
     }
+
+    const activeSocket = socket;
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingByMessageId.delete(messageId);
-        resolve({ ok: false, error: 'Protocol ACK timeout', status: getStatus() });
+        // Half-open TCP (host killed, no close yet): fail closed and force reconnect.
+        markDisconnected(MACHINE_UNAVAILABLE);
+        if (!closed) {
+          scheduleReconnect();
+        }
+        resolve({ ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() });
       }, ackTimeoutMs);
 
-      pendingByMessageId.set(messageId, { resolve, reject: resolve, timer });
+      pendingByMessageId.set(messageId, { resolve, timer });
 
       try {
-        socket.write(frame);
+        activeSocket.write(frame, (writeErr) => {
+          if (!writeErr) {
+            return;
+          }
+          const pending = pendingByMessageId.get(messageId);
+          if (pending) {
+            clearTimeout(pending.timer);
+            pendingByMessageId.delete(messageId);
+            markDisconnected(MACHINE_UNAVAILABLE);
+            pending.resolve({
+              ok: false,
+              error: MACHINE_UNAVAILABLE,
+              status: getStatus(),
+            });
+          } else {
+            markDisconnected(MACHINE_UNAVAILABLE);
+          }
+          if (!closed) {
+            scheduleReconnect();
+          }
+        });
       } catch (err) {
-        clearTimeout(timer);
-        pendingByMessageId.delete(messageId);
-        resolve({ ok: false, error: err.message || String(err), status: getStatus() });
+        const pending = pendingByMessageId.get(messageId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingByMessageId.delete(messageId);
+        }
+        markDisconnected(MACHINE_UNAVAILABLE);
+        resolve({
+          ok: false,
+          error: MACHINE_UNAVAILABLE,
+          status: getStatus(),
+        });
+        if (!closed) {
+          scheduleReconnect();
+        }
       }
     });
   }
@@ -208,27 +284,11 @@ function createProtocolMachineClient(options = {}) {
     }, RECONNECT_DELAY_MS);
   }
 
-  function connect() {
-    if (closed) {
-      return;
-    }
-    if (socket) {
-      socket.destroy();
-      socket = null;
-    }
-    connected = false;
-    status = { ...status, connected: false };
-    streamBuffer.clear();
-
-    const s = net.createConnection({ host, port }, () => {
-      connected = true;
-      status = { ...status, connected: true };
-      console.log(`ProtocolMachineClient connected to ${host}:${port}`);
-    });
-
-    socket = s;
-
+  function attachSocketHandlers(s) {
     s.on('data', (chunk) => {
+      if (s !== socket) {
+        return;
+      }
       streamBuffer.append(chunk);
       if (streamBuffer.overflowed()) {
         console.error('ProtocolMachineClient: stream buffer overflow; clearing');
@@ -240,19 +300,64 @@ function createProtocolMachineClient(options = {}) {
 
     s.on('error', (err) => {
       console.error(`ProtocolMachineClient error: ${err.message}`);
+      if (s === socket) {
+        markDisconnected(MACHINE_UNAVAILABLE);
+      }
+    });
+
+    s.on('end', () => {
+      if (s === socket) {
+        markDisconnected(MACHINE_UNAVAILABLE);
+      }
     });
 
     s.on('close', () => {
-      connected = false;
-      status = { ...status, connected: false };
+      if (s !== socket && socket !== null) {
+        return;
+      }
       socket = null;
-      streamBuffer.clear();
-      rejectPending('Disconnected from simulation_protocol');
+      const wasLive = markDisconnected(MACHINE_UNAVAILABLE);
       if (!closed) {
-        console.log('ProtocolMachineClient disconnected; reconnecting…');
+        if (wasLive) {
+          console.log('ProtocolMachineClient disconnected; reconnecting…');
+        }
         scheduleReconnect();
       }
     });
+  }
+
+  function connect() {
+    if (closed) {
+      return;
+    }
+    if (socket) {
+      const old = socket;
+      socket = null;
+      try {
+        old.destroy();
+      } catch {
+        // ignore
+      }
+    }
+
+    connected = false;
+    sessionReady = false;
+    status = { ...status, connected: false };
+    streamBuffer.clear();
+
+    const s = net.createConnection({ host, port }, () => {
+      if (s !== socket) {
+        return;
+      }
+      // TCP is up, but mutating commands wait until first status report.
+      connected = true;
+      sessionReady = false;
+      status = { ...status, connected: false };
+      console.log(`ProtocolMachineClient connected to ${host}:${port}`);
+    });
+
+    socket = s;
+    attachSocketHandlers(s);
   }
 
   async function moveTo(x, y, z) {
@@ -262,6 +367,9 @@ function createProtocolMachineClient(options = {}) {
     if (![nx, ny, nz].every(Number.isFinite)) {
       return { ok: false, error: 'moveTo requires finite x, y, z' };
     }
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     const encoded = encodeMoveToMessage(nx, ny, nz);
     if (!encoded.ok) {
       return { ok: false, error: 'Failed to encode MOVE_TO' };
@@ -270,6 +378,9 @@ function createProtocolMachineClient(options = {}) {
   }
 
   async function pause() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     const encoded = encodeEmptyMessage(MessageId.CmdPause);
     if (!encoded.ok) {
       return { ok: false, error: 'Failed to encode PAUSE' };
@@ -278,6 +389,9 @@ function createProtocolMachineClient(options = {}) {
   }
 
   async function resume() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     const encoded = encodeEmptyMessage(MessageId.CmdResume);
     if (!encoded.ok) {
       return { ok: false, error: 'Failed to encode RESUME' };
@@ -286,6 +400,9 @@ function createProtocolMachineClient(options = {}) {
   }
 
   async function stop() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     const encoded = encodeEmptyMessage(MessageId.CmdStop);
     if (!encoded.ok) {
       return { ok: false, error: 'Failed to encode STOP' };
@@ -294,6 +411,9 @@ function createProtocolMachineClient(options = {}) {
   }
 
   async function jog(axis, direction, step) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     const axisKey = String(axis || '').toUpperCase();
     if (!['X', 'Y', 'Z'].includes(axisKey)) {
       return { ok: false, error: 'jog axis must be X, Y, or Z' };
@@ -317,6 +437,9 @@ function createProtocolMachineClient(options = {}) {
   }
 
   async function pneumaticOpen() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     const encoded = encodeBoolMessage(MessageId.CmdSetSpreader, true);
     if (!encoded.ok) {
       return { ok: false, error: 'Failed to encode SET_SPREADER' };
@@ -325,6 +448,9 @@ function createProtocolMachineClient(options = {}) {
   }
 
   async function pneumaticClose() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     const encoded = encodeBoolMessage(MessageId.CmdSetSpreader, false);
     if (!encoded.ok) {
       return { ok: false, error: 'Failed to encode SET_SPREADER' };
@@ -336,11 +462,47 @@ function createProtocolMachineClient(options = {}) {
    * Compatibility workaround: command move to origin. Not Core homing.
    */
   async function home() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
     return moveTo(0, 0, 0);
   }
 
   async function setSpeed() {
     return { ok: false, error: 'Not supported over protocol' };
+  }
+
+  /**
+   * Load a point program into Core TestExecutor via CMD_LOAD_PROGRAM.
+   * Transport only — no GUI sequencing of points.
+   * @param {Array<{x:number,y:number,z:number}>} points
+   */
+  async function loadProgram(points) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    if (!Array.isArray(points) || points.length === 0) {
+      return { ok: false, error: 'loadProgram requires a non-empty points array' };
+    }
+    const encoded = encodeLoadProgramMessage(points);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode LOAD_PROGRAM' };
+    }
+    return sendFrameAndWait(MessageId.CmdLoadProgram, encoded.frame);
+  }
+
+  /**
+   * Start Core TestExecutor via CMD_START.
+   */
+  async function start() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdStart);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode START' };
+    }
+    return sendFrameAndWait(MessageId.CmdStart, encoded.frame);
   }
 
   function close() {
@@ -349,14 +511,16 @@ function createProtocolMachineClient(options = {}) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
-    rejectPending('ProtocolMachineClient closed');
+    markDisconnected(MACHINE_UNAVAILABLE);
     if (socket) {
-      socket.destroy();
+      const s = socket;
       socket = null;
+      try {
+        s.destroy();
+      } catch {
+        // ignore
+      }
     }
-    connected = false;
-    status = { ...status, connected: false };
-    streamBuffer.clear();
   }
 
   connect();
@@ -372,10 +536,13 @@ function createProtocolMachineClient(options = {}) {
     pneumaticClose,
     home,
     setSpeed,
+    loadProgram,
+    start,
     close,
   };
 }
 
 module.exports = {
   createProtocolMachineClient,
+  MACHINE_UNAVAILABLE,
 };

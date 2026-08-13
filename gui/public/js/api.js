@@ -165,6 +165,103 @@ export async function clearProgramSelection() {
 }
 
 /**
+ * Procedure status (G8).
+ */
+export async function fetchProcedureStatus() {
+  const response = await fetch('/api/procedure/status', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok) {
+    return result;
+  }
+  return result;
+}
+
+/**
+ * @param {{ mode: string, insertionForce: number, iterations: number }} body
+ */
+export async function startProcedure(body) {
+  const response = await fetch('/api/procedure/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function pauseProcedure() {
+  const response = await fetch('/api/procedure/pause', { method: 'POST' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function resumeProcedure() {
+  const response = await fetch('/api/procedure/resume', { method: 'POST' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function stopProcedure() {
+  const response = await fetch('/api/procedure/stop', { method: 'POST' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+/**
+ * Latest procedure results (G9).
+ */
+export async function fetchCurrentResults() {
+  const response = await fetch('/api/results/current', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok) {
+    return result;
+  }
+  return result;
+}
+
+/**
  * @param {(status: object) => void} onStatus
  * @param {(connected: boolean, message?: string) => void} [onConnection]
  */
