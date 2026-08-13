@@ -33,9 +33,14 @@ const TestExecutor& SimProtocolBridge::executor() const
     return executor_;
 }
 
-SimHostInputProvider& SimProtocolBridge::hostInputProvider()
+simplant::SimPlant& SimProtocolBridge::plant()
 {
-    return host_inputs_;
+    return plant_;
+}
+
+const simplant::SimPlant& SimProtocolBridge::plant() const
+{
+    return plant_;
 }
 
 CommandDispatcher& SimProtocolBridge::dispatcher()
@@ -66,7 +71,8 @@ void SimProtocolBridge::appendStatusPush(std::vector<OutboundFrame>& out)
 
 void SimProtocolBridge::applyHostInputs()
 {
-    machine_.setHostInputs(host_inputs_.build(machine_));
+    // Sensors are derived from the Core-reported pose; no safety decision here.
+    machine_.setHostInputs(plant_.sample(machine_.x(), machine_.y(), machine_.z()));
 }
 
 void SimProtocolBridge::tick(float dt)
@@ -79,6 +85,8 @@ void SimProtocolBridge::tick(float dt)
     {
         machine_.tick(dt);
     }
+
+    plant_.advance(dt);
 }
 
 } // namespace simbridge

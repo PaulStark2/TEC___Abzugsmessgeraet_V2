@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zugprüfstand — Simulation (virtuelle Außenwelt)</title>
+    <link rel="stylesheet" href="/css/app.css" />
+    <link rel="stylesheet" href="/css/simulation.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/build/three.module.js",
+          "three/addons/": "/vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body class="sim-body">
+    <header class="app-header">
+      <h1>Simulation — virtuelle Außenwelt</h1>
+      <p id="sim-status" class="gui-status">Simulations-UI startet…</p>
+      <p class="sim-header-note">
+        Diese UI stellt die Außenwelt dar und liefert Sensorsignale. Sie steuert die Maschine
+        nicht — Bewegungsentscheidungen trifft ausschließlich der Controller/Core.
+        <a href="/">Zur Maschinen-GUI</a>
+      </p>
+    </header>
+
+    <div class="status-bar" aria-label="Controller-Status">
+      <dl class="status-bar-grid">
+        <div>
+          <dt>ClientMode</dt>
+          <dd id="sim-client-mode">—</dd>
+        </div>
+        <div>
+          <dt>MachineState</dt>
+          <dd id="sim-machine-state">—</dd>
+        </div>
+        <div>
+          <dt>MotionState</dt>
+          <dd id="sim-motion-state">—</dd>
+        </div>
+        <div>
+          <dt>X</dt>
+          <dd id="sim-pos-x">—</dd>
+        </div>
+        <div>
+          <dt>Y</dt>
+          <dd id="sim-pos-y">—</dd>
+        </div>
+        <div>
+          <dt>Z</dt>
+          <dd id="sim-pos-z">—</dd>
+        </div>
+        <div>
+          <dt>Fx</dt>
+          <dd id="sim-force-fx">—</dd>
+        </div>
+        <div>
+          <dt>Fy</dt>
+          <dd id="sim-force-fy">—</dd>
+        </div>
+        <div>
+          <dt>Fz</dt>
+          <dd id="sim-force-fz">—</dd>
+        </div>
+        <div>
+          <dt>Limits</dt>
+          <dd id="sim-limits">—</dd>
+        </div>
+        <div>
+          <dt>E-Stop</dt>
+          <dd id="sim-estop">—</dd>
+        </div>
+      </dl>
+    </div>
+
+    <main class="sim-layout">
+      <aside class="sim-panel panel" aria-labelledby="sim-inputs-heading">
+        <h2 id="sim-inputs-heading">Externe Sensorsignale</h2>
+        <p id="sim-plant-feedback" class="command-feedback" aria-live="polite"></p>
+
+        <section class="sim-group">
+          <h3>Messtaster</h3>
+          <p class="placeholder-note">
+            Digitales Signal: kurzer HIGH-Impuls, danach automatisch LOW.
+          </p>
+          <button type="button" id="btn-probe-trigger">Messtaster auslösen</button>
+          <p class="sim-readout">
+            probeTriggered: <span id="sim-probe-state">—</span>
+          </p>
+        </section>
+
+        <section class="sim-group">
+          <h3>Endschalter (Max-Positionen)</h3>
+          <p class="placeholder-note">
+            TCP-Position ≥ Grenzwert → Sensor HIGH. Die Reaktion entscheidet allein die
+            Core-Safety-Logik.
+          </p>
+          <div class="sim-field">
+            <label for="input-limit-x">X-Endschalter [mm]</label>
+            <input type="number" id="input-limit-x" step="1" value="100" />
+          </div>
+          <div class="sim-field">
+            <label for="input-limit-y">Y-Endschalter [mm]</label>
+            <input type="number" id="input-limit-y" step="1" value="100" />
+          </div>
+          <div class="sim-field">
+            <label for="input-limit-z">Z-Endschalter [mm]</label>
+            <input type="number" id="input-limit-z" step="1" value="50" />
+          </div>
+          <button type="button" id="btn-apply-limits">Grenzwerte übernehmen</button>
+          <p class="sim-readout">
+            Sensorzustand: <span id="sim-limit-state">—</span>
+          </p>
+        </section>
+
+        <section class="sim-group">
+          <h3>Not-Halt (Hardware-Eingang)</h3>
+          <div class="sim-field sim-field--inline">
+            <input type="checkbox" id="input-estop" />
+            <label for="input-estop">E-Stop aktiv</label>
+          </div>
+        </section>
+
+        <section class="sim-group">
+          <h3>Geometrie der virtuellen Maschine</h3>
+          <p class="placeholder-note">
+            Nur Darstellung — beeinflusst weder Core noch Sensorlogik.
+          </p>
+          <div class="sim-field">
+            <label for="input-size-x">Länge X [mm]</label>
+            <input type="number" id="input-size-x" step="10" min="10" value="200" />
+          </div>
+          <div class="sim-field">
+            <label for="input-size-y">Länge Y [mm]</label>
+            <input type="number" id="input-size-y" step="10" min="10" value="150" />
+          </div>
+          <div class="sim-field">
+            <label for="input-size-z">Länge Z [mm]</label>
+            <input type="number" id="input-size-z" step="10" min="10" value="120" />
+          </div>
+          <div class="sim-field">
+            <label for="input-profile">Profil-Kantenlänge [mm]</label>
+            <input type="number" id="input-profile" step="1" min="1" value="12" />
+          </div>
+          <button type="button" id="btn-apply-geometry">Geometrie übernehmen</button>
+        </section>
+      </aside>
+
+      <section class="sim-viewport panel" aria-labelledby="sim-view-heading">
+        <h2 id="sim-view-heading">Virtueller Portalroboter</h2>
+        <p class="placeholder-note">
+          Pose kommt ausschließlich aus dem Controller-Status (Z-up, 1 mm = 1 Einheit).
+        </p>
+        <canvas id="gantry-canvas" class="sim-canvas" width="900" height="560"></canvas>
+        <div class="control-actions">
+          <button type="button" id="btn-sim-reset-camera">Kamera zurücksetzen</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/js/sim/simulationPage.js"></script>
+  </body>
+</html>

@@ -29,4 +29,8 @@ struct HostInputs
 
     // Emergency stop flag (M11: highest-priority safety input in Machine::tick()).
     bool e_stop; // hardware e-stop active
+
+    // Probe/touch sensor flag (M15: digital input, short pulse while triggered).
+    // Core only receives the signal; no calibration or teach-in logic exists yet.
+    bool probeTriggered; // measuring probe contact
 };

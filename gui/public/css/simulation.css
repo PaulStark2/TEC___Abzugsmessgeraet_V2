@@ -1,0 +1,113 @@
+/* M15 simulation UI — standalone page, reuses app.css tokens. */
+
+.sim-header-note {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  max-width: 70rem;
+}
+
+.sim-header-note a {
+  color: var(--accent);
+}
+
+.sim-layout {
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) 1fr;
+  gap: 1rem;
+  padding: 1rem 1.5rem 2rem;
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .sim-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sim-panel,
+.sim-viewport {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.15rem 1.25rem;
+}
+
+.sim-panel h2,
+.sim-viewport h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.sim-group {
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+  margin-top: 0.85rem;
+}
+
+.sim-group h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--accent);
+}
+
+.sim-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.sim-field--inline {
+  justify-content: flex-start;
+}
+
+.sim-field label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.sim-field input[type="number"] {
+  width: 7rem;
+  padding: 0.35rem 0.5rem;
+  background: #1b1f25;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.sim-panel button {
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.9rem;
+  background: #2f3742;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sim-panel button:hover {
+  border-color: var(--accent);
+}
+
+.sim-readout {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.sim-readout--active span {
+  color: #ffcc00;
+}
+
+.sim-canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  display: block;
+  background: #12151a;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

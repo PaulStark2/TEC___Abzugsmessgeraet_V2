@@ -10,4 +10,5 @@ if ($stopped) {
   Write-Dev 'No project simulation_protocol processes found.'
 }
 Report-PortStatus $script:SimPort
+Report-PortStatus $script:PlantPort
 exit 0

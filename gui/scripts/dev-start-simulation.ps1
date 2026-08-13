@@ -25,11 +25,13 @@ Write-Dev 'Cleaning previous project simulation_protocol...'
 [void](Stop-ProjectSimProcesses)
 Start-Sleep -Milliseconds 300
 
-if (-not (Test-PortFree $script:SimPort)) {
-  Write-Dev "ERROR: Port $($script:SimPort) is not free."
-  exit 1
+foreach ($port in @($script:SimPort, $script:PlantPort)) {
+  if (-not (Test-PortFree $port)) {
+    Write-Dev "ERROR: Port $port is not free."
+    exit 1
+  }
+  Write-Dev "Port $port is free."
 }
-Write-Dev "Port $($script:SimPort) is free."
 
 try {
   $pidSim = Start-ProjectSimulationProcess
@@ -39,6 +41,7 @@ try {
   Write-Host ''
   Write-Dev 'Simulation/controller host ready (no GUI required).'
   Write-Dev "M12 endpoint: 127.0.0.1:$($script:SimPort)"
+  Write-Dev "Plant channel (simulation only): 127.0.0.1:$($script:PlantPort)"
   Write-Dev 'Press Ctrl+C to stop simulation only (GUI is left running).'
   Write-Host ''
 

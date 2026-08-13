@@ -146,6 +146,20 @@ add_executable(bridge_integration_tests
 target_link_libraries(bridge_integration_tests PRIVATE simulation_bridge)
 add_test(NAME bridge_integration_tests COMMAND bridge_integration_tests)
 
+# M15 virtual outside world (sensor plant) tests.
+add_executable(simplant_tests
+    simplant_tests.cpp
+)
+target_link_libraries(simplant_tests PRIVATE simulation_plant)
+add_test(NAME simplant_tests COMMAND simplant_tests)
+
+# M15 simulation plant channel codec tests.
+add_executable(plantchannel_tests
+    plantchannel_tests.cpp
+)
+target_link_libraries(plantchannel_tests PRIVATE simulation_plant)
+add_test(NAME plantchannel_tests COMMAND plantchannel_tests)
+
 add_executable(bridge_tcp_tests
     bridge_tcp_tests.cpp
 )

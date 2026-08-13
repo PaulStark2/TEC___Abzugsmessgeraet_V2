@@ -1,5 +1,7 @@
 // M13 binary M12 protocol TCP host (port 8766 default).
+// M15: additionally serves the simulation plant channel (port 8767 default).
 #include "FrameStreamBuffer.hpp"
+#include "PlantChannelServer.hpp"
 #include "SimProtocolBridge.hpp"
 
 #include <chrono>
@@ -101,6 +103,23 @@ int main(int argc, char** argv)
         }
     }
 
+    // Simulation plant channel port (M15): argv[2] or PLANT_PORT, default 8767.
+    int plant_port = 8767;
+    const char* plant_port_env = std::getenv("PLANT_PORT");
+    if (argc >= 3)
+    {
+        plant_port = std::atoi(argv[2]);
+    }
+    else if (plant_port_env != nullptr)
+    {
+        plant_port = std::atoi(plant_port_env);
+    }
+    if (plant_port <= 0 || plant_port > 65535)
+    {
+        std::cerr << "Invalid plant port; using 8767" << std::endl;
+        plant_port = 8767;
+    }
+
 #ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
@@ -153,6 +172,17 @@ int main(int argc, char** argv)
     simbridge::SimProtocolBridge bridge;
     simbridge::FrameStreamBuffer stream_buffer;
     socket_t client = kInvalidSocket;
+
+    // Sensor injection channel for the simulation UI (never carries M12 commands).
+    PlantChannelServer plant_channel;
+    if (plant_channel.start(plant_port))
+    {
+        std::cout << "Plant channel on 127.0.0.1:" << plant_port << std::endl;
+    }
+    else
+    {
+        std::cerr << "Plant channel unavailable (port " << plant_port << ")" << std::endl;
+    }
 
     constexpr float kDt = 0.05f;
     using clock = std::chrono::steady_clock;
@@ -219,6 +249,10 @@ int main(int argc, char** argv)
 #endif
             }
         }
+
+        // Sensor configuration/injection from the simulation UI (no motion here).
+        plant_channel.poll(bridge.plant(), bridge.machine().x(), bridge.machine().y(),
+                           bridge.machine().z());
 
         const auto now = clock::now();
         if (now >= next_tick)

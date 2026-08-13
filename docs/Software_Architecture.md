@@ -60,3 +60,9 @@ Do NOT implement detailed physical motor models unless explicitly requested.
 See [`docs/M14_2_Architecture.md`](M14_2_Architecture.md) for the as-built
 GUI / Core / Simulation separation, command/status data flows, and runtime
 independence of HMI vs. controller host.
+
+## Simulation UI and sensor plant (M15)
+
+See [`docs/M15_Simulation_UI.md`](M15_Simulation_UI.md) for the standalone
+simulation UI, the virtual outside world (`simulation_plant`), the separate
+plant channel on port 8767, and the hierarchical gantry visualization.

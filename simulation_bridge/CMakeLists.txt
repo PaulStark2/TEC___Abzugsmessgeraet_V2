@@ -16,6 +16,7 @@ target_link_libraries(simulation_bridge
     PUBLIC
         core
         communication
+        simulation_plant
 )
 
 target_compile_features(simulation_bridge PUBLIC cxx_std_17)

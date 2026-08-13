@@ -15,6 +15,8 @@ $script:SimExe = [System.IO.Path]::GetFullPath(
 
 $script:GuiPort = 3000
 $script:SimPort = 8766
+# M15 simulation plant channel (virtual sensors, not part of M12).
+$script:PlantPort = 8767
 
 function Write-Dev([string]$Message) {
   Write-Host "[DEV] $Message"
@@ -388,9 +390,11 @@ function Find-ProjectSimPids {
     [void]$found.Add($fromFile)
   }
 
-  foreach ($pidVal in (Get-ListeningPids $script:SimPort)) {
-    if (Test-IsProjectSimProcess $pidVal) {
-      [void]$found.Add($pidVal)
+  foreach ($port in @($script:SimPort, $script:PlantPort)) {
+    foreach ($pidVal in (Get-ListeningPids $port)) {
+      if (Test-IsProjectSimProcess $pidVal) {
+        [void]$found.Add($pidVal)
+      }
     }
   }
 
@@ -490,11 +494,13 @@ function Stop-ProjectSimProcesses {
   }
   Clear-PidFile $script:SimPidFile
   Start-Sleep -Milliseconds 200
-  foreach ($pidVal in (Get-ListeningPids $script:SimPort)) {
-    if (Test-IsProjectSimProcess $pidVal) {
-      Write-Dev "WARNING: Project simulation_protocol PID $pidVal still listening on port $($script:SimPort)."
-    } else {
-      Write-Dev "WARNING: Port $($script:SimPort) is still in use by PID $pidVal (not this project sim - left running)."
+  foreach ($port in @($script:SimPort, $script:PlantPort)) {
+    foreach ($pidVal in (Get-ListeningPids $port)) {
+      if (Test-IsProjectSimProcess $pidVal) {
+        Write-Dev "WARNING: Project simulation_protocol PID $pidVal still listening on port $port."
+      } else {
+        Write-Dev "WARNING: Port $port is still in use by PID $pidVal (not this project sim - left running)."
+      }
     }
   }
   return $stoppedAny
@@ -507,14 +513,17 @@ function Start-ProjectSimulationProcess {
     Write-Dev "Expected: $($script:SimExe)"
     return $null
   }
-  if (-not (Test-PortFree $script:SimPort)) {
-    $pids = @(Get-ListeningPids $script:SimPort) -join ', '
-    Write-Dev "ERROR: Port $($script:SimPort) is not free (PID(s): $pids)."
-    return $null
+  foreach ($port in @($script:SimPort, $script:PlantPort)) {
+    if (-not (Test-PortFree $port)) {
+      $pids = @(Get-ListeningPids $port) -join ', '
+      Write-Dev "ERROR: Port $port is not free (PID(s): $pids)."
+      return $null
+    }
   }
   Write-Sim 'Starting simulation_protocol...'
+  Write-Sim "M12 port $($script:SimPort), plant channel port $($script:PlantPort)"
   $simProc = Start-Process -FilePath $script:SimExe `
-    -ArgumentList @("$($script:SimPort)") `
+    -ArgumentList @("$($script:SimPort)", "$($script:PlantPort)") `
     -WorkingDirectory ([System.IO.Path]::GetDirectoryName($script:SimExe)) `
     -PassThru `
     -WindowStyle Hidden
@@ -540,6 +549,7 @@ function Start-ProjectGuiProcess {
   Write-Gui 'Starting GUI...'
   Write-Gui 'MACHINE_CLIENT=protocol'
   Write-Gui "PROTOCOL_HOST=127.0.0.1 PROTOCOL_PORT=$($script:SimPort)"
+  Write-Gui "PLANT_PORT=$($script:PlantPort)"
 
   $nodeCmd = Get-Command node -ErrorAction Stop
   $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -551,6 +561,7 @@ function Start-ProjectGuiProcess {
   $psi.EnvironmentVariables['MACHINE_CLIENT'] = 'protocol'
   $psi.EnvironmentVariables['PROTOCOL_HOST'] = '127.0.0.1'
   $psi.EnvironmentVariables['PROTOCOL_PORT'] = "$($script:SimPort)"
+  $psi.EnvironmentVariables['PLANT_PORT'] = "$($script:PlantPort)"
   $psi.EnvironmentVariables['PORT'] = "$($script:GuiPort)"
 
   $guiProc = New-Object System.Diagnostics.Process

@@ -15,4 +15,5 @@ if (-not $guiStopped -and -not $simStopped) {
 
 Report-PortStatus $script:GuiPort
 Report-PortStatus $script:SimPort
+Report-PortStatus $script:PlantPort
 exit 0

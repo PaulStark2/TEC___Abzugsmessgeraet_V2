@@ -10,6 +10,7 @@ const programStore = require('./program/programStore');
 const selectionStore = require('./program/selectionStore');
 const resultsStore = require('./results/resultsStore');
 const { createProcedureService } = require('./procedure/procedureService');
+const { createPlantClient } = require('./simulation/plantClient');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -52,7 +53,11 @@ function resolvePublicPath(urlPath) {
     return absolute;
   }
 
-  const relative = decoded === '/' ? '/index.html' : decoded;
+  // M15: /simulation is a standalone page, not a hash route of the machine HMI.
+  const rewritten =
+    decoded === '/simulation' || decoded === '/simulation/' ? '/simulation.html' : decoded;
+
+  const relative = rewritten === '/' ? '/index.html' : rewritten;
   const absolute = path.normalize(path.join(PUBLIC_DIR, relative));
 
   if (!isPathInside(PUBLIC_DIR, absolute) && absolute !== PUBLIC_DIR) {
@@ -198,6 +203,24 @@ async function handleCommand(body) {
 
 const machineClient = createMachineClient();
 const procedureService = createProcedureService(machineClient);
+const plantClient = createPlantClient();
+
+/**
+ * Forward a simulation plant result. Connection problems answer with 503 so the
+ * simulation UI can report a plain connection error without breaking.
+ */
+function sendPlantResult(res, result) {
+  if (result && result.ok) {
+    sendJson(res, 200, result);
+    return;
+  }
+  sendJson(res, result && result.offline ? 503 : 400, result || { ok: false, error: 'Unknown error' });
+}
+
+function readFiniteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
 
 function buildSummaryFromProgram(normalizedProgram) {
   const testPoints = normalizedProgram.testPoints || [];
@@ -430,6 +453,69 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // M15 simulation plant proxy: virtual sensors only, no machine commands.
+  if (req.method === 'GET' && urlPath === '/api/simulation/state') {
+    sendPlantResult(res, await plantClient.getState());
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/simulation/limits') {
+    try {
+      const body = await readJsonBody(req);
+      const limits = {};
+      for (const key of ['xMax', 'yMax', 'zMax']) {
+        if (body[key] !== undefined) {
+          const value = readFiniteNumber(body[key]);
+          if (value === null) {
+            sendJson(res, 400, { ok: false, error: `Invalid ${key}` });
+            return;
+          }
+          limits[key] = value;
+        }
+      }
+      if (Object.keys(limits).length === 0) {
+        sendJson(res, 400, { ok: false, error: 'No limit values provided' });
+        return;
+      }
+      sendPlantResult(res, await plantClient.setLimits(limits));
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/simulation/probe') {
+    try {
+      const body = await readJsonBody(req);
+      let pulseMs;
+      if (body.pulseMs !== undefined) {
+        pulseMs = readFiniteNumber(body.pulseMs);
+        if (pulseMs === null || pulseMs <= 0) {
+          sendJson(res, 400, { ok: false, error: 'Invalid pulseMs' });
+          return;
+        }
+      }
+      sendPlantResult(res, await plantClient.triggerProbe(pulseMs));
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/simulation/estop') {
+    try {
+      const body = await readJsonBody(req);
+      if (typeof body.active !== 'boolean') {
+        sendJson(res, 400, { ok: false, error: 'Missing boolean "active"' });
+        return;
+      }
+      sendPlantResult(res, await plantClient.setEStop(body.active));
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Method Not Allowed');
@@ -519,4 +605,6 @@ server.listen(PORT, () => {
   console.log(`Status WebSocket: ws://localhost:${PORT}/ws/status (~${STATUS_HZ} Hz)`);
   console.log('Command API: POST /api/command');
   console.log('Machine debug: GET /api/machine');
+  console.log(`Simulation UI: http://localhost:${PORT}/simulation`);
+  console.log(`Simulation plant channel: ${plantClient.host}:${plantClient.port} (not M12)`);
 });

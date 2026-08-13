@@ -4,6 +4,8 @@
 #include "Machine.hpp"
 
 // M13 simulation source for HostInputs (no safety evaluation here).
+// Since M15 the protocol host uses simplant::SimPlant as virtual outside world;
+// this manual injector remains as the M9/M13 input stub.
 class SimHostInputProvider
 {
 public:

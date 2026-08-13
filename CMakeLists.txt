@@ -25,6 +25,9 @@ add_subdirectory(simulation)
 # Build the interactive Machine TCP host (M8.5 pre-protocol bridge).
 add_subdirectory(simulation_interactive)
 
+# Build the M15 virtual outside world (sensor plant) for the PC simulation.
+add_subdirectory(simulation_plant)
+
 # Build the M13 M12 binary protocol simulation bridge.
 add_subdirectory(simulation_bridge)
 add_subdirectory(simulation_protocol)

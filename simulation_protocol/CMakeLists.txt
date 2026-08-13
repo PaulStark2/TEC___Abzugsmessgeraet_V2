@@ -1,6 +1,8 @@
 # M13 binary M12 protocol TCP host (port 8766 default).
+# Also hosts the M15 simulation plant channel (port 8767 default).
 add_executable(simulation_protocol
     main.cpp
+    PlantChannelServer.cpp
 )
 
 target_link_libraries(simulation_protocol

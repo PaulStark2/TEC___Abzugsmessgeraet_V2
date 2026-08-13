@@ -16,6 +16,9 @@ npm start
 
 Browser: [http://localhost:3000](http://localhost:3000)
 
+Simulations-UI (eigenständige Seite, M15):
+[http://localhost:3000/simulation](http://localhost:3000/simulation)
+
 ## Development Runtime
 
 GUI und Simulation/Controller-Host haben **unabhängige** Lebenszyklen (M14.2).
@@ -23,7 +26,7 @@ GUI und Simulation/Controller-Host haben **unabhängige** Lebenszyklen (M14.2).
 | Command | Wirkung |
 |---------|---------|
 | `npm run dev:start-gui` | Nur GUI (`MACHINE_CLIENT=protocol`, Port 3000) |
-| `npm run dev:start-simulation` | Nur `simulation_protocol` (Port 8766) |
+| `npm run dev:start-simulation` | Nur `simulation_protocol` (Port 8766 + Plant-Kanal 8767) |
 | `npm run dev:stop-gui` | Nur Projekt-GUI beenden |
 | `npm run dev:stop-simulation` | Nur Projekt-`simulation_protocol` beenden |
 | `npm run dev:start-all` | Convenience: Simulation, dann GUI |
@@ -43,6 +46,7 @@ npm run dev:stop-simulation    # GUI bleibt laufen (offline)
 |------|--------|
 | **3000** | Node GUI (`server/index.js`) |
 | **8766** | M12 `simulation_protocol` (Core-Host) |
+| **8767** | Simulations-Plant-Kanal (nur PC-Simulation, **kein** M12) |
 
 **Sicherheit:** Es werden **keine** fremden Node-Prozesse pauschal beendet. Nur Prozesse, die eindeutig zu diesem Repository gehören. PID-Dateien unter `gui/.dev-runtime/` sind Hilfsmittel und werden vor dem Kill erneut geprüft.
 
@@ -53,6 +57,14 @@ npm run proof:architecture
 ```
 
 Siehe auch [`docs/M14_2_Architecture.md`](../docs/M14_2_Architecture.md).
+
+Simulations-Smoke-Test (M15, ohne Browser, eigene Ports):
+
+```bash
+npm run smoke:m15
+```
+
+Siehe auch [`docs/M15_Simulation_UI.md`](../docs/M15_Simulation_UI.md).
 
 Bei `EADDRINUSE`:
 
@@ -306,6 +318,32 @@ Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss l
 - `GET /api/results/current`
 - Mock: volle simulierte Zeilen; Protocol: nur beobachtete Controller-Daten (`dataCompleteness: partial`)
 - Test: `g9_results_smoke.js`
+
+### M15 — Simulations-UI und virtuelle Portalmaschine
+
+- Eigenständige Seite `/simulation` (kein Hash-Bereich der Maschinen-GUI); HMI unverändert
+- Hierarchische 3D-Portalmaschine (`js/sim/gantryView.js`): X-Portal → Y-Schlitten → Z-Säule → TCP
+- Pose ausschließlich aus dem Controller-Status (`/ws/status` → `gantryView.setPose()`), keine JS-Kinematik
+- Virtuelle Außenwelt in C++ (`simulation_plant/SimPlant`): positionsabhängige Max-Endschalter, `probeTriggered`-Impuls, E-Stop-Eingang, `fx = fy = fz = 0`
+- Reaktion auf Endschalter/E-Stop entscheidet allein die Core-Safety-Logik (latched `Fault`)
+- Separater Plant-Kanal auf Port 8767 (TCP/JSON-Zeilen), **keine** M12-Erweiterung
+- APIs: `GET /api/simulation/state`, `POST /api/simulation/limits|probe|estop`
+- Tests: `simplant_tests`, `plantchannel_tests` (CTest), `smoke:m15`
+
+## Simulations-API (M15)
+
+Nur virtuelle Sensorik der PC-Simulation — Maschinenbefehle laufen weiter über `/api/command`.
+
+```json
+GET  /api/simulation/state
+POST /api/simulation/limits   { "xMax": 190, "yMax": 140, "zMax": 110 }
+POST /api/simulation/probe    { "pulseMs": 100 }
+POST /api/simulation/estop    { "active": true }
+```
+
+Antwort: `{ "ok": true, "state": { ... }, "pose": { "x": 0, "y": 0, "z": 0 } }`.
+Ist der Simulations-Host gestoppt, antwortet der Proxy mit HTTP 503 und einer
+verständlichen Verbindungsmeldung.
 
 ## Status-WebSocket-Format
 

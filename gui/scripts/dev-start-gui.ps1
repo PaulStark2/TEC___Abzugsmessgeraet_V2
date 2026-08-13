@@ -46,6 +46,7 @@ try {
   Write-Host ''
   Write-Dev 'GUI ready (independent of simulation lifecycle).'
   Write-Dev 'GUI: http://localhost:3000'
+  Write-Dev 'Simulation UI: http://localhost:3000/simulation'
   Write-Dev 'Press Ctrl+C to stop GUI only (simulation is left running).'
   Write-Host ''
 

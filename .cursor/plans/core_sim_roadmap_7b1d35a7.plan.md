@@ -53,8 +53,11 @@ todos:
   - id: m14-2-architecture
     content: "M14.2: Architecture verification + runtime separation (GUI vs Core vs Sim)"
     status: completed
-  - id: m15-stm32
-    content: "M15: STM32 firmware hosts Core (parallel to GUI path)"
+  - id: m15-simulation-ui
+    content: "M15: Simulation UI + virtual outside world (3D gantry, plant channel)"
+    status: completed
+  - id: m16-stm32
+    content: "M16: STM32 firmware hosts Core (parallel to GUI path)"
     status: pending
 isProject: false
 ---
@@ -110,15 +113,18 @@ flowchart LR
   M13 --> M14[M14 GUI]
   M14 --> M141[M14_1 Dev Runtime]
   M141 --> M142[M14_2 Architecture]
-  M142 --> M15[M15 STM32]
-  M12 --> M15
+  M142 --> M15[M15 Simulation UI]
+  M142 --> M16[M16 STM32]
+  M12 --> M16
 ```
 
 
 
 GUI path: M12 → M13 → M14 (formal protocol). **M14.1** hardens local dev start/stop; **M14.2** verifies and documents GUI/Core/Simulation separation with independent runtime lifecycles. **M8.5 / G3.5** is an early interactive gate using temporary TCP/JSON (pre-protocol), not a substitute for M12/M13.
 
-STM32 path: M12 → M15 (parallel; does not block GUI).
+**M15** adds the standalone simulation UI and the virtual outside world (sensors in the C++ host), without touching M12 or Core control logic.
+
+STM32 path: M12 → M16 (parallel; does not block GUI).
 
 ---
 
@@ -539,7 +545,7 @@ STM32 path: M12 → M15 (parallel; does not block GUI).
 
 **Objective:** Document and prove that **GUI = HMI**, **Core = controller**, **simulation host = outer world/runtime** — not a second controller. Decouple GUI and simulation **development lifecycles** so either can run without the other.
 
-**Scope:** Architecture documentation, dev-script separation, automated proofs. No M15/STM32, no large Core refactor, no new M12 commands.
+**Scope:** Architecture documentation, dev-script separation, automated proofs. No STM32 firmware, no large Core refactor, no new M12 commands.
 
 **Files/modules:**
 
@@ -576,7 +582,45 @@ STM32 path: M12 → M15 (parallel; does not block GUI).
 
 ---
 
-## Milestone 15 — STM32 firmware host (parallel path)
+## Milestone 15 — Simulation UI & virtual outside world
+
+**Objective:** Standalone simulation UI with a 3D gantry that visualizes the **Core-computed** pose, plus a virtual outside world in the C++ host that feeds sensors into `HostInputs`. No controller logic in the UI.
+
+**Scope:** New `/simulation` page, `simulation_plant` module, separate plant channel. No M12 extension, no Core refactor, no JS kinematics, no force simulation.
+
+**Files/modules:**
+
+- `simulation_plant/SimPlant.*` — virtual sensors: position-based max limit switches, `probeTriggered` pulse, E-Stop input, force always zero
+- `simulation_plant/PlantCommandCodec.*` — JSON commands for the plant channel
+- `simulation_protocol/PlantChannelServer.*` — TCP/JSON line channel on port 8767 (simulation only)
+- `core/HostInputs.hpp` — new `probeTriggered` field
+- `gui/public/simulation.html`, `css/simulation.css`, `js/sim/*` — UI shell, plant API, `gantryView` (hierarchical Three.js gantry)
+- `gui/server/simulation/plantClient.js`, `/api/simulation/*` in `gui/server/index.js` — Node proxy to the plant channel
+
+**Dependencies:** Milestones 12–14.2.
+
+**Expected behavior:**
+
+- Pose comes only from `StatusReport` → WebSocket → `gantryView.setPose()`
+- Reaching a configured max limit sets the sensor HIGH; the **Core** decides the reaction (latched `Fault`)
+- Probe button produces a short `probeTriggered` pulse; Core only accepts the signal
+- `fx = fy = fz = 0`; Core force-control code untouched
+- Simulation host stopped: both UIs stay open, pose frozen, commands rejected, plant requests report a connection error
+
+**How to test:** CTest (`simplant_tests`, `plantchannel_tests`), `npm run smoke:m15`, existing `test:protocol`, `smoke:g14`, `proof:offline`, `proof:architecture`, G8/G9 tests; manual browser check of X/Y/Z hierarchy.
+
+**Definition of done:**
+
+- Controller logic stays in Core; simulation only produces sensor values and visualizes pose
+- M12 frame structure, message IDs, and `simulation_interactive` unchanged
+- Independent GUI/simulation lifecycles from M14.2 preserved
+- Documented in `docs/M15_Simulation_UI.md`
+
+---
+
+## Milestone 16 — STM32 firmware host (parallel path)
+
+> Previously numbered M15; renumbered because M15 is the simulation UI milestone. The STM32 path still depends only on M12 and is not blocked by M15.
 
 **Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12.
 

@@ -53,6 +53,7 @@ try {
   Write-Host ''
   Write-Dev 'Development environment ready (GUI + simulation started independently).'
   Write-Dev 'GUI: http://localhost:3000'
+  Write-Dev 'Simulation UI: http://localhost:3000/simulation'
   Write-Dev 'Prefer: npm run dev:stop-gui / dev:stop-simulation for independent stop.'
   Write-Dev 'Ctrl+C stops only this session''s owned PIDs.'
   Write-Host ''
@@ -60,8 +61,15 @@ try {
   $simExitWarned = $false
   $guiExitWarned = $false
   while ($true) {
-    $guiAlive = Get-Process -Id $script:StartedGuiPid -ErrorAction SilentlyContinue
-    $simAlive = Get-Process -Id $script:StartedSimPid -ErrorAction SilentlyContinue
+    # PIDs are cleared once a component exited; Get-Process must not see $null.
+    $guiAlive = $null
+    if ($null -ne $script:StartedGuiPid) {
+      $guiAlive = Get-Process -Id $script:StartedGuiPid -ErrorAction SilentlyContinue
+    }
+    $simAlive = $null
+    if ($null -ne $script:StartedSimPid) {
+      $simAlive = Get-Process -Id $script:StartedSimPid -ErrorAction SilentlyContinue
+    }
 
     if ($null -eq $guiAlive -and -not $guiExitWarned) {
       Write-Dev 'WARNING: GUI exited. Simulation left running (independent lifecycle).'
