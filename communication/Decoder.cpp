@@ -19,6 +19,7 @@ bool isEmptyCommandId(uint8_t message_id)
     case MessageId::CmdResume:
     case MessageId::CmdStart:
     case MessageId::CmdClearFault:
+    case MessageId::CmdHome:
     case MessageId::CmdRequestStatus:
         return true;
     default:
@@ -43,6 +44,7 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdResume:
     case MessageId::CmdStart:
     case MessageId::CmdClearFault:
+    case MessageId::CmdHome:
     case MessageId::CmdMoveTo:
     case MessageId::CmdLoadProgram:
     case MessageId::CmdSetSpreader:

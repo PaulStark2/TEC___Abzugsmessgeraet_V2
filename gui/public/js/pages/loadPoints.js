@@ -1,7 +1,7 @@
 'use strict';
 
 import { navigate } from '../router.js';
-import { uploadProgram } from '../api.js';
+import { uploadProgram, fetchCurrentProgram, deleteCurrentProgram, fetchProcedureStatus } from '../api.js';
 
 function escapeHtml(str) {
   return String(str)
@@ -34,6 +34,59 @@ function renderErrorList(errors) {
   `;
 }
 
+function renderProgramSummary(summary) {
+  const points = summary.testPoints || summary.pointsPreview || [];
+  const count = summary.count ?? points.length;
+
+  return `
+    <div class="success-card">
+      <h3>Erfolgreich geladen</h3>
+      <p class="placeholder-note">
+        Prüfprogramm: <b>${escapeHtml(summary.programName ?? '—')}</b><br/>
+        Version: <b>${escapeHtml(summary.version)}</b><br/>
+        Punkte: <b>${escapeHtml(count)}</b>
+      </p>
+      <p class="placeholder-note">
+        X-Bereich: ${escapeHtml(summary.xRange.min)} … ${escapeHtml(summary.xRange.max)}<br/>
+        Y-Bereich: ${escapeHtml(summary.yRange.min)} … ${escapeHtml(summary.yRange.max)}<br/>
+        Z-Bereich: ${escapeHtml(summary.zRange.min)} … ${escapeHtml(summary.zRange.max)}
+      </p>
+
+      <h4>Geladene Prüfstellen (${count})</h4>
+      ${
+        points.length
+          ? `
+        <div class="program-table-scroll">
+          <table class="program-table">
+            <thead>
+              <tr>
+                <th>#</th><th>Name</th><th>Seq</th><th>X</th><th>Y</th><th>Z</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${points
+                .map(
+                  (p, idx) => `
+                <tr>
+                  <td>${idx + 1}</td>
+                  <td>${escapeHtml(p.name)}</td>
+                  <td>${p.sequenceNumber}</td>
+                  <td>${formatNumber(p.x)}</td>
+                  <td>${formatNumber(p.y)}</td>
+                  <td>${formatNumber(p.z)}</td>
+                </tr>`
+                )
+                .join('')}
+            </tbody>
+          </table>
+        </div>
+      `
+          : ''
+      }
+    </div>
+  `;
+}
+
 export function renderLoadPoints(container) {
   container.innerHTML = `
     <section class="panel page-panel">
@@ -49,6 +102,7 @@ export function renderLoadPoints(container) {
         </label>
         <div class="control-actions">
           <button type="button" id="btn-upload-program">Upload / Laden</button>
+          <button type="button" id="btn-delete-program" disabled>Prüfstellen löschen</button>
         </div>
         <p id="upload-status" class="command-feedback" aria-live="polite"></p>
       </div>
@@ -68,10 +122,42 @@ export function renderLoadPoints(container) {
   const statusEl = container.querySelector('#upload-status');
   const summaryRoot = container.querySelector('#program-summary-root');
   const uploadBtn = container.querySelector('#btn-upload-program');
+  const deleteBtn = container.querySelector('#btn-delete-program');
 
   function setStatus(text, isError) {
     statusEl.textContent = text || '';
     statusEl.classList.toggle('command-feedback--error', Boolean(isError));
+  }
+
+  async function refreshDeleteButton() {
+    const [programResult, procedureResult] = await Promise.all([
+      fetchCurrentProgram(),
+      fetchProcedureStatus(),
+    ]);
+    const hasProgram = programResult.ok && programResult.current;
+    const procState = procedureResult.status?.state;
+    const procActive =
+      procState === 'running' || procState === 'paused' || procState === 'unavailable';
+    deleteBtn.disabled = !hasProgram || procActive;
+  }
+
+  async function onDeleteProgram() {
+    setStatus('Prüfstellen werden gelöscht…', false);
+    try {
+      const result = await deleteCurrentProgram();
+      if (!result.ok) {
+        setStatus(result.error || 'Löschen fehlgeschlagen', true);
+        await refreshDeleteButton();
+        return;
+      }
+      summaryRoot.innerHTML = '';
+      fileEl.value = '';
+      setStatus('Geladenes Programm und Auswahl wurden gelöscht.', false);
+      await refreshDeleteButton();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      await refreshDeleteButton();
+    }
   }
 
   async function onUpload() {
@@ -103,63 +189,48 @@ export function renderLoadPoints(container) {
       return;
     }
 
-    const s = result.summary;
     setStatus('Programm erfolgreich geladen.', false);
-    const preview = s.pointsPreview || [];
-
-    summaryRoot.innerHTML = `
-      <div class="success-card">
-        <h3>Erfolgreich geladen</h3>
-        <p class="placeholder-note">
-          Prüfprogramm: <b>${escapeHtml(s.programName ?? '—')}</b><br/>
-          Version: <b>${escapeHtml(s.version)}</b><br/>
-          Punkte: <b>${escapeHtml(s.count)}</b>
-        </p>
-        <p class="placeholder-note">
-          X-Bereich: ${escapeHtml(s.xRange.min)} … ${escapeHtml(s.xRange.max)}<br/>
-          Y-Bereich: ${escapeHtml(s.yRange.min)} … ${escapeHtml(s.yRange.max)}<br/>
-          Z-Bereich: ${escapeHtml(s.zRange.min)} … ${escapeHtml(s.zRange.max)}
-        </p>
-
-        <h4>Vorschau (erste ${preview.length} Punkte)</h4>
-        ${
-          preview.length
-            ? `
-          <table class="program-table">
-            <thead>
-              <tr>
-                <th>#</th><th>Name</th><th>Seq</th><th>X</th><th>Y</th><th>Z</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${preview
-                .map(
-                  (p, idx) => `
-                <tr>
-                  <td>${idx + 1}</td>
-                  <td>${escapeHtml(p.name)}</td>
-                  <td>${p.sequenceNumber}</td>
-                  <td>${formatNumber(p.x)}</td>
-                  <td>${formatNumber(p.y)}</td>
-                  <td>${formatNumber(p.z)}</td>
-                </tr>`
-                )
-                .join('')}
-            </tbody>
-          </table>
-        `
-            : ''
-        }
-      </div>
-    `;
+    summaryRoot.innerHTML = renderProgramSummary(result.summary);
+    await refreshDeleteButton();
   }
 
   uploadBtn.addEventListener('click', () => {
     onUpload().catch((err) => setStatus(err.message || String(err), true));
   });
 
+  deleteBtn.addEventListener('click', () => {
+    onDeleteProgram().catch((err) => setStatus(err.message || String(err), true));
+  });
+
+  fetchCurrentProgram()
+    .then((programResult) => {
+      if (programResult.ok && programResult.current) {
+        const points = programResult.current.testPoints || [];
+        summaryRoot.innerHTML = renderProgramSummary({
+          programName: programResult.current.meta?.programName,
+          version: programResult.current.meta?.version,
+          count: points.length,
+          testPoints: points,
+          xRange: {
+            min: Math.min(...points.map((p) => p.x)),
+            max: Math.max(...points.map((p) => p.x)),
+          },
+          yRange: {
+            min: Math.min(...points.map((p) => p.y)),
+            max: Math.max(...points.map((p) => p.y)),
+          },
+          zRange: {
+            min: Math.min(...points.map((p) => p.z)),
+            max: Math.max(...points.map((p) => p.z)),
+          },
+        });
+      }
+      return refreshDeleteButton();
+    })
+    .catch(() => refreshDeleteButton());
+
   return () => {
     uploadBtn.onclick = null;
+    deleteBtn.onclick = null;
   };
 }
-

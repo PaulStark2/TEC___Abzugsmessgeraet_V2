@@ -53,6 +53,9 @@ struct StatusReportPayload
     uint8_t fixture_extended;
     uint8_t current_point_index; // kNoCurrentPointIndex if n/a
     uint8_t program_point_count;
+    uint8_t homing_state; // ProtocolHomingState
+    uint8_t blocked_directions; // same bit order as limits
+    uint8_t flags; // kStatusFlagIsHomed, kStatusFlagLimitWarning
 };
 
 struct ProgramSummaryPayload

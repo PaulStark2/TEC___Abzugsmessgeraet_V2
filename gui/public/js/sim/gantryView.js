@@ -81,16 +81,25 @@ export function createGantryView(canvas, geometry = {}) {
   const carriageGroup = new THREE.Group();
   const columnGroup = new THREE.Group();
   const limitGroup = new THREE.Group();
+  const testPointGroup = new THREE.Group();
+  const plannedTrajectoryGroup = new THREE.Group();
+  const traveledTrajectoryGroup = new THREE.Group();
 
   scene.add(staticGroup);
   scene.add(bridgeGroup);
   scene.add(limitGroup);
+  scene.add(testPointGroup);
+  scene.add(plannedTrajectoryGroup);
+  scene.add(traveledTrajectoryGroup);
   bridgeGroup.add(carriageGroup);
   carriageGroup.add(columnGroup);
 
   let config = { ...DEFAULT_GEOMETRY, ...geometry };
   const pose = { x: 0, y: 0, z: 0 };
   let running = true;
+  let showLimitMarkers = true;
+  let showTrajectory = true;
+  let storedLimits = null;
 
   function clearGroup(group) {
     for (const child of [...group.children]) {
@@ -252,59 +261,81 @@ export function createGantryView(canvas, geometry = {}) {
       resetCamera();
     },
 
-    /** Show the configured limit switch trip planes. */
+    /** Show the configured limit switch trip planes (6 positions). */
     setLimits(limits) {
-      clearGroup(limitGroup);
-      if (!limits) {
+      storedLimits = limits;
+      rebuildLimitMarkers();
+    },
+
+    setShowLimitMarkers(visible) {
+      showLimitMarkers = Boolean(visible);
+      limitGroup.visible = showLimitMarkers;
+    },
+
+    setShowTrajectory(visible) {
+      showTrajectory = Boolean(visible);
+      plannedTrajectoryGroup.visible = showTrajectory;
+      traveledTrajectoryGroup.visible = showTrajectory;
+    },
+
+    setTestPoints(points) {
+      clearGroup(testPointGroup);
+      if (!Array.isArray(points)) {
         return;
       }
-      const { sizeX, sizeY, sizeZ } = config;
-      // Faint markers only: they must not hide the mechanics.
-      const material = () =>
-        new THREE.MeshBasicMaterial({
-          color: COLORS.limit,
-          transparent: true,
-          opacity: 0.07,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-
-      const addPlane = (width, height, position, rotation) => {
-        const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material());
-        plane.position.copy(position);
-        if (rotation) {
-          plane.rotation.copy(rotation);
+      for (const point of points) {
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
+          continue;
         }
-        limitGroup.add(plane);
+        const sphere = new THREE.Mesh(
+          new THREE.SphereGeometry(config.profile * 0.35, 12, 12),
+          new THREE.MeshStandardMaterial({ color: 0x66bb6a, emissive: 0x224422 })
+        );
+        sphere.position.set(point.x, point.y, point.z);
+        testPointGroup.add(sphere);
+      }
+    },
 
-        const outline = new THREE.LineSegments(
-          new THREE.EdgesGeometry(plane.geometry),
-          new THREE.LineBasicMaterial({ color: COLORS.limit, transparent: true, opacity: 0.5 })
-        );
-        outline.position.copy(plane.position);
-        outline.rotation.copy(plane.rotation);
-        limitGroup.add(outline);
-      };
+    setPlannedTrajectory(points) {
+      clearGroup(plannedTrajectoryGroup);
+      if (!showTrajectory || !Array.isArray(points) || points.length < 2) {
+        return;
+      }
+      const verts = [];
+      for (const p of points) {
+        verts.push(p.x, p.y, p.z);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+      const line = new THREE.Line(
+        geometry,
+        new THREE.LineDashedMaterial({ color: 0x90caf9, dashSize: 2, gapSize: 1 })
+      );
+      line.computeLineDistances();
+      plannedTrajectoryGroup.add(line);
+    },
 
-      if (Number.isFinite(limits.xMax)) {
-        addPlane(
-          sizeY,
-          sizeZ,
-          new THREE.Vector3(limits.xMax, sizeY / 2, sizeZ / 2),
-          new THREE.Euler(0, Math.PI / 2, 0)
-        );
+    setTraveledTrajectory(completedPoints, currentPose) {
+      clearGroup(traveledTrajectoryGroup);
+      if (!showTrajectory) {
+        return;
       }
-      if (Number.isFinite(limits.yMax)) {
-        addPlane(
-          sizeX,
-          sizeZ,
-          new THREE.Vector3(sizeX / 2, limits.yMax, sizeZ / 2),
-          new THREE.Euler(Math.PI / 2, 0, 0)
-        );
+      const path = [...(completedPoints || [])];
+      if (currentPose && Number.isFinite(currentPose.x)) {
+        path.push(currentPose);
       }
-      if (Number.isFinite(limits.zMax)) {
-        addPlane(sizeX, sizeY, new THREE.Vector3(sizeX / 2, sizeY / 2, limits.zMax), null);
+      if (path.length < 2) {
+        return;
       }
+      const verts = [];
+      for (const p of path) {
+        verts.push(p.x, p.y, p.z);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+      traveledTrajectoryGroup.add(
+        new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x43a047 }))
+      );
     },
 
     resetCamera,
@@ -317,4 +348,57 @@ export function createGantryView(canvas, geometry = {}) {
       renderer.dispose();
     },
   };
+
+  function rebuildLimitMarkers() {
+    clearGroup(limitGroup);
+    limitGroup.visible = showLimitMarkers;
+    const limits = storedLimits;
+    if (!limits) {
+      return;
+    }
+    const { sizeX, sizeY, sizeZ } = config;
+    const material = () =>
+      new THREE.MeshBasicMaterial({
+        color: COLORS.limit,
+        transparent: true,
+        opacity: 0.07,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+
+    const addPlane = (width, height, position, rotation) => {
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material());
+      plane.position.copy(position);
+      if (rotation) {
+        plane.rotation.copy(rotation);
+      }
+      limitGroup.add(plane);
+      const outline = new THREE.LineSegments(
+        new THREE.EdgesGeometry(plane.geometry),
+        new THREE.LineBasicMaterial({ color: COLORS.limit, transparent: true, opacity: 0.5 })
+      );
+      outline.position.copy(plane.position);
+      outline.rotation.copy(plane.rotation);
+      limitGroup.add(outline);
+    };
+
+    if (Number.isFinite(limits.xMin)) {
+      addPlane(sizeY, sizeZ, new THREE.Vector3(limits.xMin, sizeY / 2, sizeZ / 2), new THREE.Euler(0, Math.PI / 2, 0));
+    }
+    if (Number.isFinite(limits.xMax)) {
+      addPlane(sizeY, sizeZ, new THREE.Vector3(limits.xMax, sizeY / 2, sizeZ / 2), new THREE.Euler(0, Math.PI / 2, 0));
+    }
+    if (Number.isFinite(limits.yMin)) {
+      addPlane(sizeX, sizeZ, new THREE.Vector3(sizeX / 2, limits.yMin, sizeZ / 2), new THREE.Euler(Math.PI / 2, 0, 0));
+    }
+    if (Number.isFinite(limits.yMax)) {
+      addPlane(sizeX, sizeZ, new THREE.Vector3(sizeX / 2, limits.yMax, sizeZ / 2), new THREE.Euler(Math.PI / 2, 0, 0));
+    }
+    if (Number.isFinite(limits.zMin)) {
+      addPlane(sizeX, sizeY, new THREE.Vector3(sizeX / 2, sizeY / 2, limits.zMin), null);
+    }
+    if (Number.isFinite(limits.zMax)) {
+      addPlane(sizeX, sizeY, new THREE.Vector3(sizeX / 2, sizeY / 2, limits.zMax), null);
+    }
+  }
 }

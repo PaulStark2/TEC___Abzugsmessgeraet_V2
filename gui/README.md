@@ -274,8 +274,8 @@ Navigation:
 | `#procedure` | Prüf-/Alterungsprozedur (G8) |
 | `#results` | Prüfergebnisse (G9) |
 | `#manual` | Handmodus (G3 + G7) |
-| `#plate` | Bauplatte wechseln (Stub G10) |
-| `#calibrate` | Kalibrieren (Stub) |
+| `#plate` | Bauplatte wechseln (Stub G11) |
+| `#calibrate` | Kalibrieren (Stub G12) |
 
 Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss laufen).
 
@@ -318,6 +318,27 @@ Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss l
 - `GET /api/results/current`
 - Mock: volle simulierte Zeilen; Protocol: nur beobachtete Controller-Daten (`dataCompleteness: partial`)
 - Test: `g9_results_smoke.js`
+
+### G10 — GUI-Verbesserungen
+
+HMI-Nacharbeit vor der nächsten größeren Prüfprozedur-Arbeit. Keine Controller-Logik im Browser.
+
+- Fortschritt: `pointsDone / totalPoints` (letzter Punkt `n/n`), Abschlussbanner „Prozedur abgeschlossen“
+- `DELETE /api/program/current`: Programm + Auswahl löschen; 409 bei laufender/pausierter Prozedur; Ergebnisse bleiben
+- „Prüfstellen laden“: alle Punkte, scrollbare Tabelle (`Geladene Prüfstellen (N)`)
+- Fault-Banner + Button `Fault zurücksetzen` (`clearFault` / `CmdClearFault`); Mock simuliert keinen erfolgreichen Reset
+- Endanschlag-Warnungen aus `status.limits` (WARNING, nicht FAULT)
+- Homing: Button `HOME`, Status aus Controller (`homingState` / Fallback); keine Sequenz in der GUI
+- Anzeige-Mapping: OFFLINE, IDLE, RUNNING, PAUSED, WARNING, FAULT, HOMING, HOMED, STOPPED (Rohwerte bleiben sichtbar)
+- Test: `npm run smoke:g10`
+
+### G11 — Bauplatte wechseln (offen)
+
+- UI `#plate`: Platzhalter; Spannsystem folgt später
+
+### G12 — Kalibrieren (offen)
+
+- UI `#calibrate`: Platzhalter; Wizard-Gerüst folgt später
 
 ### M15 — Simulations-UI und virtuelle Portalmaschine
 
@@ -367,6 +388,7 @@ Pfad: `/ws/status`
 
 `POST /api/program/upload` — Testprogramm JSON  
 `GET /api/program/current` — aktuelles Programm  
+`DELETE /api/program/current` — Programm und Auswahl löschen (G10; 409 wenn Prozedur läuft/pausiert)  
 `GET /api/program/selection` — Auswahl-Entwurf/bestätigt  
 `PUT /api/program/selection` — `{ "selectedSequenceNumbers": [1,2] }` oder `{ "selectAll": true }`  
 `POST /api/program/selection/confirm` — Auswahl bestätigen (min. 1 Punkt)  
@@ -400,5 +422,5 @@ oder `{ "ok": false, "error": "..." }`.
 
 - Browser ist niemals Autorität über Machine-/Motion-State und integriert keine Pose
 - Mock bleibt für Offline; Sim-Pfad delegiert an Core
-- Später: derselbe HMI-Vertrag hinter `ProtocolMachineClient` (G12) über echtes M12/M13-Protokoll
+- Später: derselbe HMI-Vertrag hinter `ProtocolMachineClient` (G13) über echtes M12/M13-Protokoll
 - Phase-B-HMI ab G4 (Navigation); Fachlogik ab G5+

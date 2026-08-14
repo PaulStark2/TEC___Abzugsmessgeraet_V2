@@ -3,12 +3,14 @@
 import { setupTcpView } from './tcpView.js';
 import { connectStatus, sendCommand } from './api.js';
 import { applyStatus, setConnectionStatus, wireGlobalStop } from './statusBar.js';
+import { wireFaultPanel } from './components/faultPanel.js';
 import { startRouter } from './router.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   setConnectionStatus('GUI läuft — verbinde Live-Status…', false);
   setupTcpView();
   wireGlobalStop();
+  wireFaultPanel();
   startRouter();
 
   connectStatus(

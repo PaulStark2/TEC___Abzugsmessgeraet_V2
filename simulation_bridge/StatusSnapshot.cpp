@@ -58,6 +58,20 @@ tecomm::StatusReportPayload buildStatusReport(const Machine& machine, const Test
 
     status.program_point_count = program_point_count;
 
+    status.homing_state = static_cast<uint8_t>(machine.homingState());
+    status.blocked_directions = machine.blockedDirections();
+
+    uint8_t flags = 0;
+    if (machine.isHomed())
+    {
+        flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagIsHomed);
+    }
+    if (machine.limitWarningActive())
+    {
+        flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagLimitWarning);
+    }
+    status.flags = flags;
+
     if (executor.processState() == ProcessState::Running)
     {
         const std::size_t idx = executor.currentIndex();

@@ -17,7 +17,7 @@ const MOVE_TO_PAYLOAD_WIRE_SIZE = 12;
 const BOOL_PAYLOAD_WIRE_SIZE = 1;
 const ACK_PAYLOAD_WIRE_SIZE = 2;
 const NACK_PAYLOAD_WIRE_SIZE = 3;
-const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 35;
+const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 38;
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
 
@@ -30,6 +30,7 @@ const MessageId = Object.freeze({
   CmdResume: 0x12,
   CmdStart: 0x13,
   CmdClearFault: 0x14,
+  CmdHome: 0x15,
   CmdMoveTo: 0x20,
   CmdLoadProgram: 0x30,
   CmdSetSpreader: 0x40,
@@ -47,6 +48,21 @@ const MachineState = Object.freeze({
   Paused: 2,
   Stopped: 3,
   Fault: 4,
+  Homing: 5,
+});
+
+const HomingState = Object.freeze({
+  None: 0,
+  HomingZ: 1,
+  HomingX: 2,
+  HomingY: 3,
+  Homed: 4,
+  HomingError: 5,
+});
+
+const StatusFlag = Object.freeze({
+  IsHomed: 0,
+  LimitWarning: 1,
 });
 
 const MotionState = Object.freeze({
@@ -62,7 +78,8 @@ const ProcessState = Object.freeze({
   Aborted: 3,
 });
 
-const MACHINE_STATE_NAMES = Object.freeze(['Idle', 'Active', 'Paused', 'Stopped', 'Fault']);
+const MACHINE_STATE_NAMES = Object.freeze(['Idle', 'Active', 'Paused', 'Stopped', 'Fault', 'Homing']);
+const HOMING_STATE_NAMES = Object.freeze(['None', 'HomingZ', 'HomingX', 'HomingY', 'Homed', 'HomingError']);
 const MOTION_STATE_NAMES = Object.freeze(['Idle', 'Moving', 'AtTarget']);
 const PROCESS_STATE_NAMES = Object.freeze(['Idle', 'Running', 'Completed', 'Aborted']);
 
@@ -111,6 +128,10 @@ function machineStateName(ordinal) {
   return MACHINE_STATE_NAMES[ordinal] || 'Unknown';
 }
 
+function homingStateName(ordinal) {
+  return HOMING_STATE_NAMES[ordinal] || 'Unknown';
+}
+
 function motionStateName(ordinal) {
   return MOTION_STATE_NAMES[ordinal] || 'Unknown';
 }
@@ -136,9 +157,12 @@ module.exports = {
   NO_CURRENT_POINT_INDEX,
   MessageId,
   MachineState,
+  HomingState,
+  StatusFlag,
   MotionState,
   ProcessState,
   MACHINE_STATE_NAMES,
+  HOMING_STATE_NAMES,
   MOTION_STATE_NAMES,
   PROCESS_STATE_NAMES,
   AckResultCode,
@@ -147,6 +171,7 @@ module.exports = {
   LimitBit,
   isKnownMessageId,
   machineStateName,
+  homingStateName,
   motionStateName,
   processStateName,
 };

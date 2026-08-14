@@ -156,9 +156,32 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdHome:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.home())
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
+        break;
+    }
+
     case tecomm::MessageId::CmdMoveTo:
     {
         if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.machineState() == MachineState::Homing)
         {
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;

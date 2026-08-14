@@ -11,12 +11,9 @@ const programStore = require('../program/programStore');
 const selectionStore = require('../program/selectionStore');
 const resultsStore = require('../results/resultsStore');
 const procedureStore = require('./procedureStore');
+const { derivePointProgress } = require('./procedureProgress');
 
 const STEP_MS = 150;
-
-function clamp(n, min, max) {
-  return Math.min(max, Math.max(min, n));
-}
 
 function createMockProcedureAdapter(machineClient) {
   let timer = null;
@@ -50,24 +47,36 @@ function createMockProcedureAdapter(machineClient) {
     ];
   }
 
-  function updateProgress(extra = {}) {
+  function buildProgress(procedureState, processState) {
     const totalIterations = params ? params.iterations : 0;
     const totalPoints = points.length;
-    const donePoints = iterationIndex * totalPoints + pointIndex;
-    const totalSteps = Math.max(1, totalIterations * totalPoints);
-    const percent = clamp(Math.round((donePoints / totalSteps) * 100), 0, 100);
+    const derived = derivePointProgress({
+      totalPoints,
+      index0Based: pointIndex,
+      processState: processState || procedureStore.getStatus().processState,
+      procedureState: procedureState || procedureStore.getStatus().state,
+      iterationIndex,
+      totalIterations,
+      pointsPerIteration: totalPoints,
+    });
+    return {
+      currentIteration: Math.min(iterationIndex + 1, totalIterations || 0),
+      totalIterations,
+      currentPointIndex: derived.currentPointIndex,
+      pointsDone: derived.pointsDone,
+      totalPoints: derived.totalPoints,
+      percent: derived.percent,
+      isComplete: derived.isComplete,
+    };
+  }
+
+  function updateProgress(extra = {}) {
     procedureStore.patch({
       backend: 'mock',
       capabilities: capabilities(),
       notes: notes(),
       params,
-      progress: {
-        currentIteration: Math.min(iterationIndex + 1, totalIterations || 0),
-        totalIterations,
-        currentPointIndex: pointIndex,
-        totalPoints,
-        percent: procedureStore.getStatus().state === 'completed' ? 100 : percent,
-      },
+      progress: buildProgress(extra.state, extra.processState),
       ...extra,
     });
   }
@@ -103,13 +112,6 @@ function createMockProcedureAdapter(machineClient) {
       processState: 'Completed',
       completedAt: new Date().toISOString(),
       error: null,
-      progress: {
-        currentIteration: params.iterations,
-        totalIterations: params.iterations,
-        currentPointIndex: points.length,
-        totalPoints: points.length,
-        percent: 100,
-      },
     });
   }
 

@@ -160,7 +160,10 @@ bool encodeStatusReportPayload(const StatusReportPayload& payload, uint8_t* out,
         !writeU8(out, capacity, offset, payload.fixture_extend) ||
         !writeU8(out, capacity, offset, payload.fixture_extended) ||
         !writeU8(out, capacity, offset, payload.current_point_index) ||
-        !writeU8(out, capacity, offset, payload.program_point_count))
+        !writeU8(out, capacity, offset, payload.program_point_count) ||
+        !writeU8(out, capacity, offset, payload.homing_state) ||
+        !writeU8(out, capacity, offset, payload.blocked_directions) ||
+        !writeU8(out, capacity, offset, payload.flags))
     {
         return false;
     }
@@ -188,7 +191,10 @@ bool decodeStatusReportPayload(const uint8_t* data, std::size_t length, StatusRe
         !readU8(data, length, offset, out.fixture_extend) ||
         !readU8(data, length, offset, out.fixture_extended) ||
         !readU8(data, length, offset, out.current_point_index) ||
-        !readU8(data, length, offset, out.program_point_count))
+        !readU8(data, length, offset, out.program_point_count) ||
+        !readU8(data, length, offset, out.homing_state) ||
+        !readU8(data, length, offset, out.blocked_directions) ||
+        !readU8(data, length, offset, out.flags))
     {
         return false;
     }

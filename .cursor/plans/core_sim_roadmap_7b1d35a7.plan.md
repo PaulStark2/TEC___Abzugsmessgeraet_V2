@@ -56,8 +56,11 @@ todos:
   - id: m15-simulation-ui
     content: "M15: Simulation UI + virtual outside world (3D gantry, plant channel)"
     status: completed
-  - id: m16-stm32
-    content: "M16: STM32 firmware hosts Core (parallel to GUI path)"
+  - id: m16-limits-homing
+    content: "M16: Soft directional limits, homing Z+→X+→Y+, M12 status extension, SimPlant 6 limits"
+    status: completed
+  - id: m17-stm32
+    content: "M17: STM32 firmware hosts Core (parallel to GUI path)"
     status: pending
 isProject: false
 ---
@@ -89,9 +92,10 @@ No dedicated `ForceSensor` class — force is a field on `HostInputs`.
 
 ## State layers (do not mix)
 
-- **MachineState** — Idle, Active, Paused, Stopped, Fault (operational/safety; no `Moving`)
+- **MachineState** — Idle, Active, Paused, Stopped, Fault, Homing (operational/safety; no `Moving`)
 - **MotionState** — Idle, Moving, AtTarget (owned by MotionPlanner)
 - **ProcessState** — Idle, Running, Completed, Aborted (owned by TestExecutor)
+- **HomingState** — None, HomingZ, HomingX, HomingY, Homed, HomingError (owned by Machine; M16)
 
 TestExecutor advances when **MotionState == AtTarget**, not when Machine is Idle.
 
@@ -114,17 +118,20 @@ flowchart LR
   M14 --> M141[M14_1 Dev Runtime]
   M141 --> M142[M14_2 Architecture]
   M142 --> M15[M15 Simulation UI]
-  M142 --> M16[M16 STM32]
+  M15 --> M16[M16 Limits Homing]
   M12 --> M16
+  M11 --> M16
+  M16 --> M17[M17 STM32]
+  M12 --> M17
 ```
 
 
 
 GUI path: M12 → M13 → M14 (formal protocol). **M14.1** hardens local dev start/stop; **M14.2** verifies and documents GUI/Core/Simulation separation with independent runtime lifecycles. **M8.5 / G3.5** is an early interactive gate using temporary TCP/JSON (pre-protocol), not a substitute for M12/M13.
 
-**M15** adds the standalone simulation UI and the virtual outside world (sensors in the C++ host), without touching M12 or Core control logic.
+**M15** adds the standalone simulation UI and the virtual outside world (sensors in the C++ host). **M16** refines Core limit reaction (directional soft block, no global Fault), adds homing Z+→X+→Y+, extends M12 StatusReport, and gives SimPlant all six limit switches.
 
-STM32 path: M12 → M16 (parallel; does not block GUI).
+STM32 path: M12 → **M17** (parallel; does not block GUI). Previously numbered M16, then M15; renumbered because M15 is the simulation UI and M16 is limits/homing.
 
 ---
 
@@ -425,7 +432,7 @@ STM32 path: M12 → M16 (parallel; does not block GUI).
 
 - Software STOP (command) remains available
 - E-Stop input forces immediate safe halt even if a test is running
-- Limit hit → Fault/Stop
+- Limit hit → Fault/Stop (M11 baseline; **M16** replaces this with per-direction soft blocking, no global Fault)
 - Pneumatic state readable after command
 
 **How to test:** Inject e_stop mid-move; drive past soft limit; command pneumatic; assert states.
@@ -602,7 +609,7 @@ STM32 path: M12 → M16 (parallel; does not block GUI).
 **Expected behavior:**
 
 - Pose comes only from `StatusReport` → WebSocket → `gantryView.setPose()`
-- Reaching a configured max limit sets the sensor HIGH; the **Core** decides the reaction (latched `Fault`)
+- Reaching a configured max limit sets the sensor HIGH; the **Core** decides the reaction (M15: latched `Fault`; superseded in **M16** by directional soft blocking)
 - Probe button produces a short `probeTriggered` pulse; Core only accepts the signal
 - `fx = fy = fz = 0`; Core force-control code untouched
 - Simulation host stopped: both UIs stay open, pose frozen, commands rejected, plant requests report a connection error
@@ -618,21 +625,60 @@ STM32 path: M12 → M16 (parallel; does not block GUI).
 
 ---
 
-## Milestone 16 — STM32 firmware host (parallel path)
+## Milestone 16 — Soft limits, homing, fault reset (Core + Sim + M12)
 
-> Previously numbered M15; renumbered because M15 is the simulation UI milestone. The STM32 path still depends only on M12 and is not blocked by M15.
+**Objective:** End stops must not freeze the whole machine. An active limit blocks **only** motion into that direction on that axis. Motion away from the stop and motion of other axes stay possible. Homing uses an explicit sequence Z+ → X+ → Y+. The M12 status/command surface is defined and tested **before** Maschinen-GUI (Agent 2) consumes it.
 
-**Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12.
+**Scope:** Core limit/homing logic, M12 StatusReport 35→38 bytes + `CmdHome`, SimPlant six limits, Simulations-UI plant controls. No STM32. No Maschinen-GUI assumptions about byte offsets or enum values.
+
+**Files/modules:**
+
+- `core/Types.hpp`, `core/Machine.*` — `HomingState`, `MachineState::Homing`, `applyEffectiveTargets()`, `home()`, `blockedDirections()`, `limitWarningActive()`
+- `communication/` — `CmdHome = 0x15`, StatusReport wire size 38 (`homing_state`, `blocked_directions`, `flags`)
+- `simulation_bridge/StatusSnapshot.cpp`, `CommandDispatcher.cpp` — status mapping; `CmdHome` → `machine.home()`; reject `CmdMoveTo` while Homing
+- `simulation_plant/SimPlant.*`, `PlantCommandCodec.*` — six trip points (`xMin`/`xMax`/`yMin`/`yMax`/`zMin`/`zMax`)
+- `gui/server/protocol/` — JS codec/types/client mirror (`clearFault`, `home`, 38-byte status)
+- `gui/public/simulation.html`, `js/sim/*`, `css/simulation.css` — six limit inputs, E-Stop, homing/warning/homed readouts, trajectory/limit toggles
+- `docs/M16_Agent2_Interface.md` — protocol contract for Agent 2
+
+**Dependencies:** Milestones 11, 12, and 15.
+
+**Expected behavior:**
+
+- Blocking is recomputed each tick from current limit flags + current stored target. Planner targets may be clamped; **`stored_target_*` is never overwritten**, so a later command away from the stop still works.
+- `Fault` remains reserved for E-Stop and Fz safety. Limits set `limitWarning` / `blockedDirections` only.
+- Homing phases: Z+ → X+ → Y+ toward the configured SimPlant limits. Reaching the phase limit **completes** that phase (success); the axis is not commanded further into the stop; the next phase starts immediately.
+- `STOP` during homing → `HomingError` + `Stopped`. E-Stop during homing → `Fault`.
+- `clearFault` / `CmdClearFault` (0x14) is exposed on the Node command API; Core still rejects reset while E-Stop or |Fz| ≥ threshold is active.
+- Agent 2 uses only the JS helpers in `gui/server/protocol/` (`statusReportToGuiStatus`, command IDs). No GUI-side guesses of offsets or enum integers.
+
+**How to test:** CTest (`limit_blocking_tests`, `homing_tests`, `safety_tests`, `protocol_tests`, `simplant_tests`, `plantchannel_tests`, `bridge_*`); `npm run test:protocol`; `npm run smoke:m15` (test 6: sensor HIGH, X+ blocked, **no** Fault).
+
+**Definition of done:**
+
+- No global motion freeze on a limit; reverse and other-axis motion remain possible
+- Homing sequence and phase-complete-on-limit behavior covered by `homing_tests`
+- M12 38-byte StatusReport and `CmdHome` covered by C++ and JS codec tests **before** Maschinen-GUI work
+- Interface documented in `docs/M16_Agent2_Interface.md`
+- M14.2 lifecycles, M15 force-zero plant (`fx=fy=fz=0`), and `simulation_interactive` unchanged
+
+---
+
+## Milestone 17 — STM32 firmware host (parallel path)
+
+> Previously numbered M16, then M15. Renumbered because M15 is the simulation UI and M16 is limits/homing. The STM32 path still depends only on M12 and is not blocked by M15/M16.
+
+**Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12 (including the M16 StatusReport / `CmdHome` fields).
 
 **Files/modules:**
 
 - `firmware/` / `stm32/` — timer tick → Core `tick`; map HAL sensors/actuators ↔ HostInputs/HostOutputs; protocol over UART
 
-**Dependencies:** Milestone 12 + Core behavior through M11.
+**Dependencies:** Milestone 12 + Core behavior through M11/M16.
 
-**Expected behavior:** Same state progression as Sim for a demo program (step outputs may start stubbed).
+**Expected behavior:** Same state progression as Sim for a demo program (step outputs may start stubbed). Limit switches on hardware use the same directional soft-block semantics as M16.
 
-**How to test:** Compare UART status stream to known Sim trace; E-Stop and STOP on target.
+**How to test:** Compare UART status stream to known Sim trace; E-Stop and STOP on target; homing against real +limits.
 
 **Definition of done:**
 

@@ -32,17 +32,20 @@ todos:
   - id: g9-results
     content: "G9: Prüfergebnisse"
     status: pending
-  - id: g10-plate
-    content: "G10: Bauplatte wechseln"
+  - id: g10-improvements
+    content: "G10: GUI-Verbesserungen (Fortschritt, Programm löschen, Scroll-Liste, Fault/Homing/Endanschlag-Anzeige)"
+    status: completed
+  - id: g11-plate
+    content: "G11: Bauplatte wechseln"
     status: pending
-  - id: g11-calibrate
-    content: "G11: Kalibrieren (Wizard-Gerüst)"
+  - id: g12-calibrate
+    content: "G12: Kalibrieren (Wizard-Gerüst)"
     status: pending
-  - id: g12-protocol
-    content: "G12: ProtocolMachineClient (nach Core M12/M13)"
+  - id: g13-protocol
+    content: "G13: ProtocolMachineClient (nach Core M12/M13)"
     status: pending
-  - id: g13-pi-deploy
-    content: "G13: Deployment Raspberry Pi"
+  - id: g14-pi-deploy
+    content: "G14: Deployment Raspberry Pi"
     status: pending
   - id: no-core-touch
     content: "Grenzen: nur gui/; kein core/tests/simulation/CMake/UART"
@@ -73,18 +76,19 @@ flowchart LR
     G7[G7_Handmodus]
     G8[G8_Prozedur]
     G9[G9_Ergebnisse]
-    G10[G10_Bauplatte]
-    G11[G11_Kalibrierung]
+    G10[G10_GUI_Verbesserungen]
+    G11[G11_Bauplatte]
+    G12[G12_Kalibrierung]
     G4 --> G5 --> G6
     G4 --> G7
-    G6 --> G8 --> G9
-    G4 --> G10
+    G6 --> G8 --> G9 --> G10
     G4 --> G11
+    G4 --> G12
   end
   phaseA -->|"Infrastruktur_stabil"| G4
-  G3 --> G12[G12_Protocol_Client]
-  G8 --> G12
-  G12 --> G13[G13_Pi_Deploy]
+  G3 --> G13[G13_Protocol_Client]
+  G8 --> G13
+  G13 --> G14[G14_Pi_Deploy]
 ```
 
 
@@ -108,7 +112,7 @@ MachineClient  (Vertrag / Factory)
     ↓
 MockMachineClient          ← Phase A und B (früh)
     … später …
-ProtocolMachineClient      ← ab G12
+ProtocolMachineClient      ← ab G13
     ↓
 Simulation / STM32
 ```
@@ -136,7 +140,7 @@ Simulation / STM32
 - Nur `gui/` und ggf. GUI-Dokumentation
 - **Keine** Änderungen an `core/`, `tests/`, `simulation/`, CMake
 - Keine GUI-Logik in C++
-- Keine echte UART-Kommunikation in G1–G11
+- Keine echte UART-Kommunikation in G1–G12
 - Keine eigene Motion-/Machine-State-Autorität im Browser
 
 ### Hinweis Raspberry Pi (Doku)
@@ -149,9 +153,9 @@ Simulation / STM32
 | GUI    | Core-Bezug                                                                                                                          |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | G1–G3  | Fachlich angelehnt an **M5** (`MachineState`, `MotionState`, Pose, `moveTo`/`pause`/`resume`/`stop`) — **ohne** Core-Code zu nutzen |
-| G4–G11 | Parallel möglich; Fachfunktionen oft erst sinnvoll mit späteren Core-Milestones (M6+), bis dahin Mock                               |
-| G12    | Braucht Core **M12** (Protokoll) + **M13** (Sim-Bridge); entspricht grob Core-**M14**-Absicht                                       |
-| G13    | Nach G12; Pi-Hardware                                                                                                               |
+| G4–G12 | Parallel möglich; Fachfunktionen oft erst sinnvoll mit späteren Core-Milestones (M6+), bis dahin Mock                               |
+| G13    | Braucht Core **M12** (Protokoll) + **M13** (Sim-Bridge); entspricht grob Core-**M14**-Absicht                                       |
+| G14    | Nach G13; Pi-Hardware                                                                                                               |
 
 
 ---
@@ -306,7 +310,27 @@ Voraussetzung: Phase-A-Gate (G3) erfüllt.
 
 ---
 
-### G10 — Bauplatte wechseln
+### G10 — GUI-Verbesserungen (HMI vor nächster Prozedur-Arbeit)
+
+**Ziel:** Bestehende Maschinen-GUI nach G8/G9 gezielt verbessern, ohne Controller-Logik in den Browser zu verlagern.
+
+**Umfang:**
+
+- Fortschrittsanzeige der Prüf-/Alterungsprozedur: `pointsDone / totalPoints` (z. B. `5/5`), Abschlusszustand „Prozedur abgeschlossen“
+- Geladene Prüfstellen löschen: `DELETE /api/program/current` (Server verhindert Löschen bei laufender/pausierter Prozedur; Ergebnisse bleiben)
+- „Prüfstellen laden“: beliebige Punktanzahl, scrollbare Tabelle
+- Fault-Reset-Button (sendet `clearFault` / `CmdClearFault`; keine GUI-State-Machine)
+- Endanschlag-Warnungen aus Controller-`limits` (WARNING ≠ FAULT)
+- Homing-Button `HOME` + Statusanzeige aus Controllerfeldern (keine Sequenz in der GUI)
+- Anzeige-Mapping der Controllerzustände (OFFLINE, IDLE, RUNNING, PAUSED, WARNING, FAULT, HOMING, HOMED, STOPPED)
+
+**Nicht-Umfang:** Prüfgeschwindigkeit; eigene M12-Erweiterungen; Core-/Sim-Änderungen; Bauplatte/Kalibrierung.
+
+**DoD:** `npm run smoke:g10`; Fortschritt endet bei `n/n`; Programm löschen im Idle, 409 bei Running/Paused.
+
+---
+
+### G11 — Bauplatte wechseln
 
 **Ziel:** Spannsystem bedienen und zurück.
 
@@ -318,7 +342,7 @@ Voraussetzung: Phase-A-Gate (G3) erfüllt.
 
 ---
 
-### G11 — Kalibrieren
+### G12 — Kalibrieren
 
 **Ziel:** Wizard-Gerüst für beide Kalibrierpfade (Fachdetails später).
 
@@ -332,7 +356,7 @@ Voraussetzung: Phase-A-Gate (G3) erfüllt.
 
 ## Anschluss echte Kommunikation & Pi
 
-### G12 — ProtocolMachineClient
+### G13 — ProtocolMachineClient
 
 **Ziel:** Mock austauschbar durch Protokoll-Client ohne Browser-Umbau.
 
@@ -346,7 +370,7 @@ Voraussetzung: Phase-A-Gate (G3) erfüllt.
 
 ---
 
-### G13 — Deployment Raspberry Pi
+### G14 — Deployment Raspberry Pi
 
 **Ziel:** Betrieb auf Ziel-Pi.
 
@@ -366,7 +390,7 @@ gui/
 │   ├── index.js
 │   ├── machineClient.js          # Vertrag / Factory
 │   ├── mock/mockMachineClient.js
-│   └── protocol/…                # ab G12
+│   └── protocol/…                # ab G13
 └── public/
     ├── index.html
     ├── css/
@@ -393,7 +417,7 @@ gui/
 
 1. Nur **G1** implementieren und abnehmen
 2. Dann **G2**, dann **G3** → Phase-A-Gate
-3. Erst danach **G4**, anschließend G5–G11 nach Priorität (Vorschlag: G5→G6→G7→G8→G9, parallel/danach G10/G11)
-4. **G12** wenn Core M12/M13 bereit; **G13** auf Pi
+3. Erst danach **G4**, anschließend G5–G12 nach Priorität (Vorschlag: G5→G6→G7→G8→G9→G10, parallel/danach G11/G12)
+4. **G13** wenn Core M12/M13 bereit; **G14** auf Pi
 
 **Jetzt:** Plan freigeben — noch keinen Code.

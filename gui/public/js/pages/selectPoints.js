@@ -7,6 +7,8 @@ import {
   updateProgramSelection,
   confirmProgramSelection,
   clearProgramSelection,
+  deleteCurrentProgram,
+  fetchProcedureStatus,
 } from '../api.js';
 
 function escapeHtml(str) {
@@ -89,6 +91,32 @@ export function renderSelectPoints(container) {
     statusEl.classList.toggle('command-feedback--error', Boolean(isError));
   }
 
+  async function wireDeleteProgram(button) {
+    if (!button) {
+      return;
+    }
+    const procedure = await fetchProcedureStatus();
+    const procActive =
+      procedure.status?.state === 'running' ||
+      procedure.status?.state === 'paused' ||
+      procedure.status?.state === 'unavailable';
+    button.disabled = procActive;
+
+    button.addEventListener('click', async () => {
+      try {
+        const result = await deleteCurrentProgram();
+        if (!result.ok) {
+          setStatus(result.error || 'Löschen fehlgeschlagen', true);
+          return;
+        }
+        setStatus('Geladenes Programm und Auswahl wurden gelöscht.', false);
+        navigate('load-points');
+      } catch (err) {
+        setStatus(err.message || String(err), true);
+      }
+    });
+  }
+
   async function refresh() {
     setStatus('Programm wird geladen…', false);
 
@@ -124,6 +152,7 @@ export function renderSelectPoints(container) {
         ${renderConfirmedSummary(selection)}
         <div class="control-actions page-actions">
           <button type="button" id="btn-edit-selection">Auswahl ändern</button>
+          <button type="button" id="btn-delete-program">Prüfstellen löschen</button>
           <button type="button" class="btn-back" data-route="menu">Zurück zum Hauptmenü</button>
         </div>
       `;
@@ -136,6 +165,7 @@ export function renderSelectPoints(container) {
         }
       });
       contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
+      await wireDeleteProgram(contentEl.querySelector('#btn-delete-program'));
       setStatus('Bestätigte Auswahl ist für die Prozedur verfügbar.', false);
       return;
     }
@@ -157,6 +187,7 @@ export function renderSelectPoints(container) {
       <div class="control-actions selection-toolbar">
         <button type="button" id="btn-select-all">Alles auswählen</button>
         <button type="button" id="btn-clear-selection">Auswahl löschen</button>
+        <button type="button" id="btn-delete-program">Prüfstellen löschen</button>
       </div>
 
       <table class="program-table selection-table">
@@ -247,6 +278,7 @@ export function renderSelectPoints(container) {
     });
 
     contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
+    await wireDeleteProgram(contentEl.querySelector('#btn-delete-program'));
     setStatus('', false);
   }
 

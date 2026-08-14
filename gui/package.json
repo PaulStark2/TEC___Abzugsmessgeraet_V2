@@ -19,7 +19,8 @@
     "smoke:m15": "node scripts/m15_simulation_smoke.js",
     "diagnose:g14": "node scripts/g14_diagnose_runtime.js",
     "proof:offline": "node scripts/g14_offline_move_proof.js",
-    "proof:architecture": "node scripts/m14_2_architecture_proof.js"
+    "proof:architecture": "node scripts/m14_2_architecture_proof.js",
+    "smoke:g10": "node scripts/g10_gui_improvements_smoke.js"
   },
   "engines": {
     "node": ">=18"

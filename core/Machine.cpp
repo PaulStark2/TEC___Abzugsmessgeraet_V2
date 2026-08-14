@@ -2,252 +2,517 @@
 
 #include <cmath>
 
-// Construct machine in Idle with deterministic motion parameters. // ctor
-Machine::Machine()
-    : motion_planner_() // create planner
-    , machine_state_(MachineState::Idle) // initial state
-    , default_max_velocity_(10.0f) // defaults for deterministic test motion
-    , default_acceleration_(0.0f) // constant velocity mode
-    , stored_target_x_(0.0f) // init stored pose
-    , stored_target_y_(0.0f) // init stored pose
-    , stored_target_z_(0.0f) // init stored pose
-    , commanded_target_x_(0.0f) // init commanded baseline
-    , commanded_target_y_(0.0f) // init commanded baseline
-    , host_inputs_{} // init POD inputs
-    , host_outputs_{} // init POD outputs
-    , force_params_{} // default M10 parameters
-    , force_phase_(ForceControlPhase::NormalZApproach) // no XY control until slow phase
-    , x_force_correction_active_(false)
-    , y_force_correction_active_(false)
+namespace
 {
-    // Set default motion parameters so moveTo() actually moves. // default motion params
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_); // apply deterministic defaults
+
+bool isBlockedTowardTarget(float position, float target, bool limit_min, bool limit_max)
+{
+    if (limit_min && target < position - kPositionTolerance)
+    {
+        return true;
+    }
+    if (limit_max && target > position + kPositionTolerance)
+    {
+        return true;
+    }
+    return false;
 }
 
-Machine::Machine(const ForceControlParams& params)
-    : motion_planner_() // create planner
-    , machine_state_(MachineState::Idle) // initial state
-    , default_max_velocity_(10.0f) // defaults for deterministic test motion
-    , default_acceleration_(0.0f) // constant velocity mode
-    , stored_target_x_(0.0f) // init stored pose
-    , stored_target_y_(0.0f) // init stored pose
-    , stored_target_z_(0.0f) // init stored pose
-    , commanded_target_x_(0.0f) // init commanded baseline
-    , commanded_target_y_(0.0f) // init commanded baseline
-    , host_inputs_{} // init POD inputs
-    , host_outputs_{} // init POD outputs
-    , force_params_(params) // deterministic M10 params
+} // namespace
+
+Machine::Machine()
+    : motion_planner_()
+    , machine_state_(MachineState::Idle)
+    , default_max_velocity_(10.0f)
+    , default_acceleration_(0.0f)
+    , stored_target_x_(0.0f)
+    , stored_target_y_(0.0f)
+    , stored_target_z_(0.0f)
+    , commanded_target_x_(0.0f)
+    , commanded_target_y_(0.0f)
+    , host_inputs_{}
+    , host_outputs_{}
+    , force_params_{}
     , force_phase_(ForceControlPhase::NormalZApproach)
     , x_force_correction_active_(false)
     , y_force_correction_active_(false)
+    , blocked_directions_(0)
+    , homing_state_(HomingState::None)
+    , is_homed_(false)
 {
-    // Set default motion parameters so moveTo() actually moves. // default motion params
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_); // apply deterministic defaults
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+}
+
+Machine::Machine(const ForceControlParams& params)
+    : motion_planner_()
+    , machine_state_(MachineState::Idle)
+    , default_max_velocity_(10.0f)
+    , default_acceleration_(0.0f)
+    , stored_target_x_(0.0f)
+    , stored_target_y_(0.0f)
+    , stored_target_z_(0.0f)
+    , commanded_target_x_(0.0f)
+    , commanded_target_y_(0.0f)
+    , host_inputs_{}
+    , host_outputs_{}
+    , force_params_(params)
+    , force_phase_(ForceControlPhase::NormalZApproach)
+    , x_force_correction_active_(false)
+    , y_force_correction_active_(false)
+    , blocked_directions_(0)
+    , homing_state_(HomingState::None)
+    , is_homed_(false)
+{
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
 }
 
 MachineState Machine::machineState() const
 {
-    return machine_state_; // return state
+    return machine_state_;
 }
 
 MotionState Machine::motionState() const
 {
-    return motion_planner_.motionState(); // expose planner state only
+    return motion_planner_.motionState();
+}
+
+HomingState Machine::homingState() const
+{
+    return homing_state_;
+}
+
+bool Machine::isHomed() const
+{
+    return is_homed_;
+}
+
+uint8_t Machine::blockedDirections() const
+{
+    return blocked_directions_;
+}
+
+bool Machine::limitWarningActive() const
+{
+    return blocked_directions_ != 0 || activeLimitSwitchMask() != 0;
 }
 
 void Machine::setHostInputs(const HostInputs& inputs)
 {
-    host_inputs_ = inputs; // store snapshot only
+    host_inputs_ = inputs;
 }
 
 const HostInputs& Machine::hostInputs() const
 {
-    return host_inputs_; // return stored snapshot only
+    return host_inputs_;
 }
 
 HostOutputs Machine::hostOutputs() const
 {
-    return host_outputs_; // return outputs snapshot
+    return host_outputs_;
 }
 
 void Machine::setSpreaderExtend(bool extend)
 {
-    // Pneumatic commands are no-op while Fault is latched. // M11 fault guard
     if (machine_state_ == MachineState::Fault)
     {
-        return; // no-op
+        return;
     }
 
-    host_outputs_.spreaderExtend = extend; // command Spreizer
-    updatePneumaticStub(); // deterministic feedback
+    host_outputs_.spreaderExtend = extend;
+    updatePneumaticStub();
 }
 
 void Machine::setFixtureExtend(bool extend)
 {
-    // Pneumatic commands are no-op while Fault is latched. // M11 fault guard
     if (machine_state_ == MachineState::Fault)
     {
-        return; // no-op
+        return;
     }
 
-    host_outputs_.fixtureExtend = extend; // command Bauplattenhalter
-    updatePneumaticStub(); // deterministic feedback
+    host_outputs_.fixtureExtend = extend;
+    updatePneumaticStub();
 }
 
 void Machine::updatePneumaticStub()
 {
-    // Deterministic stub: Extended mirrors Extend immediately. // M11 stub
     host_outputs_.spreaderExtended = host_outputs_.spreaderExtend;
     host_outputs_.fixtureExtended = host_outputs_.fixtureExtend;
 }
 
-bool Machine::isCommandedIntoActiveLimit() const
+uint8_t Machine::activeLimitSwitchMask() const
 {
-    const float pos_x = motion_planner_.x(); // current X
-    const float pos_y = motion_planner_.y(); // current Y
-    const float pos_z = motion_planner_.z(); // current Z
+    uint8_t mask = 0;
+    if (host_inputs_.limitXMin)
+    {
+        mask |= static_cast<uint8_t>(1u << kLimitDirXMin);
+    }
+    if (host_inputs_.limitXMax)
+    {
+        mask |= static_cast<uint8_t>(1u << kLimitDirXMax);
+    }
+    if (host_inputs_.limitYMin)
+    {
+        mask |= static_cast<uint8_t>(1u << kLimitDirYMin);
+    }
+    if (host_inputs_.limitYMax)
+    {
+        mask |= static_cast<uint8_t>(1u << kLimitDirYMax);
+    }
+    if (host_inputs_.limitZMin)
+    {
+        mask |= static_cast<uint8_t>(1u << kLimitDirZMin);
+    }
+    if (host_inputs_.limitZMax)
+    {
+        mask |= static_cast<uint8_t>(1u << kLimitDirZMax);
+    }
+    return mask;
+}
 
-    // Directional limit: fault only when commanding motion toward an active limit. // M11 limits
-    if (host_inputs_.limitXMin && stored_target_x_ < pos_x - kPositionTolerance)
+uint8_t Machine::computeBlockedDirections(float target_x, float target_y, float target_z) const
+{
+    const float pos_x = motion_planner_.x();
+    const float pos_y = motion_planner_.y();
+    const float pos_z = motion_planner_.z();
+
+    uint8_t blocked = 0;
+
+    if (isBlockedTowardTarget(pos_x, target_x, host_inputs_.limitXMin, host_inputs_.limitXMax))
     {
-        return true; // commanding further -X into min limit
+        if (host_inputs_.limitXMin && target_x < pos_x - kPositionTolerance)
+        {
+            blocked |= static_cast<uint8_t>(1u << kLimitDirXMin);
+        }
+        if (host_inputs_.limitXMax && target_x > pos_x + kPositionTolerance)
+        {
+            blocked |= static_cast<uint8_t>(1u << kLimitDirXMax);
+        }
     }
-    if (host_inputs_.limitXMax && stored_target_x_ > pos_x + kPositionTolerance)
+    if (isBlockedTowardTarget(pos_y, target_y, host_inputs_.limitYMin, host_inputs_.limitYMax))
     {
-        return true; // commanding further +X into max limit
+        if (host_inputs_.limitYMin && target_y < pos_y - kPositionTolerance)
+        {
+            blocked |= static_cast<uint8_t>(1u << kLimitDirYMin);
+        }
+        if (host_inputs_.limitYMax && target_y > pos_y + kPositionTolerance)
+        {
+            blocked |= static_cast<uint8_t>(1u << kLimitDirYMax);
+        }
     }
-    if (host_inputs_.limitYMin && stored_target_y_ < pos_y - kPositionTolerance)
+    if (isBlockedTowardTarget(pos_z, target_z, host_inputs_.limitZMin, host_inputs_.limitZMax))
     {
-        return true; // commanding further -Y into min limit
-    }
-    if (host_inputs_.limitYMax && stored_target_y_ > pos_y + kPositionTolerance)
-    {
-        return true; // commanding further +Y into max limit
-    }
-    if (host_inputs_.limitZMin && stored_target_z_ < pos_z - kPositionTolerance)
-    {
-        return true; // commanding further -Z into min limit
-    }
-    if (host_inputs_.limitZMax && stored_target_z_ > pos_z + kPositionTolerance)
-    {
-        return true; // commanding further +Z into max limit
+        if (host_inputs_.limitZMin && target_z < pos_z - kPositionTolerance)
+        {
+            blocked |= static_cast<uint8_t>(1u << kLimitDirZMin);
+        }
+        if (host_inputs_.limitZMax && target_z > pos_z + kPositionTolerance)
+        {
+            blocked |= static_cast<uint8_t>(1u << kLimitDirZMax);
+        }
     }
 
-    return false; // no limit violation
+    return blocked;
+}
+
+void Machine::applyEffectiveTargets(float target_x, float target_y, float target_z)
+{
+    blocked_directions_ = computeBlockedDirections(target_x, target_y, target_z);
+
+    const float pos_x = motion_planner_.x();
+    const float pos_y = motion_planner_.y();
+    const float pos_z = motion_planner_.z();
+
+    float effective_x = target_x;
+    float effective_y = target_y;
+    float effective_z = target_z;
+
+    if ((blocked_directions_ & (1u << kLimitDirXMin)) != 0 ||
+        (blocked_directions_ & (1u << kLimitDirXMax)) != 0)
+    {
+        effective_x = pos_x;
+    }
+    if ((blocked_directions_ & (1u << kLimitDirYMin)) != 0 ||
+        (blocked_directions_ & (1u << kLimitDirYMax)) != 0)
+    {
+        effective_y = pos_y;
+    }
+    if ((blocked_directions_ & (1u << kLimitDirZMin)) != 0 ||
+        (blocked_directions_ & (1u << kLimitDirZMax)) != 0)
+    {
+        effective_z = pos_z;
+    }
+
+    motion_planner_.moveTo(effective_x, effective_y, effective_z);
 }
 
 void Machine::enterSafetyFault()
 {
-    // Safety-Fault stops motion only; pneumatic outputs are never modified here. // M11 safety
-    motion_planner_.stopMotion(); // freeze pose deterministically
-    machine_state_ = MachineState::Fault; // latched safety fault
+    motion_planner_.stopMotion();
+    machine_state_ = MachineState::Fault;
+    if (homing_state_ == HomingState::HomingZ || homing_state_ == HomingState::HomingX ||
+        homing_state_ == HomingState::HomingY)
+    {
+        homing_state_ = HomingState::HomingError;
+    }
 }
 
 void Machine::clearFault()
 {
-    // Fault clears only when latched and e_stop is released. // M11 clear
     if (machine_state_ != MachineState::Fault)
     {
-        return; // no-op
+        return;
     }
     if (host_inputs_.e_stop)
     {
-        return; // e_stop still active
+        return;
+    }
+    const float fz = host_inputs_.force.fz;
+    if (std::fabs(fz) >= force_params_.fz_safety_threshold_N)
+    {
+        return;
     }
 
-    machine_state_ = MachineState::Idle; // clear latched fault; pneumatics unchanged
+    machine_state_ = MachineState::Idle;
 }
 
-void Machine::moveTo(float x, float y, float z)
+bool Machine::home()
 {
-    // moveTo is no-op while Fault is latched. // M11 fault guard
     if (machine_state_ == MachineState::Fault)
     {
-        return; // no-op
+        return false;
     }
 
-    // Store target for possible resume after pause. // store
-    stored_target_x_ = x; // store x
-    stored_target_y_ = y; // store y
-    stored_target_z_ = z; // store z
-    commanded_target_x_ = x; // baseline for max XY correction clamp
-    commanded_target_y_ = y; // baseline for max XY correction clamp
+    is_homed_ = false;
+    homing_state_ = HomingState::HomingZ;
+    machine_state_ = MachineState::Homing;
 
-    // Reset M10 internal phases/hysteresis for the new move. // M10 reset
+    motion_planner_.setMotionParams(kHomingVelocity, default_acceleration_);
+    beginHomingPhase(HomingState::HomingZ);
+    return true;
+}
+
+void Machine::beginHomingPhase(HomingState phase)
+{
+    homing_state_ = phase;
+
+    const float pos_x = motion_planner_.x();
+    const float pos_y = motion_planner_.y();
+    const float pos_z = motion_planner_.z();
+
+    stored_target_x_ = pos_x;
+    stored_target_y_ = pos_y;
+    stored_target_z_ = pos_z;
+    commanded_target_x_ = pos_x;
+    commanded_target_y_ = pos_y;
+
+    switch (phase)
+    {
+    case HomingState::HomingZ:
+        stored_target_z_ = pos_z + kHomingOvershoot;
+        break;
+    case HomingState::HomingX:
+        stored_target_x_ = pos_x + kHomingOvershoot;
+        stored_target_z_ = pos_z;
+        break;
+    case HomingState::HomingY:
+        stored_target_y_ = pos_y + kHomingOvershoot;
+        stored_target_x_ = pos_x;
+        stored_target_z_ = pos_z;
+        break;
+    default:
+        break;
+    }
+
     force_phase_ = ForceControlPhase::NormalZApproach;
     x_force_correction_active_ = false;
     y_force_correction_active_ = false;
 
-    // MotionPlanner::stopMotion() resets Axis velocity to 0, so re-apply defaults. // restore params
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_); // reset deterministic velocity
+    motion_planner_.setMotionParams(kHomingVelocity, default_acceleration_);
+    applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
+}
 
-    // Delegate pose targets to the MotionPlanner only. // delegate
-    motion_planner_.moveTo(x, y, z); // set planner targets
+bool Machine::homingPhaseLimitReached(HomingState phase) const
+{
+    switch (phase)
+    {
+    case HomingState::HomingZ:
+        return host_inputs_.limitZMax;
+    case HomingState::HomingX:
+        return host_inputs_.limitXMax;
+    case HomingState::HomingY:
+        return host_inputs_.limitYMax;
+    default:
+        return false;
+    }
+}
 
-    // If already at target, keep machine Idle, otherwise Active. // set state
-    machine_state_ = (motion_planner_.motionState() == MotionState::AtTarget)
-                           ? MachineState::Idle
-                           : MachineState::Active;
+void Machine::finishHomingSuccess()
+{
+    homing_state_ = HomingState::Homed;
+    is_homed_ = true;
+    machine_state_ = MachineState::Idle;
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.stopMotion();
+    blocked_directions_ = 0;
+}
+
+void Machine::finishHomingError()
+{
+    homing_state_ = HomingState::HomingError;
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.stopMotion();
+}
+
+void Machine::tickHoming(float dt)
+{
+    if (host_inputs_.e_stop)
+    {
+        enterSafetyFault();
+        return;
+    }
+
+    const float fz = host_inputs_.force.fz;
+    if (std::fabs(fz) >= force_params_.fz_safety_threshold_N)
+    {
+        enterSafetyFault();
+        return;
+    }
+
+    if (homingPhaseLimitReached(homing_state_))
+    {
+        motion_planner_.stopMotion();
+
+        switch (homing_state_)
+        {
+        case HomingState::HomingZ:
+            beginHomingPhase(HomingState::HomingX);
+            break;
+        case HomingState::HomingX:
+            beginHomingPhase(HomingState::HomingY);
+            break;
+        case HomingState::HomingY:
+            finishHomingSuccess();
+            return;
+        default:
+            break;
+        }
+    }
+
+    if (machine_state_ != MachineState::Homing)
+    {
+        return;
+    }
+
+    // Hold non-homing axes at current position; drive only the active homing axis toward +limit.
+    const float pos_x = motion_planner_.x();
+    const float pos_y = motion_planner_.y();
+    const float pos_z = motion_planner_.z();
+
+    float tx = pos_x;
+    float ty = pos_y;
+    float tz = pos_z;
+
+    switch (homing_state_)
+    {
+    case HomingState::HomingZ:
+        tz = stored_target_z_;
+        break;
+    case HomingState::HomingX:
+        tx = stored_target_x_;
+        tz = pos_z;
+        break;
+    case HomingState::HomingY:
+        ty = stored_target_y_;
+        tx = pos_x;
+        tz = pos_z;
+        break;
+    default:
+        break;
+    }
+
+    // Homing ignores soft-limit blocking toward the reference; limit reached ends the phase above.
+    blocked_directions_ = 0;
+    motion_planner_.moveTo(tx, ty, tz);
+    motion_planner_.tick(dt);
+}
+
+void Machine::moveTo(float x, float y, float z)
+{
+    if (machine_state_ == MachineState::Fault)
+    {
+        return;
+    }
+    if (machine_state_ == MachineState::Homing)
+    {
+        return;
+    }
+
+    stored_target_x_ = x;
+    stored_target_y_ = y;
+    stored_target_z_ = z;
+    commanded_target_x_ = x;
+    commanded_target_y_ = y;
+
+    force_phase_ = ForceControlPhase::NormalZApproach;
+    x_force_correction_active_ = false;
+    y_force_correction_active_ = false;
+
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
+
+    machine_state_ = (motion_planner_.motionState() == MotionState::AtTarget) ? MachineState::Idle
+                                                                               : MachineState::Active;
 }
 
 void Machine::tick(float dt)
 {
-    // dt <= 0 must not change positions. // guard
     if (dt <= 0.0f)
     {
-        return; // no progress
+        return;
     }
 
-    // Motion-Safety is independent of pneumatic actuators (never modified by safety). // M11 doc
-    // Software STOP (stop()) => MachineState::Stopped; hardware E-Stop (e_stop) => Fault.
-
-    // Latched Fault: no further motion/safety evaluation until clearFault(). // M11 fault latch
     if (machine_state_ == MachineState::Fault)
     {
-        return; // no-op while fault latched
+        return;
     }
 
-    // 1. E-Stop (highest priority): Idle, Active, Paused, Stopped => Fault. // M11 e-stop
     if (host_inputs_.e_stop)
     {
-        enterSafetyFault(); // stop motion only; pneumatics unchanged
-        return; // strict priority
+        enterSafetyFault();
+        return;
     }
 
-    // 2. Directional limits while Active. // M11 limits
-    if (machine_state_ == MachineState::Active && isCommandedIntoActiveLimit())
+    if (machine_state_ == MachineState::Homing)
     {
-        enterSafetyFault(); // stop motion only; pneumatics unchanged
-        return; // strict priority
+        tickHoming(dt);
+        return;
     }
 
-    // Only Active state advances the MotionPlanner and evaluates M10. // active only
-    if (machine_state_ != MachineState::Active)
+    if (machine_state_ == MachineState::Active)
     {
-        return; // no motion while paused/stopped/idle
+        tickActiveMotion(dt);
     }
+}
 
-    // 3. Fz-Safety: abs(Fz) >= threshold => Fault + freeze + no completion. // M10 safety
+void Machine::tickActiveMotion(float dt)
+{
     const float fz = host_inputs_.force.fz;
     if (std::fabs(fz) >= force_params_.fz_safety_threshold_N)
     {
-        enterSafetyFault(); // stop motion only; pneumatics unchanged
-        return; // strict priority: no XY correction and no planner tick in this tick
+        enterSafetyFault();
+        return;
     }
 
-    // Detect SlowZApproach for XY control. // M10 slow phase detection
     const float z_remaining = stored_target_z_ - motion_planner_.z();
     const bool slow_z = std::fabs(z_remaining) <= force_params_.slow_z_distance_threshold_units;
     force_phase_ = slow_z ? ForceControlPhase::SlowZApproach : ForceControlPhase::NormalZApproach;
 
-    // Reset hysteresis states outside slow phase. // M10 ignore Fx/Fy in Normal phase
     if (force_phase_ != ForceControlPhase::SlowZApproach)
     {
         x_force_correction_active_ = false;
         y_force_correction_active_ = false;
     }
 
-    // Fx-Korrektur (continuous, independent, hysteresis) before MotionPlanner tick. // M10 XY X
     if (force_phase_ == ForceControlPhase::SlowZApproach)
     {
         const float fx = host_inputs_.force.fx;
@@ -264,7 +529,6 @@ void Machine::tick(float dt)
 
         if (x_force_correction_active_)
         {
-            // Force in +X => target steps in -X direction. // sign direction
             if (fx > 0.0f)
             {
                 stored_target_x_ -= force_params_.dx_step_units;
@@ -274,7 +538,6 @@ void Machine::tick(float dt)
                 stored_target_x_ += force_params_.dx_step_units;
             }
 
-            // Clamp corrected X target independently around commanded moveTo() target.
             const float min_x = commanded_target_x_ - force_params_.max_x_correction_units;
             const float max_x = commanded_target_x_ + force_params_.max_x_correction_units;
             if (stored_target_x_ < min_x)
@@ -288,7 +551,6 @@ void Machine::tick(float dt)
         }
     }
 
-    // Fy-Korrektur (continuous, independent, hysteresis) before MotionPlanner tick. // M10 XY Y
     if (force_phase_ == ForceControlPhase::SlowZApproach)
     {
         const float fy = host_inputs_.force.fy;
@@ -305,7 +567,6 @@ void Machine::tick(float dt)
 
         if (y_force_correction_active_)
         {
-            // Force in +Y => target steps in -Y direction. // sign direction
             if (fy > 0.0f)
             {
                 stored_target_y_ -= force_params_.dy_step_units;
@@ -315,7 +576,6 @@ void Machine::tick(float dt)
                 stored_target_y_ += force_params_.dy_step_units;
             }
 
-            // Clamp corrected Y target independently around commanded moveTo() target.
             const float min_y = commanded_target_y_ - force_params_.max_y_correction_units;
             const float max_y = commanded_target_y_ + force_params_.max_y_correction_units;
             if (stored_target_y_ < min_y)
@@ -329,76 +589,74 @@ void Machine::tick(float dt)
         }
     }
 
-    // Update only X/Y targets; must not touch Z targets. // M10 setXYTargets
-    motion_planner_.setXYTargets(stored_target_x_, stored_target_y_);
+    applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
+    motion_planner_.tick(dt);
 
-    // Normal MotionPlanner tick last. // delegate tick
-    motion_planner_.tick(dt); // tick planner
-
-    // When motion completes, return to Idle (no TestExecutor in M5). // done
     if (motion_planner_.motionState() == MotionState::AtTarget)
     {
-        machine_state_ = MachineState::Idle; // update machine state
+        machine_state_ = MachineState::Idle;
     }
 }
 
 void Machine::pause()
 {
-    // Only Active -> Paused is a valid transition. // rule
     if (machine_state_ != MachineState::Active)
     {
-        return; // no-op
+        return;
     }
 
-    // Freeze planner and switch to Paused. // pause behavior
-    motion_planner_.stopMotion(); // freeze movement
-    machine_state_ = MachineState::Paused; // update machine state
+    motion_planner_.stopMotion();
+    machine_state_ = MachineState::Paused;
 }
 
 void Machine::resume()
 {
-    // Only Paused -> Active is a valid transition. // rule
     if (machine_state_ != MachineState::Paused)
     {
-        return; // no-op
+        return;
     }
 
-    // Restart motion toward stored target and switch to Active or Idle. // resume behavior
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_); // restore velocity after stopMotion
-    motion_planner_.moveTo(stored_target_x_, stored_target_y_, stored_target_z_); // restart planner
-    machine_state_ = (motion_planner_.motionState() == MotionState::AtTarget)
-                           ? MachineState::Idle
-                           : MachineState::Active; // update machine state
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
+    machine_state_ = (motion_planner_.motionState() == MotionState::AtTarget) ? MachineState::Idle
+                                                                               : MachineState::Active;
 }
 
 void Machine::stop()
 {
-    // Software STOP: operator command => Stopped (distinct from E-Stop => Fault). // M11 doc
     if (machine_state_ == MachineState::Stopped)
     {
-        return; // already stopped
+        return;
     }
     if (machine_state_ == MachineState::Fault)
     {
-        return; // keep fault latched
+        return;
     }
 
-    // Freeze planner and switch to Stopped (resume must not reactivate). // stop behavior
-    motion_planner_.stopMotion(); // freeze movement
-    machine_state_ = MachineState::Stopped; // set stopped
+    motion_planner_.stopMotion();
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+
+    if (machine_state_ == MachineState::Homing)
+    {
+        finishHomingError();
+        machine_state_ = MachineState::Stopped;
+        return;
+    }
+
+    machine_state_ = MachineState::Stopped;
 }
 
 float Machine::x() const
 {
-    return motion_planner_.x(); // delegate
+    return motion_planner_.x();
 }
 
 float Machine::y() const
 {
-    return motion_planner_.y(); // delegate
+    return motion_planner_.y();
 }
 
 float Machine::z() const
 {
-    return motion_planner_.z(); // delegate
+    return motion_planner_.z();
 }

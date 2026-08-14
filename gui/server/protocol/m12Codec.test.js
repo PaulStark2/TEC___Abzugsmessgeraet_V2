@@ -107,6 +107,9 @@ function testStatusDecode() {
     fixtureExtended: 0,
     currentPointIndex: NO_CURRENT_POINT_INDEX,
     programPointCount: 0,
+    homingState: 0,
+    blockedDirections: 0,
+    flags: 0,
   };
   const payload = encodeStatusReportPayload(status);
   assert.strictEqual(payload.length, STATUS_REPORT_PAYLOAD_WIRE_SIZE);

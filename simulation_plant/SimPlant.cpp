@@ -54,18 +54,14 @@ HostInputs SimPlant::sample(float x, float y, float z) const
 {
     HostInputs inputs{};
 
-    // M15: force simulation is disabled; Core force control stays untouched.
     inputs.force = ForceVector{0.0f, 0.0f, 0.0f};
 
-    // Max limit switches trip on position; the reaction is Core's decision.
+    inputs.limitXMin = x <= limits_.x_min;
     inputs.limitXMax = x >= limits_.x_max;
+    inputs.limitYMin = y <= limits_.y_min;
     inputs.limitYMax = y >= limits_.y_max;
+    inputs.limitZMin = z <= limits_.z_min;
     inputs.limitZMax = z >= limits_.z_max;
-
-    // Min limit switches are not simulated in M15.
-    inputs.limitXMin = false;
-    inputs.limitYMin = false;
-    inputs.limitZMin = false;
 
     inputs.e_stop = e_stop_;
     inputs.probeTriggered = probe_remaining_ > 0.0f;
@@ -79,8 +75,11 @@ PlantState SimPlant::state(float x, float y, float z) const
 
     PlantState snapshot{};
     snapshot.limits = limits_;
+    snapshot.limit_x_min = inputs.limitXMin;
     snapshot.limit_x_max = inputs.limitXMax;
+    snapshot.limit_y_min = inputs.limitYMin;
     snapshot.limit_y_max = inputs.limitYMax;
+    snapshot.limit_z_min = inputs.limitZMin;
     snapshot.limit_z_max = inputs.limitZMax;
     snapshot.probe_triggered = inputs.probeTriggered;
     snapshot.e_stop = inputs.e_stop;

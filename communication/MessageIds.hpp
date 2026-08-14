@@ -15,6 +15,7 @@ enum class MessageId : uint8_t
     CmdResume = 0x12,
     CmdStart = 0x13,
     CmdClearFault = 0x14,
+    CmdHome = 0x15,
     CmdMoveTo = 0x20,
     CmdLoadProgram = 0x30,
     CmdSetSpreader = 0x40,

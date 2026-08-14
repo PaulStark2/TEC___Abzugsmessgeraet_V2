@@ -458,14 +458,27 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdSetSpreader, encoded.frame);
   }
 
-  /**
-   * Compatibility workaround: command move to origin. Not Core homing.
-   */
+  async function clearFault() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdClearFault);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode CLEAR_FAULT' };
+    }
+    return sendFrameAndWait(MessageId.CmdClearFault, encoded.frame);
+  }
+
+  /** Core homing sequence Z+ → X+ → Y+ (CmdHome). */
   async function home() {
     if (!isLiveSession()) {
       return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
     }
-    return moveTo(0, 0, 0);
+    const encoded = encodeEmptyMessage(MessageId.CmdHome);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode HOME' };
+    }
+    return sendFrameAndWait(MessageId.CmdHome, encoded.frame);
   }
 
   async function setSpeed() {
@@ -535,6 +548,7 @@ function createProtocolMachineClient(options = {}) {
     pneumaticOpen,
     pneumaticClose,
     home,
+    clearFault,
     setSpeed,
     loadProgram,
     start,

@@ -27,6 +27,10 @@
           <dd id="machine-client-mode">—</dd>
         </div>
         <div>
+          <dt>Anzeige</dt>
+          <dd id="gui-display-state">—</dd>
+        </div>
+        <div>
           <dt>MachineState</dt>
           <dd id="machine-state">—</dd>
         </div>
@@ -74,6 +78,16 @@
       <button type="button" id="btn-stop-global" class="btn-stop btn-stop-global">
         STOP
       </button>
+    </div>
+
+    <div id="machine-warnings" class="machine-warnings" hidden aria-live="polite"></div>
+
+    <div id="fault-banner" class="fault-banner" hidden role="alert">
+      <div class="fault-banner__body">
+        <strong class="fault-banner__title">FAULT</strong>
+        <span id="fault-detail" class="fault-banner__detail">—</span>
+        <button type="button" id="btn-clear-fault" class="btn-clear-fault">Fault zurücksetzen</button>
+      </div>
     </div>
 
     <main class="app-layout">

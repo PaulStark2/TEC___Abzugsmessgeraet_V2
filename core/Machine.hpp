@@ -48,6 +48,16 @@ public:
     // Return current motion state from the owned MotionPlanner. // thin getter
     MotionState motionState() const; // for TestExecutor AtTarget checks
 
+    // M16 homing sub-state and flags.
+    HomingState homingState() const;
+    bool isHomed() const;
+
+    // Bitmask of directions currently blocked by soft limits (6 bits, kLimitDir*).
+    uint8_t blockedDirections() const;
+
+    // True when any limit switch is active or any direction is blocked.
+    bool limitWarningActive() const;
+
     // Provide host I/O snapshot (no evaluation in M5). // set inputs
     void setHostInputs(const HostInputs& inputs); // assign
 
@@ -59,6 +69,9 @@ public:
 
     // Start a new move to a target pose. // command move
     void moveTo(float x, float y, float z); // delegate
+
+    // Start Core homing sequence Z+ → X+ → Y+ (M16).
+    bool home();
 
     // Non-blocking progress update. // step
     void tick(float dt); // no blocking
@@ -96,7 +109,7 @@ private:
     float default_max_velocity_; // max velocity
     float default_acceleration_; // acceleration
 
-    // Store target pose for resume after pause. // stored target
+    // Commanded destination (never overwritten by soft-limit blocking).
     float stored_target_x_; // stored X
     float stored_target_y_; // stored Y
     float stored_target_z_; // stored Z
@@ -111,13 +124,35 @@ private:
     bool x_force_correction_active_; // hysteresis state for X
     bool y_force_correction_active_; // hysteresis state for Y
 
+    // M16 soft-limit blocking (recomputed each tick from limits + stored targets).
+    uint8_t blocked_directions_;
+
+    // M16 homing.
+    HomingState homing_state_;
+    bool is_homed_;
+    static constexpr float kHomingVelocity = 5.0f;
+    static constexpr float kHomingOvershoot = 1000.0f;
+
     // Host I/O containers (no evaluation). // placeholders
     HostInputs host_inputs_; // last inputs
     HostOutputs host_outputs_; // produced outputs
 
     // M11 safety helpers.
-    bool isCommandedIntoActiveLimit() const; // directional limit check
     void enterSafetyFault(); // stopMotion + Fault only (no pneumatic changes)
     void updatePneumaticStub(); // mirror Extend -> Extended for both actuators
-};
 
+    // M16 limit helpers: derive blocked directions and effective planner targets without
+    // mutating stored_target_* (so a later command away from the limit still works).
+    uint8_t computeBlockedDirections(float target_x, float target_y, float target_z) const;
+    void applyEffectiveTargets(float target_x, float target_y, float target_z);
+    uint8_t activeLimitSwitchMask() const;
+
+    // M16 homing tick and phase transitions.
+    void tickHoming(float dt);
+    void beginHomingPhase(HomingState phase);
+    bool homingPhaseLimitReached(HomingState phase) const;
+    void finishHomingSuccess();
+    void finishHomingError();
+
+    void tickActiveMotion(float dt);
+};

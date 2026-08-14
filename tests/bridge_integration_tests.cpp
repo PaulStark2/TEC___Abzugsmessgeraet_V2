@@ -5,6 +5,7 @@
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
 #include "Payloads.hpp"
+#include "SimPlant.hpp"
 
 #include "Types.hpp"
 
@@ -38,6 +39,10 @@ int main()
     // LOAD -> START -> tick until Completed
     {
         simbridge::SimProtocolBridge bridge;
+
+        simplant::PlantLimits limits{};
+        limits.z_min = -10.0f;
+        bridge.plant().setLimits(limits);
 
         tecomm::LoadProgramPayload load{};
         load.point_count = 3;

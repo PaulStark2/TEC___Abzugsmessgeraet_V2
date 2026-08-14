@@ -14,8 +14,10 @@ function createEmptyStatus() {
       currentIteration: 0,
       totalIterations: 0,
       currentPointIndex: 0,
+      pointsDone: 0,
       totalPoints: 0,
       percent: 0,
+      isComplete: false,
     },
     processState: null,
     capabilities: {

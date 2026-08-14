@@ -109,6 +109,18 @@ target_link_libraries(safety_tests
 
 add_test(NAME safety_tests COMMAND safety_tests)
 
+add_executable(limit_blocking_tests
+    limit_blocking_tests.cpp
+)
+target_link_libraries(limit_blocking_tests PRIVATE core)
+add_test(NAME limit_blocking_tests COMMAND limit_blocking_tests)
+
+add_executable(homing_tests
+    homing_tests.cpp
+)
+target_link_libraries(homing_tests PRIVATE core)
+add_test(NAME homing_tests COMMAND homing_tests)
+
 # CMake definition for M12 communication protocol tests.
 add_executable(protocol_tests
     protocol_tests.cpp

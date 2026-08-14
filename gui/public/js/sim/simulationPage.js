@@ -1,12 +1,5 @@
 /**
- * M15 simulation UI bootstrap (standalone /simulation page).
- *
- * Responsibilities:
- *  - render the controller status and drive the 3D gantry from the Core pose
- *  - collect operator input for the virtual outside world (sensors)
- *
- * Explicit non-responsibilities: no motion logic, no kinematics, no safety
- * reaction. The Core decides how the machine moves.
+ * M15/M16 simulation UI — display only; Core is motion authority.
  */
 import { connectStatus } from '/js/api.js';
 import { createGantryView } from '/js/sim/gantryView.js';
@@ -18,6 +11,7 @@ import {
 } from '/js/sim/plantApi.js';
 
 const PLANT_POLL_MS = 200;
+const PROGRAM_POLL_MS = 2000;
 const PROBE_PULSE_MS = 100;
 
 const el = (id) => document.getElementById(id);
@@ -27,6 +21,9 @@ const dom = {
   clientMode: el('sim-client-mode'),
   machineState: el('sim-machine-state'),
   motionState: el('sim-motion-state'),
+  homingState: el('sim-homing-state'),
+  homedState: el('sim-homed-state'),
+  warningState: el('sim-warning-state'),
   x: el('sim-pos-x'),
   y: el('sim-pos-y'),
   z: el('sim-pos-z'),
@@ -38,16 +35,21 @@ const dom = {
   plantFeedback: el('sim-plant-feedback'),
   probeState: el('sim-probe-state'),
   limitState: el('sim-limit-state'),
+  estopPlant: el('sim-estop-plant'),
 };
 
 const gantry = createGantryView(el('gantry-canvas'), readGeometryInputs());
 
+let programPoints = [];
+let lastStatus = null;
+let estopActive = false;
+let limitInputsTouched = false;
+
+const LIMIT_LABELS = ['X-', 'X+', 'Y-', 'Y+', 'Z-', 'Z+'];
+
 function formatNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—';
 }
-
-// Limit bit order matches the M12 StatusReport bitmask (XMin..ZMax).
-const LIMIT_LABELS = ['X-', 'X+', 'Y-', 'Y+', 'Z-', 'Z+'];
 
 function formatLimits(status) {
   if (typeof status.limits !== 'number') {
@@ -83,20 +85,49 @@ function readGeometryInputs() {
 
 function readLimitInputs() {
   return {
-    xMax: readNumberInput('input-limit-x', 100),
-    yMax: readNumberInput('input-limit-y', 100),
-    zMax: readNumberInput('input-limit-z', 50),
+    xMin: readNumberInput('input-limit-x-min', 0),
+    xMax: readNumberInput('input-limit-x-max', 100),
+    yMin: readNumberInput('input-limit-y-min', 0),
+    yMax: readNumberInput('input-limit-y-max', 100),
+    zMin: readNumberInput('input-limit-z-min', 0),
+    zMax: readNumberInput('input-limit-z-max', 50),
   };
 }
 
-/**
- * Render controller status. Display only — never derive a pose locally.
- * @param {object} status flat status message from /ws/status
- */
+function normalizePlantLimits(limits) {
+  if (!limits) {
+    return null;
+  }
+  return {
+    xMin: limits.xMin,
+    xMax: limits.xMax,
+    yMin: limits.yMin,
+    yMax: limits.yMax,
+    zMin: limits.zMin,
+    zMax: limits.zMax,
+  };
+}
+
+function updateTrajectory(status) {
+  if (!programPoints.length) {
+    gantry.setPlannedTrajectory([]);
+    gantry.setTraveledTrajectory([], null);
+    return;
+  }
+  gantry.setPlannedTrajectory(programPoints);
+  const idx = typeof status?.currentPointIndex === 'number' ? status.currentPointIndex : 0;
+  const completed = programPoints.slice(0, Math.max(0, idx));
+  gantry.setTraveledTrajectory(completed, { x: status.x, y: status.y, z: status.z });
+}
+
 function renderStatus(status) {
+  lastStatus = status;
   dom.clientMode.textContent = status.machineClientMode || '—';
   dom.machineState.textContent = status.machineState || '—';
   dom.motionState.textContent = status.motionState || '—';
+  dom.homingState.textContent = status.homingState || 'None';
+  dom.homedState.textContent = status.isHomed ? 'ja' : 'nein';
+  dom.warningState.textContent = status.limitWarning ? 'Limit aktiv' : '—';
   dom.x.textContent = formatNumber(status.x);
   dom.y.textContent = formatNumber(status.y);
   dom.z.textContent = formatNumber(status.z);
@@ -106,41 +137,42 @@ function renderStatus(status) {
   dom.limits.textContent = formatLimits(status);
   dom.estop.textContent = status.eStop ? 'AKTIV' : 'inaktiv';
 
-  // Offline: keep the last known pose (no local movement, no interpolation).
   if (status.connected === false) {
-    setHeaderStatus('Controller offline — Pose eingefroren, keine lokale Bewegung', true);
+    setHeaderStatus('Offline — Pose eingefroren, keine lokale Bewegung', true);
     return;
   }
 
   gantry.setPose({ x: status.x, y: status.y, z: status.z });
-
-  if (status.connected === true) {
-    setHeaderStatus('Controller verbunden — Pose aus Core-Status', false);
-  }
+  updateTrajectory(status);
+  setHeaderStatus('Controller verbunden — Pose aus Core-Status', false);
 }
 
 function renderPlantState(state) {
   const activeLimits = [];
+  if (state.limitXMin) activeLimits.push('X-');
   if (state.limitXMax) activeLimits.push('X+');
+  if (state.limitYMin) activeLimits.push('Y-');
   if (state.limitYMax) activeLimits.push('Y+');
+  if (state.limitZMin) activeLimits.push('Z-');
   if (state.limitZMax) activeLimits.push('Z+');
 
   dom.limitState.textContent = activeLimits.length ? `${activeLimits.join(' ')} HIGH` : 'alle LOW';
   dom.probeState.textContent = state.probeTriggered ? 'HIGH' : 'LOW';
-  dom.probeState.parentElement.classList.toggle('sim-readout--active', state.probeTriggered);
-  dom.limitState.parentElement.classList.toggle('sim-readout--active', activeLimits.length > 0);
+  dom.estopPlant.textContent = state.eStop ? 'AKTIV' : 'inaktiv';
+  estopActive = Boolean(state.eStop);
+  el('btn-estop-toggle').classList.toggle('sim-estop-btn--active', estopActive);
 }
-
-// The plant owns the limit values; mirror them until the operator edits a field.
-let limitInputsTouched = false;
 
 function syncLimitInputs(limits) {
   if (limitInputsTouched || !limits) {
     return;
   }
-  el('input-limit-x').value = String(limits.xMax);
-  el('input-limit-y').value = String(limits.yMax);
-  el('input-limit-z').value = String(limits.zMax);
+  el('input-limit-x-min').value = String(limits.xMin);
+  el('input-limit-x-max').value = String(limits.xMax);
+  el('input-limit-y-min').value = String(limits.yMin);
+  el('input-limit-y-max').value = String(limits.yMax);
+  el('input-limit-z-min').value = String(limits.zMin);
+  el('input-limit-z-max').value = String(limits.zMax);
 }
 
 async function pollPlantState() {
@@ -148,12 +180,41 @@ async function pollPlantState() {
     const result = await fetchPlantState();
     renderPlantState(result.state);
     syncLimitInputs(result.state.limits);
-    gantry.setLimits(result.state.limits);
-    el('input-estop').checked = Boolean(result.state.eStop);
+    gantry.setLimits(normalizePlantLimits(result.state.limits));
   } catch (err) {
     dom.probeState.textContent = '—';
     dom.limitState.textContent = '—';
     setPlantFeedback(err.message, true);
+  }
+}
+
+async function fetchProgramPoints() {
+  try {
+    let res = await fetch('/api/program/selection');
+    let data = await res.json();
+    if (data.ok && data.selection && data.selection.confirmed && data.selection.points?.length) {
+      programPoints = data.selection.points
+        .slice()
+        .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+      gantry.setTestPoints(programPoints);
+      if (lastStatus) {
+        updateTrajectory(lastStatus);
+      }
+      return;
+    }
+    res = await fetch('/api/program/current');
+    data = await res.json();
+    if (data.ok && data.current?.testPoints?.length) {
+      programPoints = data.current.testPoints
+        .slice()
+        .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+      gantry.setTestPoints(programPoints);
+      if (lastStatus) {
+        updateTrajectory(lastStatus);
+      }
+    }
+  } catch {
+    // program API optional for simulation view
   }
 }
 
@@ -162,7 +223,7 @@ async function runPlantAction(action, successMessage) {
     const result = await action();
     if (result && result.state) {
       renderPlantState(result.state);
-      gantry.setLimits(result.state.limits);
+      gantry.setLimits(normalizePlantLimits(result.state.limits));
     }
     setPlantFeedback(successMessage, false);
   } catch (err) {
@@ -171,7 +232,11 @@ async function runPlantAction(action, successMessage) {
 }
 
 function bindPanel() {
-  for (const id of ['input-limit-x', 'input-limit-y', 'input-limit-z']) {
+  for (const id of [
+    'input-limit-x-min', 'input-limit-x-max',
+    'input-limit-y-min', 'input-limit-y-max',
+    'input-limit-z-min', 'input-limit-z-max',
+  ]) {
     el(id).addEventListener('input', () => {
       limitInputsTouched = true;
     });
@@ -186,24 +251,31 @@ function bindPanel() {
 
   el('btn-apply-limits').addEventListener('click', () => {
     const limits = readLimitInputs();
+    runPlantAction(() => setPlantLimits(limits), 'Endanschläge übernommen');
+  });
+
+  el('btn-estop-toggle').addEventListener('click', () => {
+    const next = !estopActive;
     runPlantAction(
-      () => setPlantLimits(limits),
-      `Endschalter gesetzt: X+${limits.xMax} Y+${limits.yMax} Z+${limits.zMax}`
+      () => setPlantEStop(next),
+      next ? 'E-Stop-Eingang aktiviert' : 'E-Stop-Eingang freigegeben'
     );
   });
 
-  el('input-estop').addEventListener('change', (event) => {
-    const active = event.target.checked;
-    runPlantAction(
-      () => setPlantEStop(active),
-      active ? 'E-Stop-Eingang aktiviert' : 'E-Stop-Eingang freigegeben'
-    );
+  el('toggle-trajectory').addEventListener('change', (event) => {
+    gantry.setShowTrajectory(event.target.checked);
+    if (lastStatus) {
+      updateTrajectory(lastStatus);
+    }
+  });
+
+  el('toggle-limit-markers').addEventListener('change', (event) => {
+    gantry.setShowLimitMarkers(event.target.checked);
   });
 
   el('btn-apply-geometry').addEventListener('click', () => {
     gantry.setGeometry(readGeometryInputs());
-    gantry.setLimits(readLimitInputs());
-    setPlantFeedback('Darstellungsgeometrie aktualisiert (kein Core-Einfluss)', false);
+    setPlantFeedback('Darstellungsgeometrie aktualisiert', false);
   });
 
   el('btn-sim-reset-camera').addEventListener('click', () => gantry.resetCamera());
@@ -211,6 +283,8 @@ function bindPanel() {
 
 function init() {
   bindPanel();
+  gantry.setShowLimitMarkers(el('toggle-limit-markers').checked);
+  gantry.setShowTrajectory(el('toggle-trajectory').checked);
   gantry.setLimits(readLimitInputs());
 
   connectStatus(renderStatus, (connected, message) => {
@@ -218,7 +292,9 @@ function init() {
   });
 
   pollPlantState();
+  fetchProgramPoints();
   window.setInterval(pollPlantState, PLANT_POLL_MS);
+  window.setInterval(fetchProgramPoints, PROGRAM_POLL_MS);
 }
 
 init();

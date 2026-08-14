@@ -234,21 +234,24 @@ async function main() {
     });
     assert.strictEqual(moveX.body.ok, true, `moveTo accepted: ${moveX.body.error}`);
 
-    const faulted = await waitStatus(
+    const blocked = await waitStatus(
       guiPort,
-      (status) => status.machineState === 'Fault',
-      'Core safety fault after limit'
+      (status) =>
+        status.machineState !== 'Fault' &&
+        status.limitWarning === true &&
+        (status.blockedDirections & (1 << LIMIT_BIT_X_MAX)) !== 0,
+      'Core soft limit blocks X+ without Fault'
     );
     assert.ok(
-      (faulted.limits & (1 << LIMIT_BIT_X_MAX)) !== 0,
-      `limit X+ reported HIGH (limits=${faulted.limits})`
+      (blocked.limits & (1 << LIMIT_BIT_X_MAX)) !== 0,
+      `limit X+ reported HIGH (limits=${blocked.limits})`
     );
-    assert.ok(faulted.x >= 5, `pose reached trip point (x=${faulted.x})`);
-    assert.ok(faulted.x < 40, 'motion did not continue to the commanded target');
+    assert.ok(blocked.x >= 5, `pose reached trip point (x=${blocked.x})`);
+    assert.ok(blocked.x < 40, 'motion did not continue to the commanded target');
 
     const plantAtLimit = await request(guiPort, 'GET', '/api/simulation/state');
     assert.strictEqual(plantAtLimit.body.state.limitXMax, true, 'plant keeps sensor HIGH');
-    console.log(`  PASS: sensor HIGH at x=${faulted.x.toFixed(2)}, Core latched Fault`);
+    console.log(`  PASS: sensor HIGH at x=${blocked.x.toFixed(2)}, Core blocked X+ (no Fault)`);
 
     console.log('[7] offline behaviour');
     const beforeStop = (await request(guiPort, 'GET', '/api/machine')).body.status;

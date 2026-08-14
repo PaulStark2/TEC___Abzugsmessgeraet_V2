@@ -165,6 +165,25 @@ export async function clearProgramSelection() {
 }
 
 /**
+ * Delete the currently loaded program (clears selection, keeps results).
+ */
+export async function deleteCurrentProgram() {
+  const response = await fetch('/api/program/current', { method: 'DELETE' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+
+  if (!response.ok) {
+    return result;
+  }
+
+  return result;
+}
+
+/**
  * Procedure status (G8).
  */
 export async function fetchProcedureStatus() {

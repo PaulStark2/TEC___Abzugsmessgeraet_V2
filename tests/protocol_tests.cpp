@@ -31,7 +31,9 @@ static bool statusEqual(const tecomm::StatusReportPayload& a, const tecomm::Stat
            nearEqual(a.fz, b.fz) && a.limits == b.limits && a.e_stop == b.e_stop &&
            a.spreader_extend == b.spreader_extend && a.spreader_extended == b.spreader_extended &&
            a.fixture_extend == b.fixture_extend && a.fixture_extended == b.fixture_extended &&
-           a.current_point_index == b.current_point_index && a.program_point_count == b.program_point_count;
+           a.current_point_index == b.current_point_index && a.program_point_count == b.program_point_count &&
+           a.homing_state == b.homing_state && a.blocked_directions == b.blocked_directions &&
+           a.flags == b.flags;
 }
 
 static bool roundtripEmpty(uint8_t message_id)

@@ -66,3 +66,11 @@ independence of HMI vs. controller host.
 See [`docs/M15_Simulation_UI.md`](M15_Simulation_UI.md) for the standalone
 simulation UI, the virtual outside world (`simulation_plant`), the separate
 plant channel on port 8767, and the hierarchical gantry visualization.
+
+## Soft limits and homing (M16)
+
+End stops block only the affected axis direction. Homing is Z+ → X+ → Y+.
+The M12 StatusReport is 38 bytes (`homingState`, `blockedDirections`, `flags`);
+`CmdHome` is `0x15`. See [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md)
+for the protocol contract used by the Maschinen-GUI. STM32 firmware hosting
+is the following parallel milestone (M17).

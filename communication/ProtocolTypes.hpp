@@ -13,6 +13,17 @@ enum class ProtocolMachineState : uint8_t
     Paused = 2,
     Stopped = 3,
     Fault = 4,
+    Homing = 5,
+};
+
+enum class ProtocolHomingState : uint8_t
+{
+    None = 0,
+    HomingZ = 1,
+    HomingX = 2,
+    HomingY = 3,
+    Homed = 4,
+    HomingError = 5,
 };
 
 enum class ProtocolMotionState : uint8_t
@@ -96,5 +107,9 @@ constexpr uint8_t kLimitBitYMin = 2;
 constexpr uint8_t kLimitBitYMax = 3;
 constexpr uint8_t kLimitBitZMin = 4;
 constexpr uint8_t kLimitBitZMax = 5;
+
+// StatusReportPayload.flags bit indices (byte 37).
+constexpr uint8_t kStatusFlagIsHomed = 0;
+constexpr uint8_t kStatusFlagLimitWarning = 1;
 
 } // namespace tecomm

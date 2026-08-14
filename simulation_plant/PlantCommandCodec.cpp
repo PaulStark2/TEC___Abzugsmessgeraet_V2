@@ -139,8 +139,11 @@ PlantCommand parsePlantCommand(const std::string& line)
     if (name == "setLimits")
     {
         command.type = PlantCommandType::SetLimits;
+        command.has_x_min = extractNumber(line, "xMin", command.x_min);
         command.has_x_max = extractNumber(line, "xMax", command.x_max);
+        command.has_y_min = extractNumber(line, "yMin", command.y_min);
         command.has_y_max = extractNumber(line, "yMax", command.y_max);
+        command.has_z_min = extractNumber(line, "zMin", command.z_min);
         command.has_z_max = extractNumber(line, "zMax", command.z_max);
         return command;
     }
@@ -175,13 +178,25 @@ bool applyPlantCommand(SimPlant& plant, const PlantCommand& command)
     case PlantCommandType::SetLimits:
     {
         PlantLimits limits = plant.limits();
+        if (command.has_x_min)
+        {
+            limits.x_min = command.x_min;
+        }
         if (command.has_x_max)
         {
             limits.x_max = command.x_max;
         }
+        if (command.has_y_min)
+        {
+            limits.y_min = command.y_min;
+        }
         if (command.has_y_max)
         {
             limits.y_max = command.y_max;
+        }
+        if (command.has_z_min)
+        {
+            limits.z_min = command.z_min;
         }
         if (command.has_z_max)
         {
@@ -212,13 +227,22 @@ bool applyPlantCommand(SimPlant& plant, const PlantCommand& command)
 std::string formatPlantStateResponse(const PlantState& state, float x, float y, float z)
 {
     std::string json = "{\"ok\":true,\"state\":{";
-    json += "\"limits\":{\"xMax\":" + formatFloat(state.limits.x_max);
+    json += "\"limits\":{\"xMin\":" + formatFloat(state.limits.x_min);
+    json += ",\"xMax\":" + formatFloat(state.limits.x_max);
+    json += ",\"yMin\":" + formatFloat(state.limits.y_min);
     json += ",\"yMax\":" + formatFloat(state.limits.y_max);
+    json += ",\"zMin\":" + formatFloat(state.limits.z_min);
     json += ",\"zMax\":" + formatFloat(state.limits.z_max) + "}";
+    json += ",\"limitXMin\":";
+    json += boolLiteral(state.limit_x_min);
     json += ",\"limitXMax\":";
     json += boolLiteral(state.limit_x_max);
+    json += ",\"limitYMin\":";
+    json += boolLiteral(state.limit_y_min);
     json += ",\"limitYMax\":";
     json += boolLiteral(state.limit_y_max);
+    json += ",\"limitZMin\":";
+    json += boolLiteral(state.limit_z_min);
     json += ",\"limitZMax\":";
     json += boolLiteral(state.limit_z_max);
     json += ",\"probeTriggered\":";

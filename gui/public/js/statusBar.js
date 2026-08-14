@@ -2,6 +2,8 @@
 
 import { sendCommand } from './api.js';
 import { setTcpPose } from './tcpView.js';
+import { deriveDisplayState, formatHomingStatus } from './machineGuiState.js';
+import { applyFaultPanel } from './components/faultPanel.js';
 
 function $(id) {
   return document.getElementById(id);
@@ -30,11 +32,28 @@ function readForce(status, keys) {
   return undefined;
 }
 
+function applyMachineWarnings(warnings) {
+  const el = $('machine-warnings');
+  if (!el) {
+    return;
+  }
+
+  if (!warnings || warnings.length === 0) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+
+  el.hidden = false;
+  el.innerHTML = warnings.map((msg) => `<p class="machine-warning">⚠ ${msg}</p>`).join('');
+}
+
 /**
  * Update global status bar and 3D TCP (display-only).
  * @param {object} status
  */
 export function applyStatus(status) {
+  const displayEl = $('gui-display-state');
   const machineEl = $('machine-state');
   const motionEl = $('motion-state');
   const xEl = $('pos-x');
@@ -46,6 +65,14 @@ export function applyStatus(status) {
   const fxEl = $('force-fx');
   const fyEl = $('force-fy');
   const fzEl = $('force-fz');
+
+  const display = deriveDisplayState(status);
+  if (displayEl) {
+    displayEl.textContent = display.label;
+    displayEl.className = `gui-display-state gui-display-state--${display.label.toLowerCase()}`;
+  }
+  applyMachineWarnings(display.warnings);
+  applyFaultPanel(status);
 
   if (machineEl) machineEl.textContent = status.machineState ?? '—';
   if (motionEl) motionEl.textContent = status.motionState ?? '—';
@@ -71,13 +98,7 @@ export function applyStatus(status) {
   }
 
   if (homingEl) {
-    if (status.homingInProgress === true || status.machineState === 'Homing') {
-      homingEl.textContent = 'Aktiv';
-    } else if (status.machineState === 'Idle' && status.motionState === 'AtTarget') {
-      homingEl.textContent = 'Bereit';
-    } else {
-      homingEl.textContent = '—';
-    }
+    homingEl.textContent = formatHomingStatus(status);
   }
 
   const fx = readForce(status, ['fx', 'forceX', 'forceFx']);
@@ -88,7 +109,6 @@ export function applyStatus(status) {
   if (fyEl) fyEl.textContent = formatForce(fy);
   if (fzEl) fzEl.textContent = formatForce(fz);
 
-  // Protocol/mock identity from server (authoritative).
   if (status.machineClientMode || status.implementation) {
     const modeEl = $('machine-client-mode');
     if (modeEl) {
@@ -99,8 +119,6 @@ export function applyStatus(status) {
     }
   }
 
-  // Protocol client exposes machine TCP liveness via status.connected.
-  // Mock/sim omit the field — leave GUI WebSocket status message unchanged.
   if (Object.prototype.hasOwnProperty.call(status, 'connected')) {
     if (status.connected === false) {
       setConnectionStatus('Maschine offline — TCP getrennt (keine Bewegung)', true);
@@ -109,8 +127,6 @@ export function applyStatus(status) {
     }
   }
 
-  // Display-only: never invent motion. Pose stays at last reported values when offline.
-  // ONLY call site that moves the Three.js TCP mesh (besides initial 0,0,0).
   setTcpPose(status);
 }
 

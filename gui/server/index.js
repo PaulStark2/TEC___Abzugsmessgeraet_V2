@@ -9,6 +9,7 @@ const { validateTestProgram } = require('./program/validateTestProgram');
 const programStore = require('./program/programStore');
 const selectionStore = require('./program/selectionStore');
 const resultsStore = require('./results/resultsStore');
+const procedureStore = require('./procedure/procedureStore');
 const { createProcedureService } = require('./procedure/procedureService');
 const { createPlantClient } = require('./simulation/plantClient');
 
@@ -177,6 +178,13 @@ async function handleCommand(body) {
       }
       result = await machineClient.home();
       break;
+    case 'clearFault':
+    case 'resetFault':
+      if (typeof machineClient.clearFault !== 'function') {
+        return { ok: false, error: 'clearFault not supported by client' };
+      }
+      result = await machineClient.clearFault();
+      break;
     default:
       return { ok: false, error: `Unknown command: ${command}` };
   }
@@ -228,19 +236,20 @@ function buildSummaryFromProgram(normalizedProgram) {
   const ys = testPoints.map((p) => p.y);
   const zs = testPoints.map((p) => p.z);
 
-  const previewCount = Math.min(5, testPoints.length);
+  const pointRows = testPoints.map((p) => ({
+    name: p.name,
+    sequenceNumber: p.sequenceNumber,
+    x: p.x,
+    y: p.y,
+    z: p.z,
+  }));
 
   return {
     programName: normalizedProgram.programName ?? null,
     version: normalizedProgram.version,
     count: testPoints.length,
-    pointsPreview: testPoints.slice(0, previewCount).map((p) => ({
-      name: p.name,
-      sequenceNumber: p.sequenceNumber,
-      x: p.x,
-      y: p.y,
-      z: p.z,
-    })),
+    pointsPreview: pointRows,
+    testPoints: pointRows,
     xRange: { min: Math.min(...xs), max: Math.max(...xs) },
     yRange: { min: Math.min(...ys), max: Math.max(...ys) },
     zRange: { min: Math.min(...zs), max: Math.max(...zs) },
@@ -300,6 +309,32 @@ const server = http.createServer(async (req, res) => {
         testPoints: current.testPoints,
       },
     });
+    return;
+  }
+
+  if (req.method === 'DELETE' && urlPath === '/api/program/current') {
+    const current = programStore.getProgram();
+    if (!current) {
+      sendJson(res, 404, { ok: false, error: 'No program loaded' });
+      return;
+    }
+
+    const proc = procedureService.getStatus();
+    if (proc.state === 'running' || proc.state === 'paused' || proc.state === 'unavailable') {
+      sendJson(res, 409, {
+        ok: false,
+        error: 'Cannot delete program while procedure is running, paused, or unavailable',
+      });
+      return;
+    }
+
+    programStore.clearProgram();
+    selectionStore.clear();
+    if (['idle', 'completed', 'stopped', 'error'].includes(proc.state)) {
+      procedureStore.reset();
+    }
+
+    sendJson(res, 200, { ok: true });
     return;
   }
 
@@ -463,7 +498,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readJsonBody(req);
       const limits = {};
-      for (const key of ['xMax', 'yMax', 'zMax']) {
+      for (const key of ['xMin', 'xMax', 'yMin', 'yMax', 'zMin', 'zMax']) {
         if (body[key] !== undefined) {
           const value = readFiniteNumber(body[key]);
           if (value === null) {

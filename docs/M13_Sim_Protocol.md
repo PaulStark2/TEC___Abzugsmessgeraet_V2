@@ -64,8 +64,13 @@ Responses: `RSP_ACK`, `RSP_NACK`, `MSG_STATUS_REPORT`, `MSG_PROGRAM_SUMMARY` (af
 
 For automated tests, see `tests/bridge_*_tests.cpp`.
 
-## M14 / M15
+## M14 / M15 / M16 / M17
 
 - **M14:** Node.js `ProtocolMachineClient` (`MACHINE_CLIENT=protocol`) targeting port 8766.
   See [`gui/README.md`](../gui/README.md) for start instructions.
-- **M15:** Same M12 frames over UART on STM32; transport changes, bridge mapping concept stays on the firmware side.
+- **M15:** Standalone simulation UI and plant channel (port 8767). Same M12 frames
+  to the controller; plant commands are TCP/JSON, not M12.
+- **M16:** StatusReport grows to 38 bytes; `CmdHome` (`0x15`). See
+  [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md).
+- **M17:** Same M12 frames over UART on STM32; transport changes, bridge mapping
+  concept stays on the firmware side.

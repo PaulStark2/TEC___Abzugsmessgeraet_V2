@@ -150,15 +150,18 @@ static int testCoreDecidesLimitReaction()
     {
         return 13;
     }
-    // Reaction comes from Core safety (latched fault), not from the plant.
-    if (machine.machineState() != MachineState::Fault)
+    // Reaction comes from Core soft-limit blocking (no latched fault).
+    if (machine.machineState() == MachineState::Fault)
     {
         return 14;
     }
-    // Pose stopped at/after the trip point, well below the commanded target.
-    if (machine.x() < limits.x_max || machine.x() > 20.0f)
+    if ((machine.blockedDirections() & (1u << kLimitDirXMax)) == 0)
     {
         return 15;
+    }
+    if (machine.x() >= 20.0f)
+    {
+        return 16;
     }
     return 0;
 }

@@ -118,6 +118,14 @@ function createMockMachineClient() {
     return beginMotion({ x: 0, y: 0, z: 0 }, 'Homing');
   }
 
+  function clearFault() {
+    return {
+      ok: false,
+      error: 'Mock: Fault-Reset erfordert Controller (Agent 1)',
+      status: getStatus(),
+    };
+  }
+
   function pause() {
     if (machineState !== 'Active' && machineState !== 'Homing') {
       return { ok: true, status: getStatus() };
@@ -193,6 +201,7 @@ function createMockMachineClient() {
     pneumaticOpen,
     pneumaticClose,
     home,
+    clearFault,
     pause,
     resume,
     stop,

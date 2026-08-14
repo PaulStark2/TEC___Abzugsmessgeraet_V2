@@ -1,6 +1,8 @@
 // Platform-independent Core type definitions.
 #pragma once
 
+#include <cstdint>
+
 // Declare the trivial Core version query used by the simulation host.
 int core_version();
 
@@ -40,9 +42,30 @@ enum class MachineState
     Paused,
     // Machine motion is stopped/aborted (resume not allowed).
     Stopped,
-    // Fault placeholder state (not automatically triggered in M5).
-    Fault
+    // Latched safety fault (E-Stop, Fz safety — not soft limits).
+    Fault,
+    // Multi-axis homing sequence in progress (M16).
+    Homing
 };
+
+// Homing sub-state (M16). Exposed via protocol StatusReport.homing_state.
+enum class HomingState
+{
+    None,
+    HomingZ,
+    HomingX,
+    HomingY,
+    Homed,
+    HomingError
+};
+
+// Limit-direction bitmask indices (match tecomm::kLimitBit* in ProtocolTypes.hpp).
+constexpr uint8_t kLimitDirXMin = 0;
+constexpr uint8_t kLimitDirXMax = 1;
+constexpr uint8_t kLimitDirYMin = 2;
+constexpr uint8_t kLimitDirYMax = 3;
+constexpr uint8_t kLimitDirZMin = 4;
+constexpr uint8_t kLimitDirZMax = 5;
 
 // Process-level state owned by the TestExecutor (Milestone 7).
 enum class ProcessState

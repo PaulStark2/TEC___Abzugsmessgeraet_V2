@@ -22,6 +22,7 @@ const selectionStore = require('../program/selectionStore');
 const programStore = require('../program/programStore');
 const resultsStore = require('../results/resultsStore');
 const procedureStore = require('./procedureStore');
+const { derivePointProgress } = require('./procedureProgress');
 
 const POLL_MS = 200;
 
@@ -154,14 +155,18 @@ function createProtocolProcedureAdapter(machineClient) {
       currentPointIndex = idx;
     }
 
-    const percent =
-      processState === 'Completed'
-        ? 100
-        : totalPoints > 0
-          ? Math.min(99, Math.round(((currentPointIndex + 1) / totalPoints) * 100))
-          : 0;
-
     const prev = procedureStore.getStatus();
+    const nextProcedureState =
+      processState === 'Completed'
+        ? 'completed'
+        : mapGuiState(processState, connected);
+    const derived = derivePointProgress({
+      totalPoints,
+      index0Based: currentPointIndex,
+      processState,
+      procedureState: nextProcedureState,
+    });
+
     let nextState = mapGuiState(processState, connected);
 
     // Preserve paused UI state while Core process stays Running and Machine is Paused.
@@ -185,9 +190,11 @@ function createProtocolProcedureAdapter(machineClient) {
       progress: {
         currentIteration: 1,
         totalIterations: 1,
-        currentPointIndex: Number.isFinite(currentPointIndex) ? currentPointIndex : 0,
-        totalPoints,
-        percent,
+        currentPointIndex: derived.currentPointIndex,
+        pointsDone: derived.pointsDone,
+        totalPoints: derived.totalPoints,
+        percent: derived.percent,
+        isComplete: derived.isComplete,
       },
       error: connected
         ? prev.error
@@ -205,8 +212,10 @@ function createProtocolProcedureAdapter(machineClient) {
           currentIteration: 1,
           totalIterations: 1,
           currentPointIndex: totalPoints,
+          pointsDone: totalPoints,
           totalPoints,
           percent: 100,
+          isComplete: true,
         },
       });
     }
@@ -318,8 +327,10 @@ function createProtocolProcedureAdapter(machineClient) {
         currentIteration: 1,
         totalIterations: 1,
         currentPointIndex: 0,
+        pointsDone: 0,
         totalPoints: points.length,
         percent: 0,
+        isComplete: false,
       },
     });
 

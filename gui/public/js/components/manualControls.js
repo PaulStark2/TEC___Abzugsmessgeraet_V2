@@ -55,10 +55,10 @@ export function mountManualControls(container) {
     </div>
 
     <div class="manual-section">
-      <h3>Homing (Mock-Stub)</h3>
-      <p class="placeholder-note">Vereinfachtes Mock-Homing nach (0, 0, 0). Keine STM32-Sequenz.</p>
+      <h3>Homing</h3>
+      <p class="placeholder-note">Controller-gesteuertes Homing (CmdHome). Keine Sequenz in der GUI.</p>
       <div class="control-actions">
-        <button type="button" id="btn-home">Homing starten</button>
+        <button type="button" id="btn-home">HOME</button>
       </div>
     </div>
 
@@ -122,7 +122,7 @@ export function mountManualControls(container) {
   const onHome = async () => {
     try {
       await sendCommand({ command: 'home' });
-      setFeedback('Homing (Mock) gestartet', false);
+      setFeedback('HOME-Befehl gesendet', false);
     } catch (err) {
       setFeedback(err.message || String(err), true);
     }

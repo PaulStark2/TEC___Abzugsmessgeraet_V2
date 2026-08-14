@@ -23,6 +23,7 @@ const {
   isKnownMessageId,
   machineStateName,
   motionStateName,
+  homingStateName,
   processStateName,
 } = require('./protocolTypes');
 
@@ -147,6 +148,9 @@ function decodeStatusReportPayload(payload) {
   const fixtureExtended = payload[offset++];
   const currentPointIndex = payload[offset++];
   const programPointCount = payload[offset++];
+  const homingState = payload[offset++];
+  const blockedDirections = payload[offset++];
+  const flags = payload[offset++];
 
   const boolFields = [eStop, spreaderExtend, spreaderExtended, fixtureExtend, fixtureExtended];
   if (boolFields.some((v) => v !== 0 && v !== 1)) {
@@ -171,6 +175,9 @@ function decodeStatusReportPayload(payload) {
     fixtureExtended,
     currentPointIndex,
     programPointCount,
+    homingState,
+    blockedDirections,
+    flags,
   };
 }
 
@@ -199,14 +206,24 @@ function encodeStatusReportPayload(status) {
   out[offset++] = status.fixtureExtended ? 1 : 0;
   out[offset++] = status.currentPointIndex & 0xff;
   out[offset++] = status.programPointCount & 0xff;
+  out[offset++] = status.homingState & 0xff;
+  out[offset++] = status.blockedDirections & 0xff;
+  out[offset++] = status.flags & 0xff;
   return out;
 }
 
 function statusReportToGuiStatus(decoded, connected = true) {
+  const limitWarning =
+    (decoded.flags & (1 << 1)) !== 0 ||
+    decoded.limits !== 0 ||
+    decoded.blockedDirections !== 0;
   return {
     machineState: machineStateName(decoded.machineState),
     motionState: motionStateName(decoded.motionState),
     processState: processStateName(decoded.processState),
+    homingState: homingStateName(decoded.homingState),
+    isHomed: (decoded.flags & 1) !== 0,
+    limitWarning,
     x: decoded.x,
     y: decoded.y,
     z: decoded.z,
@@ -214,6 +231,7 @@ function statusReportToGuiStatus(decoded, connected = true) {
     fy: decoded.fy,
     fz: decoded.fz,
     limits: decoded.limits,
+    blockedDirections: decoded.blockedDirections,
     eStop: decoded.eStop !== 0,
     spreaderExtend: decoded.spreaderExtend !== 0,
     spreaderExtended: decoded.spreaderExtended !== 0,
@@ -235,6 +253,7 @@ function isEmptyCommandId(messageId) {
     case MessageId.CmdResume:
     case MessageId.CmdStart:
     case MessageId.CmdClearFault:
+    case MessageId.CmdHome:
     case MessageId.CmdRequestStatus:
       return true;
     default:

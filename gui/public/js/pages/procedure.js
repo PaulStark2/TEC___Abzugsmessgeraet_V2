@@ -84,13 +84,19 @@ export function renderProcedure(container) {
 
   function renderProgress(status) {
     const p = status.progress || {};
+    const complete = p.isComplete || status.state === 'completed';
     return `
-      <div class="progress-card">
+      <div class="progress-card${complete ? ' progress-card--complete' : ''}">
         <h3>Fortschritt</h3>
+        ${
+          complete
+            ? `<p class="procedure-complete-banner" role="status">Prozedur abgeschlossen</p>`
+            : ''
+        }
         <p class="placeholder-note">
           Iteration: <b>${escapeHtml(p.currentIteration ?? '—')}</b> /
           <b>${escapeHtml(p.totalIterations ?? '—')}</b><br/>
-          Punkt: <b>${escapeHtml(p.currentPointIndex ?? '—')}</b> /
+          Punkt: <b>${escapeHtml(p.pointsDone ?? p.currentPointIndex ?? '—')}</b> /
           <b>${escapeHtml(p.totalPoints ?? '—')}</b><br/>
           Fortschritt: <b>${escapeHtml(p.percent ?? 0)}%</b>
         </p>

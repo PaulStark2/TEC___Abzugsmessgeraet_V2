@@ -87,14 +87,45 @@ int main()
             m.moveTo(cases[i].tx, cases[i].ty, cases[i].tz);
             m.tick(kDt);
 
-            if (m.machineState() != MachineState::Fault)
+            if (m.machineState() == MachineState::Fault)
             {
-                return static_cast<int>(1 + i); // L1–L6 fail
+                return static_cast<int>(1 + i); // soft limits must not fault
             }
-            if (!nearEqual(m.x(), x0) || !nearEqual(m.y(), y0) || !nearEqual(m.z(), z0))
+
+            const uint8_t expected_bit = static_cast<uint8_t>(1u << i);
+            if ((m.blockedDirections() & expected_bit) == 0)
             {
-                return static_cast<int>(10 + i); // pose must freeze on limit fault
+                return static_cast<int>(100 + i); // direction must be blocked
             }
+        }
+    }
+
+    // L1b: after blocked +X command, reverse -X must still work (stored target not permanently clamped).
+    {
+        Machine m;
+        HostInputs in = makeSafeInputs();
+        in.limitXMax = true;
+        setHostSafety(m, in);
+
+        m.moveTo(10.0f, 0.0f, 0.0f);
+        for (int t = 0; t < 5; ++t)
+        {
+            m.tick(kDt);
+        }
+        if (m.machineState() == MachineState::Fault)
+        {
+            return 107;
+        }
+
+        m.moveTo(-10.0f, 0.0f, 0.0f);
+        m.tick(kDt);
+        if (m.machineState() == MachineState::Fault)
+        {
+            return 108;
+        }
+        if (nearEqual(m.x(), 0.0f))
+        {
+            return 109; // should move away from max limit
         }
     }
 
@@ -250,7 +281,7 @@ int main()
     }
 
     // -------------------------------
-    // C1: Limit beats Fz in same tick
+    // C1: Fz safety faults during Active motion (soft limits do not preempt Fz).
     // -------------------------------
     {
         Machine::ForceControlParams params{};
@@ -262,7 +293,7 @@ int main()
         in.force = ForceVector{0.0f, 0.0f, 11.0f};
         setHostSafety(m, in);
 
-        m.moveTo(10.0f, 0.0f, 0.0f);
+        m.moveTo(0.0f, 10.0f, 0.0f);
         m.tick(kDt);
 
         if (m.machineState() != MachineState::Fault)
@@ -338,7 +369,7 @@ int main()
         m.moveTo(10.0f, 0.0f, 0.0f);
         m.tick(kDt);
 
-        if (m.motionState() == MotionState::AtTarget)
+        if (m.blockedDirections() == 0)
         {
             return 52;
         }
