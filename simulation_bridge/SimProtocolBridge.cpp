@@ -4,6 +4,8 @@
 #include "PayloadCodec.hpp"
 #include "StatusSnapshot.hpp"
 
+#include "ForcePathRecorder.hpp"
+
 namespace simbridge
 {
 
@@ -62,6 +64,37 @@ void SimProtocolBridge::appendStatusPush(std::vector<OutboundFrame>& out)
     OutboundFrame frame{};
     const tecomm::EncodeResult encoded = tecomm::encodeMessage(
         static_cast<uint8_t>(tecomm::MessageId::MsgStatusReport), status, frame.data, sizeof(frame.data));
+    if (encoded.ok)
+    {
+        frame.length = encoded.bytes_written;
+        out.push_back(frame);
+    }
+}
+
+void SimProtocolBridge::appendForcePathChunks(std::vector<OutboundFrame>& out)
+{
+    ForcePathRecorder& recorder = executor_.procedure().forcePath();
+    tecomm::ForcePathChunkPayload chunk{};
+    ForcePathRecorder::Sample samples[tecomm::kForcePathChunkMaxSamples];
+    const std::size_t n = recorder.pop(samples, tecomm::kForcePathChunkMaxSamples);
+    if (n == 0)
+    {
+        return;
+    }
+    chunk.point_index = static_cast<uint8_t>(executor_.currentIndex());
+    chunk.iteration = static_cast<uint16_t>(executor_.procedure().testIteration());
+    chunk.sequence = recorder.sequence();
+    chunk.sample_count = static_cast<uint8_t>(n);
+    chunk.dropped = recorder.dropped();
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        chunk.z[i] = samples[i].z;
+        chunk.fz[i] = samples[i].fz;
+    }
+
+    OutboundFrame frame{};
+    const tecomm::EncodeResult encoded = tecomm::encodeMessage(
+        static_cast<uint8_t>(tecomm::MessageId::MsgForcePathChunk), chunk, frame.data, sizeof(frame.data));
     if (encoded.ok)
     {
         frame.length = encoded.bytes_written;

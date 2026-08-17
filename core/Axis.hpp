@@ -41,6 +41,9 @@ public:
     // Enable or disable axis motion updates.
     void setEnabled(bool enabled);
 
+    // Set position, target, and zero current velocity (home offset snap).
+    void snapTo(float position);
+
     // Return true when the axis is within tolerance of its target.
     bool isAtTarget() const;
 

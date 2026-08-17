@@ -30,6 +30,9 @@ public:
     float y() const;
     float z() const;
 
+    // Snap all axes to a pose (used after homing to apply homeOffset).
+    void setCurrentPose(float x, float y, float z);
+
     // Set the same motion parameters for all axes.
     void setMotionParams(float maxVelocity, float acceleration);
 

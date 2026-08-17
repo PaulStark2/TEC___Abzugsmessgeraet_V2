@@ -39,10 +39,21 @@ int main()
     // LOAD -> START -> tick until Completed
     {
         simbridge::SimProtocolBridge bridge;
+        bridge.machine().setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
 
         simplant::PlantLimits limits{};
-        limits.z_min = -10.0f;
+        limits.z_min = -100.0f;
         bridge.plant().setLimits(limits);
+
+        TestConfiguration cfg = bridge.machine().testConfiguration();
+        cfg.target_force_N = 0.1f;
+        cfg.mode = TestMode::Aging;
+        cfg.iterations = 1u;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!bridge.machine().trySetTestConfiguration(cfg, err))
+        {
+            return 99;
+        }
 
         tecomm::LoadProgramPayload load{};
         load.point_count = 3;
@@ -83,8 +94,8 @@ int main()
         {
             return 3;
         }
-        if (!nearEqual(bridge.machine().x(), 30.0f) || !nearEqual(bridge.machine().y(), 5.0f) ||
-            !nearEqual(bridge.machine().z(), -5.0f))
+        if (!nearEqual(bridge.machine().x(), 0.0f) || !nearEqual(bridge.machine().y(), 0.0f) ||
+            !nearEqual(bridge.machine().z(), 0.0f))
         {
             return 4;
         }

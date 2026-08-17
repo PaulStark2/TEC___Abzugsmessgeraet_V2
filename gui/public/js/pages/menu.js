@@ -10,6 +10,7 @@ const MENU_ITEMS = [
   { route: 'manual', label: 'Handmodus' },
   { route: 'plate', label: 'Bauplatte wechseln' },
   { route: 'calibrate', label: 'Kalibrieren' },
+  { route: 'parameters', label: 'Parametereinstellungen' },
 ];
 
 export function renderMenu(container) {

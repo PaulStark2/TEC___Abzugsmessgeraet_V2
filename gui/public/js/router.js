@@ -8,6 +8,7 @@ import { renderProcedure } from './pages/procedure.js';
 import { renderResults } from './pages/results.js';
 import { renderPlate } from './pages/plate.js';
 import { renderCalibrate } from './pages/calibrate.js';
+import { renderParameters } from './pages/parameters.js';
 
 const ROUTES = {
   menu: renderMenu,
@@ -18,6 +19,7 @@ const ROUTES = {
   manual: renderManual,
   plate: renderPlate,
   calibrate: renderCalibrate,
+  parameters: renderParameters,
 };
 
 const DEFAULT_ROUTE = 'menu';

@@ -17,6 +17,10 @@ const {
   NACK_PAYLOAD_WIRE_SIZE,
   STATUS_REPORT_PAYLOAD_WIRE_SIZE,
   LOAD_PROGRAM_MAX_POINT_COUNT,
+  MACHINE_CONFIG_PAYLOAD_WIRE_SIZE,
+  TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE,
+  FORCE_PATH_CHUNK_MAX_SAMPLES,
+  FORCE_PATH_CHUNK_HEADER_WIRE_SIZE,
   MessageId,
   DecodeResult,
   NO_CURRENT_POINT_INDEX,
@@ -25,6 +29,7 @@ const {
   motionStateName,
   homingStateName,
   processStateName,
+  procedurePhaseName,
 } = require('./protocolTypes');
 
 function isFiniteNumber(value) {
@@ -66,6 +71,140 @@ function decodeMoveToPayload(payload) {
     return null;
   }
   return { x: x.value, y: y.value, z: z.value };
+}
+
+const MACHINE_CONFIG_FLOAT_KEYS = [
+  'v_approach',
+  'v_slow',
+  'v_measure',
+  'v_homing',
+  'acceleration',
+  'force_filter',
+  'xy_tolerance_N',
+  'xy_correction_step',
+  'xy_max_correction',
+  'insertion_buffer',
+  'collision_approach_N',
+  'collision_retract_N',
+  'collision_clamp_N',
+  'collision_unclamp_N',
+  'collision_contact_N',
+  'collision_measure_N',
+  'spreader_extend_time_s',
+  'spreader_retract_time_s',
+  'force_tolerance_N',
+  'z_correction_gain',
+  'z_correction_max',
+  'minimum_correction',
+];
+
+function encodeMachineConfigPayload(cfg) {
+  const out = Buffer.alloc(MACHINE_CONFIG_PAYLOAD_WIRE_SIZE);
+  let offset = 0;
+  for (const key of MACHINE_CONFIG_FLOAT_KEYS) {
+    if (!writeF32LE(out, offset, cfg[key])) {
+      return null;
+    }
+    offset += 4;
+  }
+  if (!Number.isInteger(cfg.max_optimization_iterations) || cfg.max_optimization_iterations < 0) {
+    return null;
+  }
+  out.writeUInt16LE(cfg.max_optimization_iterations & 0xffff, offset);
+  offset += 2;
+  const tail = [
+    'probe_search_speed',
+    'probe_search_distance',
+    'probe_backoff',
+    'home_offset_x',
+    'home_offset_y',
+    'home_offset_z',
+    'tool_offset_x',
+    'tool_offset_y',
+    'tool_offset_z',
+  ];
+  for (const key of tail) {
+    if (!writeF32LE(out, offset, cfg[key])) {
+      return null;
+    }
+    offset += 4;
+  }
+  return offset === MACHINE_CONFIG_PAYLOAD_WIRE_SIZE ? out : null;
+}
+
+function decodeMachineConfigPayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length !== MACHINE_CONFIG_PAYLOAD_WIRE_SIZE) {
+    return null;
+  }
+  const out = {};
+  let offset = 0;
+  for (const key of MACHINE_CONFIG_FLOAT_KEYS) {
+    const value = readF32LE(payload, offset);
+    if (!value.ok) {
+      return null;
+    }
+    out[key] = value.value;
+    offset += 4;
+  }
+  out.max_optimization_iterations = payload.readUInt16LE(offset);
+  offset += 2;
+  const tail = [
+    'probe_search_speed',
+    'probe_search_distance',
+    'probe_backoff',
+    'home_offset_x',
+    'home_offset_y',
+    'home_offset_z',
+    'tool_offset_x',
+    'tool_offset_y',
+    'tool_offset_z',
+  ];
+  for (const key of tail) {
+    const value = readF32LE(payload, offset);
+    if (!value.ok) {
+      return null;
+    }
+    out[key] = value.value;
+    offset += 4;
+  }
+  return out;
+}
+
+function encodeTestConfigurationPayload({ mode, target_force_N, iterations, active_point_index }) {
+  if (mode !== 0 && mode !== 1) {
+    return null;
+  }
+  if (!isFiniteNumber(target_force_N) || !Number.isInteger(iterations) || iterations < 0) {
+    return null;
+  }
+  const out = Buffer.alloc(TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE);
+  out[0] = mode;
+  if (!writeF32LE(out, 1, target_force_N)) {
+    return null;
+  }
+  out.writeUInt16LE(iterations & 0xffff, 5);
+  out[7] = active_point_index & 0xff;
+  return out;
+}
+
+function decodeTestConfigurationPayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length !== TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE) {
+    return null;
+  }
+  const mode = payload[0];
+  if (mode !== 0 && mode !== 1) {
+    return null;
+  }
+  const force = readF32LE(payload, 1);
+  if (!force.ok) {
+    return null;
+  }
+  return {
+    mode,
+    target_force_N: force.value,
+    iterations: payload.readUInt16LE(5),
+    active_point_index: payload[7],
+  };
 }
 
 function encodeBoolPayload(value) {
@@ -151,6 +290,7 @@ function decodeStatusReportPayload(payload) {
   const homingState = payload[offset++];
   const blockedDirections = payload[offset++];
   const flags = payload[offset++];
+  const procedurePhase = payload[offset++];
 
   const boolFields = [eStop, spreaderExtend, spreaderExtended, fixtureExtend, fixtureExtended];
   if (boolFields.some((v) => v !== 0 && v !== 1)) {
@@ -178,6 +318,7 @@ function decodeStatusReportPayload(payload) {
     homingState,
     blockedDirections,
     flags,
+    procedurePhase,
   };
 }
 
@@ -209,6 +350,7 @@ function encodeStatusReportPayload(status) {
   out[offset++] = status.homingState & 0xff;
   out[offset++] = status.blockedDirections & 0xff;
   out[offset++] = status.flags & 0xff;
+  out[offset++] = (status.procedurePhase || 0) & 0xff;
   return out;
 }
 
@@ -241,6 +383,8 @@ function statusReportToGuiStatus(decoded, connected = true) {
     currentPointIndex:
       decoded.currentPointIndex === NO_CURRENT_POINT_INDEX ? null : decoded.currentPointIndex,
     programPointCount: decoded.programPointCount,
+    procedurePhase: procedurePhaseName(decoded.procedurePhase),
+    procedurePhaseOrdinal: decoded.procedurePhase,
     connected: Boolean(connected),
   };
 }
@@ -254,6 +398,8 @@ function isEmptyCommandId(messageId) {
     case MessageId.CmdStart:
     case MessageId.CmdClearFault:
     case MessageId.CmdHome:
+    case MessageId.CmdGetMachineConfig:
+    case MessageId.CmdStartProbeCalib:
     case MessageId.CmdRequestStatus:
       return true;
     default:
@@ -291,6 +437,15 @@ function validatePayloadForMessage(messageId, payload) {
       }
     case MessageId.MsgProgramSummary:
       return length === 26;
+    case MessageId.CmdSetMachineConfig:
+    case MessageId.MsgMachineConfig:
+      return length === MACHINE_CONFIG_PAYLOAD_WIRE_SIZE && decodeMachineConfigPayload(payload) !== null;
+    case MessageId.CmdSetTestConfiguration:
+      return length === TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE && decodeTestConfigurationPayload(payload) !== null;
+    case MessageId.CmdSetPlateOrigin:
+      return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
+    case MessageId.MsgForcePathChunk:
+      return decodeForcePathChunkPayload(payload) !== null;
     default:
       return false;
   }
@@ -375,6 +530,90 @@ function encodeLoadProgramMessage(points) {
   return encodeFrame(MessageId.CmdLoadProgram, payload);
 }
 
+function encodeMachineConfigMessage(cfg) {
+  const payload = encodeMachineConfigPayload(cfg);
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdSetMachineConfig, payload);
+}
+
+function encodeTestConfigurationMessage(cfg) {
+  const payload = encodeTestConfigurationPayload(cfg);
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdSetTestConfiguration, payload);
+}
+
+function encodePlateOriginMessage(x, y, z) {
+  const payload = encodeMoveToPayload({ x, y, z });
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdSetPlateOrigin, payload);
+}
+
+function encodeForcePathChunkPayload(chunk) {
+  const count = Number(chunk.sampleCount);
+  if (!Number.isInteger(count) || count < 0 || count > FORCE_PATH_CHUNK_MAX_SAMPLES) {
+    return null;
+  }
+  const out = Buffer.alloc(FORCE_PATH_CHUNK_HEADER_WIRE_SIZE + count * 8);
+  let offset = 0;
+  out[offset++] = (chunk.pointIndex || 0) & 0xff;
+  out.writeUInt16LE((chunk.iteration || 0) & 0xffff, offset);
+  offset += 2;
+  out.writeUInt32LE((chunk.sequence || 0) >>> 0, offset);
+  offset += 4;
+  out[offset++] = count & 0xff;
+  out.writeUInt32LE((chunk.dropped || 0) >>> 0, offset);
+  offset += 4;
+  const zs = chunk.z || [];
+  const fzs = chunk.fz || [];
+  for (let i = 0; i < count; ++i) {
+    if (!writeF32LE(out, offset, Number(zs[i])) || !writeF32LE(out, offset + 4, Number(fzs[i]))) {
+      return null;
+    }
+    offset += 8;
+  }
+  return out;
+}
+
+function decodeForcePathChunkPayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length < FORCE_PATH_CHUNK_HEADER_WIRE_SIZE) {
+    return null;
+  }
+  let offset = 0;
+  const pointIndex = payload[offset++];
+  const iteration = payload.readUInt16LE(offset);
+  offset += 2;
+  const sequence = payload.readUInt32LE(offset);
+  offset += 4;
+  const sampleCount = payload[offset++];
+  const dropped = payload.readUInt32LE(offset);
+  offset += 4;
+  if (sampleCount > FORCE_PATH_CHUNK_MAX_SAMPLES) {
+    return null;
+  }
+  if (payload.length !== FORCE_PATH_CHUNK_HEADER_WIRE_SIZE + sampleCount * 8) {
+    return null;
+  }
+  const z = [];
+  const fz = [];
+  for (let i = 0; i < sampleCount; ++i) {
+    const zv = readF32LE(payload, offset);
+    const fv = readF32LE(payload, offset + 4);
+    if (!zv.ok || !fv.ok) {
+      return null;
+    }
+    z.push(zv.value);
+    fz.push(fv.value);
+    offset += 8;
+  }
+  return { pointIndex, iteration, sequence, sampleCount, dropped, z, fz };
+}
+
 /**
  * Decode one complete frame from a buffer prefix.
  * Mirrors tecomm::decodeFrame.
@@ -434,6 +673,9 @@ module.exports = {
   encodeBoolMessage,
   encodeLoadProgramPayload,
   encodeLoadProgramMessage,
+  encodeMachineConfigMessage,
+  encodeTestConfigurationMessage,
+  encodePlateOriginMessage,
   encodeMoveToPayload,
   decodeMoveToPayload,
   encodeBoolPayload,
@@ -447,4 +689,10 @@ module.exports = {
   statusReportToGuiStatus,
   decodeFrame,
   validatePayloadForMessage,
+  encodeMachineConfigPayload,
+  decodeMachineConfigPayload,
+  encodeTestConfigurationPayload,
+  decodeTestConfigurationPayload,
+  encodeForcePathChunkPayload,
+  decodeForcePathChunkPayload,
 };

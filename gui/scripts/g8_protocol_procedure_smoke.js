@@ -186,30 +186,44 @@ async function run() {
     assert(move.status === 200 && move.body.ok, 'A: moveTo online');
     console.log('Disconnect A: PASS');
 
-    // G8 protocol procedure (single Core pass; iterations GUI-only)
+    // G8 protocol procedure (Core ProcedureController)
+    await waitMachineOnline(gui.base);
+
+    const origin = await request(gui.base, 'POST', '/api/calibration/plate-origin', {
+      x: 0,
+      y: 0,
+      z: 0,
+    });
+    assert(origin.status === 200 && origin.body.ok, 'plate origin');
+
     await prepareSelection(gui.base);
     const start = await request(gui.base, 'POST', '/api/procedure/start', {
       mode: 'test',
-      insertionForce: 10,
-      iterations: 3,
+      insertionForce: 0.1,
+      iterations: 1,
     });
     assert(start.status === 200 && start.body.ok, 'G8 protocol start');
     assert(start.body.status.backend === 'protocol', 'backend protocol');
-    assert(start.body.status.capabilities.iterationsSupported === false, 'iterations not Core');
-    assert(start.body.status.progress.totalIterations === 1, 'Core runs once');
+    assert(start.body.status.capabilities.iterationsSupported === true, 'iterations Core');
+    assert(start.body.status.capabilities.modeSupported === true, 'mode Core');
+    assert(start.body.status.progress.totalIterations === 1, 'requested iterations');
 
     const done = await waitProcedure(
       gui.base,
       (s) => s.state === 'completed' || s.state === 'stopped',
-      30000,
+      90000,
       'procedure terminal'
     );
     assert(done.state === 'completed', `expected completed, got ${done.state}`);
 
     const results = await request(gui.base, 'GET', '/api/results/current', null);
     assert(results.status === 200, 'protocol results');
-    assert(results.body.results.dataCompleteness === 'partial', 'partial controller data');
     assert(results.body.results.backend === 'protocol', 'results backend');
+    assert(
+      results.body.results.dataCompleteness === 'partial' ||
+        results.body.results.dataCompleteness === 'complete',
+      'controller data completeness'
+    );
     console.log('G8 protocol procedure: PASS');
 
     // --- B: kill controller → offline, commands rejected ---

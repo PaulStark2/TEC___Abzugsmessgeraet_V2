@@ -59,6 +59,38 @@ export function renderResults(container) {
 
     const r = result.results;
     const rows = r.rows || [];
+    const curves = r.curves || [];
+
+    function renderCurve(curve, idx) {
+      const samples = curve.samples || [];
+      if (samples.length < 2) {
+        return `<p class="placeholder-note">Kurve ${idx + 1}: Punkt ${curve.pointIndex}, Iteration ${curve.iteration} — zu wenige Samples.</p>`;
+      }
+      const zs = samples.map((s) => Number(s.z));
+      const fs = samples.map((s) => Number(s.fz));
+      const zMin = Math.min(...zs);
+      const zMax = Math.max(...zs);
+      const fMin = Math.min(...fs);
+      const fMax = Math.max(...fs);
+      const zSpan = zMax - zMin || 1;
+      const fSpan = fMax - fMin || 1;
+      const w = 320;
+      const h = 120;
+      const pts = samples
+        .map((s) => {
+          const x = ((Number(s.z) - zMin) / zSpan) * (w - 8) + 4;
+          const y = h - 4 - ((Number(s.fz) - fMin) / fSpan) * (h - 8);
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(' ');
+      return `
+        <figure class="force-curve">
+          <figcaption>Punkt ${escapeHtml(curve.pointIndex)} · Iteration ${escapeHtml(curve.iteration)} · ${samples.length} Samples${curve.dropped ? ` · dropped=${curve.dropped}` : ''}</figcaption>
+          <svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Kraft-Weg-Kurve">
+            <polyline fill="none" stroke="#5b9fd4" stroke-width="1.5" points="${pts}" />
+          </svg>
+        </figure>`;
+    }
 
     contentEl.innerHTML = `
       <div class="success-card">
@@ -121,6 +153,12 @@ export function renderResults(container) {
         </tbody>
       </table>
 
+      ${
+        curves.length
+          ? `<div class="curve-list"><h3>Kraft-Weg-Kurven</h3>${curves.map(renderCurve).join('')}</div>`
+          : '<p class="placeholder-note">Keine Kraft-Weg-Kurven empfangen (Alterung oder noch keine Chunks).</p>'
+      }
+
       <div class="control-actions page-actions">
         <a class="btn-link" href="/api/results/export" download="results-stub.csv">CSV exportieren (Stub)</a>
         <button type="button" id="btn-go-procedure">Zur Prozedur</button>
@@ -133,7 +171,9 @@ export function renderResults(container) {
     setFeedback(
       r.dataCompleteness === 'partial'
         ? 'Reduzierte Controller-Daten — fehlende Werte als „—“.'
-        : 'Mock-Ergebnisse (simuliert).',
+        : r.backend === 'protocol'
+          ? 'Controller-Daten (Core/Protocol, keine STM32-Hardware).'
+          : 'Mock-Ergebnisse (simuliert).',
       false
     );
   }

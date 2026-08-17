@@ -1,6 +1,7 @@
 // Unit tests for M13 CommandDispatcher (all M12 commands + ACK/NACK semantics).
 #include "CommandDispatcher.hpp"
 
+#include "ConfigMapping.hpp"
 #include "Decoder.hpp"
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
@@ -90,6 +91,7 @@ static bool hasMessageId(const std::vector<simbridge::OutboundFrame>& out, tecom
 int main()
 {
     Machine machine;
+    machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
     TestExecutor executor(machine);
     simbridge::CommandDispatcher dispatcher(machine, executor);
 
@@ -387,6 +389,7 @@ int main()
     // PAUSE/RESUME while Running via executor
     {
         Machine m4;
+        m4.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
         TestExecutor ex4(m4);
         simbridge::CommandDispatcher d4(m4, ex4);
 
@@ -422,6 +425,60 @@ int main()
         if (!dispatchEmpty(d4, tecomm::MessageId::CmdResume, tecomm::AckResultCode::Ok, out))
         {
             return 82;
+        }
+    }
+
+    // M17.2 set/get machine config and plate origin.
+    {
+        Machine m;
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+
+        tecomm::MachineConfigPayload cfg = toMachineConfigPayload(MachineConfig{});
+        uint8_t payload[tecomm::kMachineConfigPayloadWireSize];
+        if (!tecomm::encodeMachineConfigPayload(cfg, payload, sizeof(payload)))
+        {
+            return 90;
+        }
+        std::vector<simbridge::OutboundFrame> out;
+        tecomm::DecodedFrame frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdSetMachineConfig),
+                                                 payload, sizeof(payload));
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        tecomm::AckPayload ack{};
+        if (out.size() != 1 || !decodeOutboundAck(out[0], ack) ||
+            ack.result_code != static_cast<uint8_t>(tecomm::AckResultCode::Ok))
+        {
+            return 91;
+        }
+
+        cfg.collision_contact_N = 80.0f;
+        if (!tecomm::encodeMachineConfigPayload(cfg, payload, sizeof(payload)))
+        {
+            return 92;
+        }
+        out.clear();
+        frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdSetMachineConfig), payload, sizeof(payload));
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        tecomm::NackPayload nack{};
+        if (out.size() != 1 || !decodeOutboundNack(out[0], nack))
+        {
+            return 93;
+        }
+        if (m.machineConfig().collision.contact_N > 50.0f)
+        {
+            return 94;
+        }
+
+        tecomm::MoveToPayload origin{9.0f, 8.0f, 7.0f};
+        uint8_t origin_wire[tecomm::kMoveToPayloadWireSize];
+        tecomm::encodeMoveToPayload(origin, origin_wire, sizeof(origin_wire));
+        out.clear();
+        frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdSetPlateOrigin), origin_wire,
+                            sizeof(origin_wire));
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        if (!m.calibrationSet().plate_origin_valid || m.calibrationSet().plate_origin.x != 9.0f)
+        {
+            return 95;
         }
     }
 

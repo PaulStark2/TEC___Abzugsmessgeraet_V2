@@ -39,6 +39,9 @@ Machine::Machine()
     , blocked_directions_(0)
     , homing_state_(HomingState::None)
     , is_homed_(false)
+    , collision_context_(CollisionContext::Approach)
+    , last_force_watchdog_trip_(ForceWatchdogTrip::None)
+    , pre_clamp_xy_enabled_(false)
 {
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
 }
@@ -62,6 +65,9 @@ Machine::Machine(const ForceControlParams& params)
     , blocked_directions_(0)
     , homing_state_(HomingState::None)
     , is_homed_(false)
+    , collision_context_(CollisionContext::Approach)
+    , last_force_watchdog_trip_(ForceWatchdogTrip::None)
+    , pre_clamp_xy_enabled_(false)
 {
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
 }
@@ -118,8 +124,16 @@ void Machine::setSpreaderExtend(bool extend)
         return;
     }
 
-    host_outputs_.spreaderExtend = extend;
-    updatePneumaticStub();
+    if (extend)
+    {
+        spreader_timer_.commandExtend(machine_config_.spreader.extend_time_s);
+    }
+    else
+    {
+        spreader_timer_.commandRetract(machine_config_.spreader.retract_time_s);
+    }
+    host_outputs_.spreaderExtend = spreader_timer_.command();
+    host_outputs_.spreaderExtended = spreader_timer_.extended();
 }
 
 void Machine::setFixtureExtend(bool extend)
@@ -135,8 +149,9 @@ void Machine::setFixtureExtend(bool extend)
 
 void Machine::updatePneumaticStub()
 {
-    host_outputs_.spreaderExtended = host_outputs_.spreaderExtend;
     host_outputs_.fixtureExtended = host_outputs_.fixtureExtend;
+    host_outputs_.spreaderExtend = spreader_timer_.command();
+    host_outputs_.spreaderExtended = spreader_timer_.extended();
 }
 
 uint8_t Machine::activeLimitSwitchMask() const
@@ -351,8 +366,15 @@ void Machine::finishHomingSuccess()
     homing_state_ = HomingState::Homed;
     is_homed_ = true;
     machine_state_ = MachineState::Idle;
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
     motion_planner_.stopMotion();
+    const TestPoint home = calibration_set_.home_offset;
+    motion_planner_.setCurrentPose(home.x, home.y, home.z);
+    stored_target_x_ = home.x;
+    stored_target_y_ = home.y;
+    stored_target_z_ = home.z;
+    commanded_target_x_ = home.x;
+    commanded_target_y_ = home.y;
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
     blocked_directions_ = 0;
 }
 
@@ -471,6 +493,10 @@ void Machine::tick(float dt)
         return;
     }
 
+    spreader_timer_.tick(dt);
+    host_outputs_.spreaderExtend = spreader_timer_.command();
+    host_outputs_.spreaderExtended = spreader_timer_.extended();
+
     if (machine_state_ == MachineState::Fault)
     {
         return;
@@ -482,14 +508,27 @@ void Machine::tick(float dt)
         return;
     }
 
+    last_force_watchdog_trip_ =
+        evaluateForceWatchdog(host_inputs_.force, machine_config_, collision_context_);
+    if (last_force_watchdog_trip_ != ForceWatchdogTrip::None)
+    {
+        enterSafetyFault();
+        return;
+    }
+
     if (machine_state_ == MachineState::Homing)
     {
         tickHoming(dt);
         return;
     }
 
-    if (machine_state_ == MachineState::Active)
+    if (machine_state_ == MachineState::Active ||
+        (pre_clamp_xy_enabled_ && machine_state_ == MachineState::Idle))
     {
+        if (pre_clamp_xy_enabled_ && machine_state_ == MachineState::Idle)
+        {
+            machine_state_ = MachineState::Active;
+        }
         tickActiveMotion(dt);
     }
 }
@@ -504,7 +543,8 @@ void Machine::tickActiveMotion(float dt)
     }
 
     const float z_remaining = stored_target_z_ - motion_planner_.z();
-    const bool slow_z = std::fabs(z_remaining) <= force_params_.slow_z_distance_threshold_units;
+    const bool slow_z = pre_clamp_xy_enabled_ ||
+                        std::fabs(z_remaining) <= force_params_.slow_z_distance_threshold_units;
     force_phase_ = slow_z ? ForceControlPhase::SlowZApproach : ForceControlPhase::NormalZApproach;
 
     if (force_phase_ != ForceControlPhase::SlowZApproach)
@@ -592,7 +632,7 @@ void Machine::tickActiveMotion(float dt)
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
     motion_planner_.tick(dt);
 
-    if (motion_planner_.motionState() == MotionState::AtTarget)
+    if (motion_planner_.motionState() == MotionState::AtTarget && !pre_clamp_xy_enabled_)
     {
         machine_state_ = MachineState::Idle;
     }
@@ -659,4 +699,96 @@ float Machine::y() const
 float Machine::z() const
 {
     return motion_planner_.z();
+}
+
+bool Machine::trySetMachineConfig(const MachineConfig& incoming, ConfigValidationError& error)
+{
+    if (!::tryApplyMachineConfig(machine_config_, incoming, error))
+    {
+        return false;
+    }
+    calibration_set_.home_offset = machine_config_.calibration.home_offset;
+    calibration_set_.tool_offset = machine_config_.calibration.tool_offset;
+    default_max_velocity_ = machine_config_.motion.v_approach;
+    default_acceleration_ = machine_config_.motion.acceleration;
+    return true;
+}
+
+const MachineConfig& Machine::machineConfig() const
+{
+    return machine_config_;
+}
+
+bool Machine::trySetTestConfiguration(const TestConfiguration& incoming, ConfigValidationError& error)
+{
+    return ::tryApplyTestConfiguration(test_configuration_, incoming, error);
+}
+
+const TestConfiguration& Machine::testConfiguration() const
+{
+    return test_configuration_;
+}
+
+void Machine::setPlateOrigin(const TestPoint& machine_pose)
+{
+    ::setPlateOrigin(calibration_set_, machine_pose);
+}
+
+void Machine::setProbeCenter(const TestPoint& machine_pose)
+{
+    ::setProbeCenter(calibration_set_, machine_pose);
+}
+
+const CalibrationSet& Machine::calibrationSet() const
+{
+    return calibration_set_;
+}
+
+void Machine::setActiveVelocity(float velocity)
+{
+    const float v = (velocity > 0.0f) ? velocity : machine_config_.motion.v_approach;
+    default_max_velocity_ = v;
+    default_acceleration_ = machine_config_.motion.acceleration;
+    motion_planner_.setMotionParams(v, default_acceleration_);
+}
+
+void Machine::setPreClampXyEnabled(bool enabled)
+{
+    pre_clamp_xy_enabled_ = enabled;
+    if (enabled)
+    {
+        force_params_.fx_threshold_on_N = machine_config_.force.xy_tolerance_N;
+        force_params_.fx_threshold_off_N = machine_config_.force.xy_tolerance_N * 0.5f;
+        force_params_.fy_threshold_on_N = machine_config_.force.xy_tolerance_N;
+        force_params_.fy_threshold_off_N = machine_config_.force.xy_tolerance_N * 0.5f;
+        force_params_.dx_step_units = machine_config_.force.xy_correction_step;
+        force_params_.dy_step_units = machine_config_.force.xy_correction_step;
+        force_params_.max_x_correction_units = machine_config_.force.xy_max_correction;
+        force_params_.max_y_correction_units = machine_config_.force.xy_max_correction;
+    }
+    else
+    {
+        x_force_correction_active_ = false;
+        y_force_correction_active_ = false;
+    }
+}
+
+void Machine::setCollisionContext(CollisionContext context)
+{
+    collision_context_ = context;
+}
+
+CollisionContext Machine::collisionContext() const
+{
+    return collision_context_;
+}
+
+ForceWatchdogTrip Machine::lastForceWatchdogTrip() const
+{
+    return last_force_watchdog_trip_;
+}
+
+bool Machine::spreaderBusy() const
+{
+    return spreader_timer_.isBusy();
 }

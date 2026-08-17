@@ -1,8 +1,13 @@
 #pragma once
 
-#include "MotionPlanner.hpp" // compose motion planner
+#include "CalibrationSet.hpp"
+#include "ForceWatchdog.hpp"
 #include "HostInputs.hpp" // host input container
 #include "HostOutputs.hpp" // host output container
+#include "MachineConfig.hpp"
+#include "MotionPlanner.hpp" // compose motion planner
+#include "SpreaderTimer.hpp"
+#include "TestConfiguration.hpp"
 #include "Types.hpp" // MachineState and MotionState
 
 // Machine provides the overgeordneten Betriebszustandsautomaten über MotionPlanner. // state machine
@@ -95,6 +100,25 @@ public:
     float y() const; // getter
     float z() const; // getter
 
+    // M17 RAM copies of writable config / taught calibration (not SafetyLimits).
+    bool trySetMachineConfig(const MachineConfig& incoming, ConfigValidationError& error);
+    const MachineConfig& machineConfig() const;
+    bool trySetTestConfiguration(const TestConfiguration& incoming, ConfigValidationError& error);
+    const TestConfiguration& testConfiguration() const;
+    void setPlateOrigin(const TestPoint& machine_pose);
+    void setProbeCenter(const TestPoint& machine_pose);
+    const CalibrationSet& calibrationSet() const;
+
+    void setActiveVelocity(float velocity);
+    void setPreClampXyEnabled(bool enabled);
+
+    // Collision watchdog context (ProcedureController sets this per phase).
+    void setCollisionContext(CollisionContext context);
+    CollisionContext collisionContext() const;
+    ForceWatchdogTrip lastForceWatchdogTrip() const;
+
+    bool spreaderBusy() const;
+
 private:
     enum class ForceControlPhase
     {
@@ -132,6 +156,14 @@ private:
     bool is_homed_;
     static constexpr float kHomingVelocity = 5.0f;
     static constexpr float kHomingOvershoot = 1000.0f;
+
+    MachineConfig machine_config_;
+    TestConfiguration test_configuration_;
+    CalibrationSet calibration_set_;
+    CollisionContext collision_context_;
+    ForceWatchdogTrip last_force_watchdog_trip_;
+    SpreaderTimer spreader_timer_;
+    bool pre_clamp_xy_enabled_;
 
     // Host I/O containers (no evaluation). // placeholders
     HostInputs host_inputs_; // last inputs

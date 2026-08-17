@@ -7,21 +7,19 @@
  *
  * Supported by Core today:
  * - Load selected points (CmdLoadProgram)
+ * - TestConfiguration (mode, target force, iterations)
+ * - Plate origin (CmdSetPlateOrigin)
  * - Start / pause / resume / stop process
- * - Observe processState / currentPointIndex from StatusReport
- *
- * NOT supported by Core (GUI stores params, does NOT fake them):
- * - mode test|aging
- * - insertionForce
- * - iterations (>1)
- *
- * No Completed→start() iteration loop. No invented force samples.
+ * - Observe processState / procedurePhase / currentPointIndex from StatusReport
+ * - Force-path chunks in Test mode
  */
 
 const selectionStore = require('../program/selectionStore');
 const programStore = require('../program/programStore');
 const resultsStore = require('../results/resultsStore');
+const forcePathStore = require('../results/forcePathStore');
 const procedureStore = require('./procedureStore');
+const calibrationStore = require('../config/calibrationStore');
 const { derivePointProgress } = require('./procedureProgress');
 
 const POLL_MS = 200;
@@ -35,30 +33,25 @@ function createProtocolProcedureAdapter(machineClient) {
 
   function capabilities() {
     return {
-      iterationsSupported: false,
-      modeSupported: false,
-      insertionForceSupported: false,
+      iterationsSupported: true,
+      modeSupported: true,
+      insertionForceSupported: true,
       simulatedForces: false,
+      procedurePhaseSupported: true,
+      forcePathSupported: true,
     };
   }
 
   function notesForParams(p) {
     const list = [
-      'Protocol-Backend: Punktfolge läuft im Core-TestExecutor (CmdLoadProgram + CmdStart).',
-      'Modus „Prüfen/Altern“, Eingliederungskraft und Iterationen werden nur GUI-seitig gespeichert — Core unterstützt sie noch nicht.',
+      'Protocol-Backend: Prüf-/Alterungsablauf läuft im Core-ProcedureController.',
+      'Modus, Sollkraft und Iterationen werden per CmdSetTestConfiguration an den Core gesendet.',
     ];
-    if (p && p.iterations > 1) {
-      list.push(
-        `Hinweis: Iterationen=${p.iterations} angefordert, Core führt die Punktfolge nur einmal aus (keine GUI-Wiederholung).`
-      );
+    if (p && p.mode === 'aging') {
+      list.push('Alterung: keine Kraft-Weg-Aufzeichnung, nur Safety-Überwachung.');
     }
-    if (p && p.mode) {
-      list.push(`GUI-Parameter Modus="${p.mode}" hat derzeit keine Core-Wirkung.`);
-    }
-    if (p && Number.isFinite(p.insertionForce)) {
-      list.push(
-        `GUI-Parameter Eingliederungskraft=${p.insertionForce} N hat derzeit keine Core-Wirkung.`
-      );
+    if (p && p.mode === 'test') {
+      list.push('Prüfung: Kraft-Weg-Kurven per MsgForcePathChunk (opportunistisch, Drops möglich).');
     }
     return list;
   }
@@ -106,13 +99,14 @@ function createProtocolProcedureAdapter(machineClient) {
       completedAt: new Date().toISOString(),
       backend: 'protocol',
       params: params ? { ...params } : null,
-      dataCompleteness: 'partial',
+      dataCompleteness: forcePathStore.getCurves().length > 0 ? 'complete' : 'partial',
       notes: [
-        'Protocol-Ergebnisse: nur beobachtete Controller-Statusdaten (Pose/Kräfte zum Zeitpunkt des Punktwechsels).',
-        'Keine erfundenen Messwerte. Pass/Fail und vollständige Kraftkurven sind nicht verfügbar.',
+        'Protocol-Ergebnisse vom Core-ProcedureController. Kraft-Weg-Kurven nur im Prüfmodus und nur soweit MsgForcePathChunk empfangen wurde.',
         ...notesForParams(params),
       ],
       processState: finalProcessState,
+      procedurePhase: machineClient.getStatus().procedurePhase || null,
+      curves: forcePathStore.getCurves(),
       rows: observedRows.map((row) => ({ ...row })),
     };
   }
@@ -188,13 +182,14 @@ function createProtocolProcedureAdapter(machineClient) {
       processState,
       state: nextState,
       progress: {
-        currentIteration: 1,
-        totalIterations: 1,
+        currentIteration: 0,
+        totalIterations: params && params.iterations ? params.iterations : 1,
         currentPointIndex: derived.currentPointIndex,
         pointsDone: derived.pointsDone,
         totalPoints: derived.totalPoints,
         percent: derived.percent,
         isComplete: derived.isComplete,
+        procedurePhase: machineStatus.procedurePhase || null,
       },
       error: connected
         ? prev.error
@@ -209,8 +204,8 @@ function createProtocolProcedureAdapter(machineClient) {
         completedAt: new Date().toISOString(),
         error: null,
         progress: {
-          currentIteration: 1,
-          totalIterations: 1,
+          currentIteration: params && params.iterations ? params.iterations : 1,
+          totalIterations: params && params.iterations ? params.iterations : 1,
           currentPointIndex: totalPoints,
           pointsDone: totalPoints,
           totalPoints,
@@ -274,11 +269,19 @@ function createProtocolProcedureAdapter(machineClient) {
     const insertionForce = Number(body && body.insertionForce);
     const iterations = Number(body && body.iterations);
 
-    if (!Number.isFinite(insertionForce) || insertionForce < 0) {
-      return { ok: false, error: 'insertionForce must be a non-negative number' };
+    if (!Number.isFinite(insertionForce) || !(insertionForce > 0)) {
+      return { ok: false, error: 'insertionForce must be a positive number' };
     }
     if (!Number.isInteger(iterations) || iterations < 1) {
       return { ok: false, error: 'iterations must be an integer >= 1' };
+    }
+
+    const calib = calibrationStore.load();
+    if (!calib.plateOriginValid || !calib.plateOrigin) {
+      return {
+        ok: false,
+        error: 'Bauplatten-Ursprung nicht gesetzt — bitte unter Kalibrieren einmessen',
+      };
     }
 
     const current = procedureStore.getStatus();
@@ -291,6 +294,38 @@ function createProtocolProcedureAdapter(machineClient) {
     observedRows = [];
     lastPointIndex = null;
     resultsStore.clear();
+    forcePathStore.clear();
+
+    if (typeof machineClient.setPlateOrigin === 'function') {
+      const origin = await machineClient.setPlateOrigin(
+        calib.plateOrigin.x,
+        calib.plateOrigin.y,
+        calib.plateOrigin.z
+      );
+      if (!origin || !origin.ok) {
+        return {
+          ok: false,
+          error: (origin && origin.error) || 'CmdSetPlateOrigin failed',
+          status: procedureStore.getStatus(),
+        };
+      }
+    }
+
+    if (typeof machineClient.setTestConfiguration === 'function') {
+      const cfg = await machineClient.setTestConfiguration({
+        mode: mode === 'aging' ? 1 : 0,
+        target_force_N: insertionForce,
+        iterations,
+        active_point_index: 0,
+      });
+      if (!cfg || !cfg.ok) {
+        return {
+          ok: false,
+          error: (cfg && cfg.error) || 'CmdSetTestConfiguration failed',
+          status: procedureStore.getStatus(),
+        };
+      }
+    }
 
     const load = await machineClient.loadProgram(
       points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
@@ -324,8 +359,8 @@ function createProtocolProcedureAdapter(machineClient) {
       startedAt: new Date().toISOString(),
       completedAt: null,
       progress: {
-        currentIteration: 1,
-        totalIterations: 1,
+        currentIteration: 0,
+        totalIterations: iterations,
         currentPointIndex: 0,
         pointsDone: 0,
         totalPoints: points.length,

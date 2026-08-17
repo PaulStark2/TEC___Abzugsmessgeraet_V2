@@ -69,7 +69,7 @@ export function renderProcedure(container) {
                 Folgende Parameter werden vom aktuellen Core/Protocol <b>nicht</b> ausgeführt
                 (nur GUI-seitig gespeichert): ${unsupported.map(escapeHtml).join(', ')}.
               </p>`
-            : `<p class="placeholder-note">Mock-Backend: Parameter werden vollständig simuliert.</p>`
+            : `<p class="placeholder-note">Parameter werden an den Core gesendet (TestConfiguration / ProcedureController).</p>`
         }
         ${
           notes.length
@@ -98,6 +98,7 @@ export function renderProcedure(container) {
           <b>${escapeHtml(p.totalIterations ?? '—')}</b><br/>
           Punkt: <b>${escapeHtml(p.pointsDone ?? p.currentPointIndex ?? '—')}</b> /
           <b>${escapeHtml(p.totalPoints ?? '—')}</b><br/>
+          Phase: <b>${escapeHtml(p.procedurePhase || status.procedurePhase || '—')}</b><br/>
           Fortschritt: <b>${escapeHtml(p.percent ?? 0)}%</b>
         </p>
         <div class="progress-bar" aria-hidden="true">

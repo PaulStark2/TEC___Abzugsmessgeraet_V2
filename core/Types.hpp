@@ -79,3 +79,66 @@ enum class ProcessState
     // Execution was aborted (e.g. machine stop).
     Aborted
 };
+
+// Collision-watchdog context (M17). Phase-dependent force thresholds live in MachineConfig.
+enum class CollisionContext : uint8_t
+{
+    Approach = 0,
+    Retract = 1,
+    Clamp = 2,
+    Unclamp = 3,
+    Contact = 4,
+    Measure = 5
+};
+
+// Number of CollisionContext values (for fixed arrays, no heap).
+constexpr uint8_t kCollisionContextCount = 6;
+
+// Test vs aging mode (not part of the point file).
+enum class TestMode : uint8_t
+{
+    Test = 0,
+    Aging = 1
+};
+
+// Automated procedure steps (not MachineState).
+enum class ProcedurePhase : uint8_t
+{
+    Idle = 0,
+    Homing = 1,
+    MoveSafePose = 2,
+    ProbeApproach = 3,
+    ProbeCalibrate = 4,
+    WaitPlateCalibration = 5,
+    PointApproach = 6,
+    PreClampXyCorrect = 7,
+    Clamp = 8,
+    InsertInitial = 9,
+    OptimizeInsert = 10,
+    TestOrAge = 11,
+    Unclamp = 12,
+    NextPoint = 13,
+    MoveSafeEnd = 14,
+    Completed = 15,
+    Aborted = 16
+};
+
+// Config validation result: Ok or a specific rejection (never silent clamp).
+enum class ConfigValidationError : uint8_t
+{
+    Ok = 0,
+    VelocityExceedsSafety,
+    VelocityNotPositive,
+    AccelerationExceedsSafety,
+    AccelerationNegative,
+    ForceExceedsSafety,
+    ForceNotPositive,
+    TimeExceedsSafety,
+    TimeNotPositive,
+    BufferExceedsSafety,
+    BufferNegative,
+    GainNotPositive,
+    IterationsZero,
+    TargetForceInvalid,
+    FilterInvalid
+};

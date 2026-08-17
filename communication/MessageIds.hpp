@@ -20,6 +20,11 @@ enum class MessageId : uint8_t
     CmdLoadProgram = 0x30,
     CmdSetSpreader = 0x40,
     CmdSetFixture = 0x41,
+    CmdSetMachineConfig = 0x50,
+    CmdGetMachineConfig = 0x51,
+    CmdSetTestConfiguration = 0x52,
+    CmdSetPlateOrigin = 0x53,
+    CmdStartProbeCalib = 0x54,
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.
@@ -29,6 +34,8 @@ enum class MessageId : uint8_t
     // Controller -> Host telemetry.
     MsgStatusReport = 0xA0,
     MsgProgramSummary = 0xA1,
+    MsgForcePathChunk = 0xA2,
+    MsgMachineConfig = 0xA3,
 };
 
 } // namespace tecomm

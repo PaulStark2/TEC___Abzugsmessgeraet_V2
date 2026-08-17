@@ -106,3 +106,11 @@ float MotionPlanner::z() const
     return axis_z_.position();
 }
 
+void MotionPlanner::setCurrentPose(float x, float y, float z)
+{
+    axis_x_.snapTo(x);
+    axis_y_.snapTo(y);
+    axis_z_.snapTo(z);
+    motion_state_ = MotionState::Idle;
+}
+

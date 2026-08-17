@@ -20,6 +20,9 @@ __pycache__/
 # Node.js
 node_modules/
 
+# GUI runtime config (written by Parametereinstellungen)
+gui/server/data/*.json
+
 # M14.1 local development runtime (PID files)
 gui/.dev-runtime/
 

@@ -34,6 +34,9 @@ public:
     // Encode current Core status as one outbound frame (20 Hz push / hello on connect).
     void appendStatusPush(std::vector<OutboundFrame>& out);
 
+    // Opportunistic force-path telemetry; never waits on the host.
+    void appendForcePathChunks(std::vector<OutboundFrame>& out);
+
     // Apply simulated host inputs before each tick.
     void applyHostInputs();
 

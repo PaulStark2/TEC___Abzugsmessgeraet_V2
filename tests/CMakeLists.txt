@@ -121,6 +121,54 @@ add_executable(homing_tests
 target_link_libraries(homing_tests PRIVATE core)
 add_test(NAME homing_tests COMMAND homing_tests)
 
+add_executable(config_validation_tests
+    config_validation_tests.cpp
+)
+target_link_libraries(config_validation_tests PRIVATE core)
+add_test(NAME config_validation_tests COMMAND config_validation_tests)
+
+add_executable(collision_context_tests
+    collision_context_tests.cpp
+)
+target_link_libraries(collision_context_tests PRIVATE core)
+add_test(NAME collision_context_tests COMMAND collision_context_tests)
+
+add_executable(spreader_timing_tests
+    spreader_timing_tests.cpp
+)
+target_link_libraries(spreader_timing_tests PRIVATE core)
+add_test(NAME spreader_timing_tests COMMAND spreader_timing_tests)
+
+add_executable(transform_tests
+    transform_tests.cpp
+)
+target_link_libraries(transform_tests PRIVATE core)
+add_test(NAME transform_tests COMMAND transform_tests)
+
+add_executable(probe_calibration_tests
+    probe_calibration_tests.cpp
+)
+target_link_libraries(probe_calibration_tests PRIVATE core)
+add_test(NAME probe_calibration_tests COMMAND probe_calibration_tests)
+
+add_executable(procedure_phase_tests
+    procedure_phase_tests.cpp
+)
+target_link_libraries(procedure_phase_tests PRIVATE core)
+add_test(NAME procedure_phase_tests COMMAND procedure_phase_tests)
+
+add_executable(force_path_recorder_tests
+    force_path_recorder_tests.cpp
+)
+target_link_libraries(force_path_recorder_tests PRIVATE core)
+add_test(NAME force_path_recorder_tests COMMAND force_path_recorder_tests)
+
+add_executable(procedure_insert_tests
+    procedure_insert_tests.cpp
+)
+target_link_libraries(procedure_insert_tests PRIVATE core)
+add_test(NAME procedure_insert_tests COMMAND procedure_insert_tests)
+
 # CMake definition for M12 communication protocol tests.
 add_executable(protocol_tests
     protocol_tests.cpp

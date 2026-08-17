@@ -71,6 +71,7 @@ tecomm::StatusReportPayload buildStatusReport(const Machine& machine, const Test
         flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagLimitWarning);
     }
     status.flags = flags;
+    status.procedure_phase = static_cast<uint8_t>(executor.procedurePhase());
 
     if (executor.processState() == ProcessState::Running)
     {

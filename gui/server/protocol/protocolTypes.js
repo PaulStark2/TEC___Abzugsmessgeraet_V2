@@ -17,9 +17,14 @@ const MOVE_TO_PAYLOAD_WIRE_SIZE = 12;
 const BOOL_PAYLOAD_WIRE_SIZE = 1;
 const ACK_PAYLOAD_WIRE_SIZE = 2;
 const NACK_PAYLOAD_WIRE_SIZE = 3;
-const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 38;
+const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 39;
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
+const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 126;
+const TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE = 8;
+const PLATE_ORIGIN_PAYLOAD_WIRE_SIZE = 12;
+const FORCE_PATH_CHUNK_MAX_SAMPLES = 32;
+const FORCE_PATH_CHUNK_HEADER_WIRE_SIZE = 12;
 
 const NO_CURRENT_POINT_INDEX = 0xff;
 
@@ -35,11 +40,18 @@ const MessageId = Object.freeze({
   CmdLoadProgram: 0x30,
   CmdSetSpreader: 0x40,
   CmdSetFixture: 0x41,
+  CmdSetMachineConfig: 0x50,
+  CmdGetMachineConfig: 0x51,
+  CmdSetTestConfiguration: 0x52,
+  CmdSetPlateOrigin: 0x53,
+  CmdStartProbeCalib: 0x54,
   CmdRequestStatus: 0x7f,
   RspAck: 0x80,
   RspNack: 0x81,
   MsgStatusReport: 0xa0,
   MsgProgramSummary: 0xa1,
+  MsgForcePathChunk: 0xa2,
+  MsgMachineConfig: 0xa3,
 });
 
 const MachineState = Object.freeze({
@@ -82,6 +94,25 @@ const MACHINE_STATE_NAMES = Object.freeze(['Idle', 'Active', 'Paused', 'Stopped'
 const HOMING_STATE_NAMES = Object.freeze(['None', 'HomingZ', 'HomingX', 'HomingY', 'Homed', 'HomingError']);
 const MOTION_STATE_NAMES = Object.freeze(['Idle', 'Moving', 'AtTarget']);
 const PROCESS_STATE_NAMES = Object.freeze(['Idle', 'Running', 'Completed', 'Aborted']);
+const PROCEDURE_PHASE_NAMES = Object.freeze([
+  'Idle',
+  'Homing',
+  'MoveSafePose',
+  'ProbeApproach',
+  'ProbeCalibrate',
+  'WaitPlateCalibration',
+  'PointApproach',
+  'PreClampXyCorrect',
+  'Clamp',
+  'InsertInitial',
+  'OptimizeInsert',
+  'TestOrAge',
+  'Unclamp',
+  'NextPoint',
+  'MoveSafeEnd',
+  'Completed',
+  'Aborted',
+]);
 
 const AckResultCode = Object.freeze({
   Ok: 0,
@@ -140,6 +171,10 @@ function processStateName(ordinal) {
   return PROCESS_STATE_NAMES[ordinal] || 'Unknown';
 }
 
+function procedurePhaseName(ordinal) {
+  return PROCEDURE_PHASE_NAMES[ordinal] || 'Unknown';
+}
+
 module.exports = {
   MAGIC0,
   MAGIC1,
@@ -154,6 +189,11 @@ module.exports = {
   STATUS_REPORT_PAYLOAD_WIRE_SIZE,
   PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE,
   LOAD_PROGRAM_MAX_POINT_COUNT,
+  MACHINE_CONFIG_PAYLOAD_WIRE_SIZE,
+  TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE,
+  PLATE_ORIGIN_PAYLOAD_WIRE_SIZE,
+  FORCE_PATH_CHUNK_MAX_SAMPLES,
+  FORCE_PATH_CHUNK_HEADER_WIRE_SIZE,
   NO_CURRENT_POINT_INDEX,
   MessageId,
   MachineState,
@@ -165,6 +205,7 @@ module.exports = {
   HOMING_STATE_NAMES,
   MOTION_STATE_NAMES,
   PROCESS_STATE_NAMES,
+  PROCEDURE_PHASE_NAMES,
   AckResultCode,
   NackErrorCode,
   DecodeResult,
@@ -174,4 +215,5 @@ module.exports = {
   homingStateName,
   motionStateName,
   processStateName,
+  procedurePhaseName,
 };

@@ -34,6 +34,20 @@ bool writeU16LE(uint8_t* buffer, std::size_t capacity, std::size_t& offset, uint
     return true;
 }
 
+bool writeU32LE(uint8_t* buffer, std::size_t capacity, std::size_t& offset, uint32_t value)
+{
+    if (offset + 4 > capacity)
+    {
+        return false;
+    }
+    buffer[offset + 0] = static_cast<uint8_t>(value & 0xFFu);
+    buffer[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
+    buffer[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFFu);
+    buffer[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFFu);
+    offset += 4;
+    return true;
+}
+
 bool writeF32LE(uint8_t* buffer, std::size_t capacity, std::size_t& offset, float value)
 {
     if (!isFiniteFloat(value))
@@ -74,6 +88,20 @@ bool readU16LE(const uint8_t* buffer, std::size_t length, std::size_t& offset, u
     value_out = static_cast<uint16_t>(buffer[offset + 0]) |
                 static_cast<uint16_t>(static_cast<uint16_t>(buffer[offset + 1]) << 8);
     offset += 2;
+    return true;
+}
+
+bool readU32LE(const uint8_t* buffer, std::size_t length, std::size_t& offset, uint32_t& value_out)
+{
+    if (offset + 4 > length)
+    {
+        return false;
+    }
+    value_out = static_cast<uint32_t>(buffer[offset + 0]) |
+                (static_cast<uint32_t>(buffer[offset + 1]) << 8) |
+                (static_cast<uint32_t>(buffer[offset + 2]) << 16) |
+                (static_cast<uint32_t>(buffer[offset + 3]) << 24);
+    offset += 4;
     return true;
 }
 

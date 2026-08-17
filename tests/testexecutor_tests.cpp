@@ -32,6 +32,17 @@ static TestProgram makeThreePointProgram()
     return program; // copy
 }
 
+static void seedIdentityPlate(Machine& machine)
+{
+    machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+    TestConfiguration cfg = machine.testConfiguration();
+    cfg.target_force_N = 0.1f;
+    cfg.iterations = 1u;
+    cfg.mode = TestMode::Aging;
+    ConfigValidationError err = ConfigValidationError::Ok;
+    machine.trySetTestConfiguration(cfg, err);
+}
+
 int main()
 {
     // Test 1 – Initial Idle, no current point.
@@ -54,6 +65,7 @@ int main()
     // Test 2 – Start a 3-point program.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
 
@@ -94,6 +106,7 @@ int main()
     // Test 3 – Sequence order to Completed.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // 3 points
 
@@ -107,7 +120,7 @@ int main()
         bool saw1 = false; // later
         bool saw2 = false; // later
 
-        for (int i = 0; i < 40 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 400 && ex.processState() == ProcessState::Running; ++i)
         {
             const std::size_t idx = ex.currentIndex(); // sample
             if (idx == 1)
@@ -139,24 +152,24 @@ int main()
         {
             return 12; // fail
         }
-        if (!nearEqual(machine.x(), 30.0f) || !nearEqual(machine.y(), 0.0f) || !nearEqual(machine.z(), 0.0f))
+        if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f) || !nearEqual(machine.z(), 0.0f))
         {
-            return 13; // fail end pose
+            return 13; // fail end pose (safe pose)
         }
     }
 
     // Test 4 – Pause keeps Process Running and freezes progress.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
         ex.start(); // run
-        ex.tick(1.0f); // move a bit
 
         const std::size_t idx_before = ex.currentIndex(); // snapshot
         const float x_before = machine.x(); // snapshot
 
-        ex.pause(); // pause machine
+        ex.pause(); // pause during PointApproach
         if (ex.processState() != ProcessState::Running) // process stays Running
         {
             return 14; // fail
@@ -181,6 +194,7 @@ int main()
     // Test 5 – Resume continues to Completed.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
         ex.start(); // run
@@ -193,12 +207,12 @@ int main()
             return 18; // fail
         }
 
-        runUntilDone(ex, 40); // finish
+        runUntilDone(ex, 400); // finish
         if (ex.processState() != ProcessState::Completed) // complete
         {
             return 19; // fail
         }
-        if (!nearEqual(machine.x(), 30.0f)) // last pose
+        if (!nearEqual(machine.x(), 0.0f)) // safe-end pose
         {
             return 20; // fail
         }
@@ -207,6 +221,7 @@ int main()
     // Test 6 – Stop aborts and freezes.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
         ex.start(); // run
@@ -254,6 +269,7 @@ int main()
     // Test 8 – Invalid transitions are no-ops / rejected.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // idle
 
         ex.pause(); // Idle pause
@@ -290,6 +306,7 @@ int main()
     // Test 9 – External Machine::stop aborts on next tick.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
         ex.start(); // Running
@@ -311,12 +328,13 @@ int main()
     // Test 10 – Restart after Completed and after Aborted.
     {
         Machine machine; // machine
+        seedIdentityPlate(machine);
         TestExecutor ex(machine); // executor
 
         // Complete first run. // complete path
         ex.setProgram(makeThreePointProgram()); // prog A
         ex.start(); // run
-        runUntilDone(ex, 40); // finish
+        runUntilDone(ex, 400); // finish
         if (ex.processState() != ProcessState::Completed) // done
         {
             return 34; // fail
@@ -329,12 +347,12 @@ int main()
         {
             return 35; // fail
         }
-        runUntilDone(ex, 20); // finish
+        runUntilDone(ex, 400); // finish
         if (ex.processState() != ProcessState::Completed) // completed again
         {
             return 36; // fail
         }
-        if (!nearEqual(machine.x(), 5.0f) || !nearEqual(machine.y(), 1.0f)) // new end
+        if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f)) // safe-end pose
         {
             return 37; // fail
         }
@@ -356,7 +374,7 @@ int main()
         {
             return 39; // fail
         }
-        runUntilDone(ex, 20); // finish
+        runUntilDone(ex, 400); // finish
         if (ex.processState() != ProcessState::Completed) // completed
         {
             return 40; // fail

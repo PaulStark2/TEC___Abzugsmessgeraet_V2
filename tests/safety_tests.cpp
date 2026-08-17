@@ -204,6 +204,7 @@ int main()
     // -------------------------------
     {
         Machine machine;
+        machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
         TestExecutor ex(machine);
         TestProgram program;
         program.add(TestPoint{20.0f, 0.0f, 0.0f});
@@ -331,6 +332,7 @@ int main()
         Machine::ForceControlParams params{};
         params.fz_safety_threshold_N = 10.0f;
         Machine machine(params);
+        machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
         TestExecutor ex(machine);
 
         TestProgram program;
@@ -376,13 +378,17 @@ int main()
     }
 
     // -------------------------------
-    // P1: Spreizer stub
+    // P1: Spreizer command immediate, feedback after config time
     // -------------------------------
     {
         Machine m;
         m.setSpreaderExtend(true);
-        const HostOutputs out = m.hostOutputs();
-        if (!out.spreaderExtend || !out.spreaderExtended)
+        if (!m.hostOutputs().spreaderExtend || m.hostOutputs().spreaderExtended)
+        {
+            return 60;
+        }
+        m.tick(m.machineConfig().spreader.extend_time_s);
+        if (!m.hostOutputs().spreaderExtended)
         {
             return 60;
         }
@@ -408,6 +414,7 @@ int main()
         Machine m;
         m.setSpreaderExtend(true);
         m.setFixtureExtend(false);
+        m.tick(m.machineConfig().spreader.extend_time_s);
         const HostOutputs out = m.hostOutputs();
         if (!out.spreaderExtend || !out.spreaderExtended)
         {
@@ -505,6 +512,7 @@ int main()
         }
 
         m.setSpreaderExtend(true);
+        m.tick(m.machineConfig().spreader.extend_time_s);
         if (!m.hostOutputs().spreaderExtend || !m.hostOutputs().spreaderExtended)
         {
             return 71; // commands work after clearFault

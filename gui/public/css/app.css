@@ -545,3 +545,34 @@ button:disabled {
 .btn-clear-fault:hover {
   background: rgba(229, 115, 115, 0.12);
 }
+
+.param-group {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+}
+
+.param-field {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) 8rem auto 1fr;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin: 0.4rem 0;
+}
+
+.param-info {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.force-curve {
+  margin: 0.75rem 0;
+}
+
+.force-curve svg {
+  background: #1a1d21;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

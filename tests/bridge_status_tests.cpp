@@ -19,6 +19,7 @@ static bool nearEqual(float a, float b, float eps = 1e-4f)
 int main()
 {
     Machine machine;
+    machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
     TestExecutor executor(machine);
     SimHostInputProvider provider;
 

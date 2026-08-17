@@ -20,6 +20,12 @@ const {
   decodeStatusReportPayload,
   statusReportToGuiStatus,
   decodeFrame,
+  encodeMachineConfigPayload,
+  decodeMachineConfigPayload,
+  encodeTestConfigurationPayload,
+  decodeTestConfigurationPayload,
+  encodeForcePathChunkPayload,
+  decodeForcePathChunkPayload,
 } = require('./m12Codec');
 const {
   MessageId,
@@ -186,4 +192,133 @@ testPartialNeedMore();
 testCrcMatchesKnownPattern();
 testPayloadHelpers();
 testLoadProgramEncode();
+
+function sampleMachineConfig() {
+  return {
+    v_approach: 10,
+    v_slow: 2,
+    v_measure: 1,
+    v_homing: 5,
+    acceleration: 0,
+    force_filter: 0,
+    xy_tolerance_N: 0.5,
+    xy_correction_step: 0.05,
+    xy_max_correction: 2,
+    insertion_buffer: 1,
+    collision_approach_N: 20,
+    collision_retract_N: 20,
+    collision_clamp_N: 20,
+    collision_unclamp_N: 20,
+    collision_contact_N: 40,
+    collision_measure_N: 40,
+    spreader_extend_time_s: 0.5,
+    spreader_retract_time_s: 0.5,
+    force_tolerance_N: 0.5,
+    z_correction_gain: 0.1,
+    z_correction_max: 1,
+    minimum_correction: 0.01,
+    max_optimization_iterations: 10,
+    probe_search_speed: 2,
+    probe_search_distance: 10,
+    probe_backoff: 1,
+    home_offset_x: 0,
+    home_offset_y: 0,
+    home_offset_z: 0,
+    tool_offset_x: 0.25,
+    tool_offset_y: -0.5,
+    tool_offset_z: 1,
+  };
+}
+
+function testMachineConfigRoundtrip() {
+  const payload = encodeMachineConfigPayload(sampleMachineConfig());
+  assert.ok(payload);
+  assert.strictEqual(payload.length, 126);
+  const decoded = decodeMachineConfigPayload(payload);
+  assert.ok(nearEqual(decoded.tool_offset_z, 1));
+  assert.strictEqual(decoded.max_optimization_iterations, 10);
+  const frame = encodeFrame(MessageId.CmdSetMachineConfig, payload);
+  assert.ok(frame.ok);
+  const parsed = decodeFrame(frame.frame);
+  assert.strictEqual(parsed.result, DecodeResult.Ok);
+  const getFrame = encodeEmptyMessage(MessageId.CmdGetMachineConfig);
+  assert.ok(getFrame.ok);
+  assert.strictEqual(decodeFrame(getFrame.frame).result, DecodeResult.Ok);
+}
+
+function testTestConfigurationRoundtrip() {
+  const payload = encodeTestConfigurationPayload({
+    mode: 1,
+    target_force_N: 12.5,
+    iterations: 7,
+    active_point_index: 3,
+  });
+  assert.ok(payload);
+  const decoded = decodeTestConfigurationPayload(payload);
+  assert.strictEqual(decoded.mode, 1);
+  assert.strictEqual(decoded.iterations, 7);
+  assert.ok(nearEqual(decoded.target_force_N, 12.5));
+  assert.strictEqual(encodeTestConfigurationPayload({
+    mode: 2,
+    target_force_N: 1,
+    iterations: 1,
+    active_point_index: 0,
+  }), null);
+}
+
+testMachineConfigRoundtrip();
+testTestConfigurationRoundtrip();
+
+function testForcePathChunkRoundtrip() {
+  const payload = encodeForcePathChunkPayload({
+    pointIndex: 2,
+    iteration: 3,
+    sequence: 9,
+    sampleCount: 2,
+    dropped: 4,
+    z: [1.25, 1.5],
+    fz: [8.5, 9],
+  });
+  assert.ok(payload);
+  const decoded = decodeForcePathChunkPayload(payload);
+  assert.strictEqual(decoded.pointIndex, 2);
+  assert.strictEqual(decoded.iteration, 3);
+  assert.strictEqual(decoded.dropped, 4);
+  assert.ok(nearEqual(decoded.z[1], 1.5));
+  const frame = encodeFrame(MessageId.MsgForcePathChunk, payload);
+  assert.strictEqual(decodeFrame(frame.frame).result, DecodeResult.Ok);
+  assert.strictEqual(encodeForcePathChunkPayload({ sampleCount: 33, z: [], fz: [] }), null);
+}
+
+function testStatusReportProcedurePhase() {
+  const payload = encodeStatusReportPayload({
+    machineState: 0,
+    motionState: 0,
+    processState: 1,
+    x: 0,
+    y: 0,
+    z: 0,
+    fx: 0,
+    fy: 0,
+    fz: 0,
+    limits: 0,
+    eStop: 0,
+    spreaderExtend: 0,
+    spreaderExtended: 0,
+    fixtureExtend: 0,
+    fixtureExtended: 0,
+    currentPointIndex: NO_CURRENT_POINT_INDEX,
+    programPointCount: 0,
+    homingState: 0,
+    blockedDirections: 0,
+    flags: 0,
+    procedurePhase: 11,
+  });
+  assert.strictEqual(payload.length, STATUS_REPORT_PAYLOAD_WIRE_SIZE);
+  const decoded = decodeStatusReportPayload(payload);
+  assert.strictEqual(decoded.procedurePhase, 11);
+}
+
+testForcePathChunkRoundtrip();
+testStatusReportProcedurePhase();
 console.log('m12Codec.test.js: PASS');

@@ -59,8 +59,11 @@ todos:
   - id: m16-limits-homing
     content: "M16: Soft directional limits, homing Z+→X+→Y+, M12 status extension, SimPlant 6 limits"
     status: completed
-  - id: m17-stm32
-    content: "M17: STM32 firmware hosts Core (parallel to GUI path)"
+  - id: m17-procedure
+    content: "M17: Automated test/aging procedure (config, protocol, ProcedureController, GUI parameters)"
+    status: completed
+  - id: m18-stm32
+    content: "M18: STM32 firmware hosts Core (parallel to GUI path; formerly M17)"
     status: pending
 isProject: false
 ---
@@ -121,8 +124,10 @@ flowchart LR
   M15 --> M16[M16 Limits Homing]
   M12 --> M16
   M11 --> M16
-  M16 --> M17[M17 STM32]
+  M16 --> M17[M17 Procedure]
   M12 --> M17
+  M17 --> M18[M18 STM32]
+  M12 --> M18
 ```
 
 
@@ -131,7 +136,7 @@ GUI path: M12 → M13 → M14 (formal protocol). **M14.1** hardens local dev sta
 
 **M15** adds the standalone simulation UI and the virtual outside world (sensors in the C++ host). **M16** refines Core limit reaction (directional soft block, no global Fault), adds homing Z+→X+→Y+, extends M12 StatusReport, and gives SimPlant all six limit switches.
 
-STM32 path: M12 → **M17** (parallel; does not block GUI). Previously numbered M16, then M15; renumbered because M15 is the simulation UI and M16 is limits/homing.
+STM32 path: M12 → **M18** (parallel; does not block GUI). Previously numbered M17. **M17** is the automated test/aging procedure (Core + M12 + GUI parameters).
 
 ---
 
@@ -664,17 +669,32 @@ STM32 path: M12 → **M17** (parallel; does not block GUI). Previously numbered 
 
 ---
 
-## Milestone 17 — STM32 firmware host (parallel path)
+## Milestone 17 — Automated test / aging procedure
 
-> Previously numbered M16, then M15. Renumbered because M15 is the simulation UI and M16 is limits/homing. The STM32 path still depends only on M12 and is not blocked by M15/M16.
+**Objective:** Extend Core with `ProcedureController` (one process SM), MachineConfig/SafetyLimits,
+coordinate frames, force watchdog, force-path recorder, and matching M12/GUI surfaces.
 
-**Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12 (including the M16 StatusReport / `CmdHome` fields).
+**Documentation:** [`docs/M17_Procedure.md`](../../docs/M17_Procedure.md)
+
+**Sub-milestones:** M17.1 config types … M17.11 GUI Parametereinstellungen.
+
+**Dependencies:** M12–M16.
+
+**STM32 firmware hosting is M18.**
+
+---
+
+## Milestone 18 — STM32 firmware host (parallel path)
+
+> Previously numbered M17. Renumbered because M17 is the automated procedure.
+
+**Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12 (including the M16/M17 StatusReport fields).
 
 **Files/modules:**
 
 - `firmware/` / `stm32/` — timer tick → Core `tick`; map HAL sensors/actuators ↔ HostInputs/HostOutputs; protocol over UART
 
-**Dependencies:** Milestone 12 + Core behavior through M11/M16.
+**Dependencies:** Milestone 12 + Core behavior through M16/M17.
 
 **Expected behavior:** Same state progression as Sim for a demo program (step outputs may start stubbed). Limit switches on hardware use the same directional soft-block semantics as M16.
 

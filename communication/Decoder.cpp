@@ -1,6 +1,7 @@
 #include "Decoder.hpp"
 
 #include "Crc16.hpp"
+#include "PayloadCodec.hpp"
 #include "WireUtil.hpp"
 
 namespace tecomm
@@ -20,6 +21,8 @@ bool isEmptyCommandId(uint8_t message_id)
     case MessageId::CmdStart:
     case MessageId::CmdClearFault:
     case MessageId::CmdHome:
+    case MessageId::CmdGetMachineConfig:
+    case MessageId::CmdStartProbeCalib:
     case MessageId::CmdRequestStatus:
         return true;
     default:
@@ -49,11 +52,18 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdLoadProgram:
     case MessageId::CmdSetSpreader:
     case MessageId::CmdSetFixture:
+    case MessageId::CmdSetMachineConfig:
+    case MessageId::CmdGetMachineConfig:
+    case MessageId::CmdSetTestConfiguration:
+    case MessageId::CmdSetPlateOrigin:
+    case MessageId::CmdStartProbeCalib:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
     case MessageId::RspNack:
     case MessageId::MsgStatusReport:
     case MessageId::MsgProgramSummary:
+    case MessageId::MsgForcePathChunk:
+    case MessageId::MsgMachineConfig:
         return true;
     default:
         return false;
@@ -187,6 +197,43 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
             }
             return offset == payload_length;
         }
+
+    case MessageId::CmdSetMachineConfig:
+    case MessageId::MsgMachineConfig:
+        if (payload_length != kMachineConfigPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            MachineConfigPayload parsed{};
+            return decodeMachineConfigPayload(payload, payload_length, parsed);
+        }
+
+    case MessageId::CmdSetTestConfiguration:
+        if (payload_length != kTestConfigurationPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            TestConfigurationPayload parsed{};
+            return decodeTestConfigurationPayload(payload, payload_length, parsed);
+        }
+
+    case MessageId::CmdSetPlateOrigin:
+        if (payload_length != kPlateOriginPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            MoveToPayload parsed{};
+            return decodeMoveToPayload(payload, payload_length, parsed);
+        }
+
+    case MessageId::MsgForcePathChunk:
+    {
+        ForcePathChunkPayload parsed{};
+        return decodeForcePathChunkPayload(payload, payload_length, parsed);
+    }
 
     default:
         return false;

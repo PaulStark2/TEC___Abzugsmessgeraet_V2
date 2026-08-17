@@ -33,7 +33,7 @@ static bool statusEqual(const tecomm::StatusReportPayload& a, const tecomm::Stat
            a.fixture_extend == b.fixture_extend && a.fixture_extended == b.fixture_extended &&
            a.current_point_index == b.current_point_index && a.program_point_count == b.program_point_count &&
            a.homing_state == b.homing_state && a.blocked_directions == b.blocked_directions &&
-           a.flags == b.flags;
+           a.flags == b.flags && a.procedure_phase == b.procedure_phase;
 }
 
 static bool roundtripEmpty(uint8_t message_id)
@@ -536,6 +536,210 @@ int main()
         if (!tecomm::decodeAckPayload(decoded.payload, decoded.payload_length, parsed))
         {
             return 82;
+        }
+    }
+
+    // M17.2 MachineConfig / TestConfiguration / PlateOrigin roundtrip.
+    {
+        tecomm::MachineConfigPayload cfg{};
+        cfg.v_approach = 10.0f;
+        cfg.v_slow = 2.0f;
+        cfg.v_measure = 1.0f;
+        cfg.v_homing = 5.0f;
+        cfg.acceleration = 0.0f;
+        cfg.force_filter = 0.0f;
+        cfg.xy_tolerance_N = 0.5f;
+        cfg.xy_correction_step = 0.05f;
+        cfg.xy_max_correction = 2.0f;
+        cfg.insertion_buffer = 1.0f;
+        cfg.collision_approach_N = 20.0f;
+        cfg.collision_retract_N = 20.0f;
+        cfg.collision_clamp_N = 20.0f;
+        cfg.collision_unclamp_N = 20.0f;
+        cfg.collision_contact_N = 40.0f;
+        cfg.collision_measure_N = 40.0f;
+        cfg.spreader_extend_time_s = 0.5f;
+        cfg.spreader_retract_time_s = 0.5f;
+        cfg.force_tolerance_N = 0.5f;
+        cfg.z_correction_gain = 0.1f;
+        cfg.z_correction_max = 1.0f;
+        cfg.minimum_correction = 0.01f;
+        cfg.max_optimization_iterations = 10;
+        cfg.probe_search_speed = 2.0f;
+        cfg.probe_search_distance = 10.0f;
+        cfg.probe_backoff = 1.0f;
+        cfg.home_offset_x = 0.0f;
+        cfg.home_offset_y = 0.0f;
+        cfg.home_offset_z = 0.0f;
+        cfg.tool_offset_x = 0.25f;
+        cfg.tool_offset_y = -0.5f;
+        cfg.tool_offset_z = 1.0f;
+
+        uint8_t wire[tecomm::kMachineConfigPayloadWireSize];
+        if (!tecomm::encodeMachineConfigPayload(cfg, wire, sizeof(wire)))
+        {
+            return 90;
+        }
+        tecomm::MachineConfigPayload parsed{};
+        if (!tecomm::decodeMachineConfigPayload(wire, sizeof(wire), parsed))
+        {
+            return 91;
+        }
+        if (parsed.tool_offset_z != cfg.tool_offset_z ||
+            parsed.max_optimization_iterations != 10 || parsed.v_homing != cfg.v_homing)
+        {
+            return 92;
+        }
+
+        uint8_t frame[tecomm::kMaxFrameSize];
+        const tecomm::EncodeResult enc = tecomm::encodeMessage(
+            static_cast<uint8_t>(tecomm::MessageId::CmdSetMachineConfig), cfg, frame, sizeof(frame));
+        if (!enc.ok || enc.bytes_written != 6 + tecomm::kMachineConfigPayloadWireSize + 2)
+        {
+            return 93;
+        }
+        tecomm::DecodedFrame decoded{};
+        std::size_t consumed = 0;
+        if (tecomm::decodeFrame(frame, enc.bytes_written, decoded, consumed) != tecomm::DecodeResult::Ok)
+        {
+            return 94;
+        }
+
+        const tecomm::EncodeResult get_enc = tecomm::encodeEmptyMessage(
+            static_cast<uint8_t>(tecomm::MessageId::CmdGetMachineConfig), frame, sizeof(frame));
+        if (!get_enc.ok)
+        {
+            return 95;
+        }
+        if (tecomm::decodeFrame(frame, get_enc.bytes_written, decoded, consumed) != tecomm::DecodeResult::Ok)
+        {
+            return 96;
+        }
+
+        cfg.v_approach = std::numeric_limits<float>::infinity();
+        if (tecomm::encodeMachineConfigPayload(cfg, wire, sizeof(wire)))
+        {
+            return 97;
+        }
+    }
+
+    {
+        tecomm::TestConfigurationPayload test{};
+        test.mode = 1;
+        test.target_force_N = 12.5f;
+        test.iterations = 7;
+        test.active_point_index = 3;
+        uint8_t wire[tecomm::kTestConfigurationPayloadWireSize];
+        if (!tecomm::encodeTestConfigurationPayload(test, wire, sizeof(wire)))
+        {
+            return 100;
+        }
+        tecomm::TestConfigurationPayload parsed{};
+        if (!tecomm::decodeTestConfigurationPayload(wire, sizeof(wire), parsed) || parsed.mode != 1 ||
+            parsed.iterations != 7 || parsed.active_point_index != 3)
+        {
+            return 101;
+        }
+        test.mode = 2;
+        if (tecomm::encodeTestConfigurationPayload(test, wire, sizeof(wire)))
+        {
+            return 102;
+        }
+
+        uint8_t frame[tecomm::kMaxFrameSize];
+        test.mode = 0;
+        const tecomm::EncodeResult enc = tecomm::encodeMessage(
+            static_cast<uint8_t>(tecomm::MessageId::CmdSetTestConfiguration), test, frame, sizeof(frame));
+        tecomm::DecodedFrame decoded{};
+        std::size_t consumed = 0;
+        if (!enc.ok ||
+            tecomm::decodeFrame(frame, enc.bytes_written, decoded, consumed) != tecomm::DecodeResult::Ok)
+        {
+            return 103;
+        }
+    }
+
+    {
+        tecomm::MoveToPayload origin{1.5f, 2.5f, 3.5f};
+        uint8_t frame[tecomm::kMaxFrameSize];
+        const tecomm::EncodeResult enc = tecomm::encodeMessage(
+            static_cast<uint8_t>(tecomm::MessageId::CmdSetPlateOrigin), origin, frame, sizeof(frame));
+        tecomm::DecodedFrame decoded{};
+        std::size_t consumed = 0;
+        if (!enc.ok ||
+            tecomm::decodeFrame(frame, enc.bytes_written, decoded, consumed) != tecomm::DecodeResult::Ok)
+        {
+            return 104;
+        }
+        tecomm::MoveToPayload parsed{};
+        if (!tecomm::decodeMoveToPayload(decoded.payload, decoded.payload_length, parsed) ||
+            parsed.x != origin.x || parsed.z != origin.z)
+        {
+            return 105;
+        }
+    }
+
+    {
+        if (!roundtripEmpty(static_cast<uint8_t>(tecomm::MessageId::CmdStartProbeCalib)))
+        {
+            return 110;
+        }
+
+        tecomm::ForcePathChunkPayload chunk{};
+        chunk.point_index = 2;
+        chunk.iteration = 3;
+        chunk.sequence = 9;
+        chunk.sample_count = 2;
+        chunk.dropped = 4;
+        chunk.z[0] = 1.25f;
+        chunk.fz[0] = 8.5f;
+        chunk.z[1] = 1.50f;
+        chunk.fz[1] = 9.0f;
+
+        uint8_t wire[tecomm::kForcePathChunkMaxPayloadWireSize];
+        std::size_t bytes_written = 0;
+        if (!tecomm::encodeForcePathChunkPayload(chunk, wire, sizeof(wire), bytes_written) ||
+            bytes_written != tecomm::forcePathChunkWireSize(2))
+        {
+            return 111;
+        }
+        tecomm::ForcePathChunkPayload parsed{};
+        if (!tecomm::decodeForcePathChunkPayload(wire, bytes_written, parsed) ||
+            parsed.point_index != 2 || parsed.iteration != 3 || parsed.dropped != 4 ||
+            parsed.sample_count != 2 || parsed.z[1] != chunk.z[1] || parsed.fz[0] != chunk.fz[0])
+        {
+            return 112;
+        }
+
+        uint8_t frame[tecomm::kMaxFrameSize];
+        const tecomm::EncodeResult enc = tecomm::encodeMessage(
+            static_cast<uint8_t>(tecomm::MessageId::MsgForcePathChunk), chunk, frame, sizeof(frame));
+        tecomm::DecodedFrame decoded{};
+        std::size_t consumed = 0;
+        if (!enc.ok ||
+            tecomm::decodeFrame(frame, enc.bytes_written, decoded, consumed) != tecomm::DecodeResult::Ok)
+        {
+            return 113;
+        }
+
+        chunk.sample_count = static_cast<uint8_t>(tecomm::kForcePathChunkMaxSamples + 1);
+        if (tecomm::encodeForcePathChunkPayload(chunk, wire, sizeof(wire), bytes_written))
+        {
+            return 114;
+        }
+
+        tecomm::StatusReportPayload status{};
+        status.procedure_phase = 11;
+        uint8_t status_wire[tecomm::kStatusReportPayloadWireSize];
+        if (!tecomm::encodeStatusReportPayload(status, status_wire, sizeof(status_wire)))
+        {
+            return 115;
+        }
+        tecomm::StatusReportPayload status_parsed{};
+        if (!tecomm::decodeStatusReportPayload(status_wire, sizeof(status_wire), status_parsed) ||
+            status_parsed.procedure_phase != 11)
+        {
+            return 116;
         }
     }
 

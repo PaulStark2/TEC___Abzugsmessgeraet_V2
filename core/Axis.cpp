@@ -86,6 +86,13 @@ void Axis::setEnabled(bool enabled)
     enabled_ = enabled;
 }
 
+void Axis::snapTo(float position)
+{
+    position_ = position;
+    target_ = position;
+    current_velocity_ = 0.0f;
+}
+
 // Compare current position to target using the Core tolerance.
 bool Axis::isAtTarget() const
 {

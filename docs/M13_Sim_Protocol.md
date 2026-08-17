@@ -72,5 +72,7 @@ For automated tests, see `tests/bridge_*_tests.cpp`.
   to the controller; plant commands are TCP/JSON, not M12.
 - **M16:** StatusReport grows to 38 bytes; `CmdHome` (`0x15`). See
   [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md).
-- **M17:** Same M12 frames over UART on STM32; transport changes, bridge mapping
+- **M17:** StatusReport 39 bytes (`procedurePhase`); config/test/plate/probe commands;
+  `MsgForcePathChunk`. See [`docs/M17_Procedure.md`](M17_Procedure.md).
+- **M18:** Same M12 frames over UART on STM32; transport changes, bridge mapping
   concept stays on the firmware side.

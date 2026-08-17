@@ -51,6 +51,13 @@ std::size_t encodedPayloadSize(uint8_t message_id, const LoadProgramPayload* loa
         return kStatusReportPayloadWireSize;
     case MessageId::MsgProgramSummary:
         return kProgramSummaryPayloadWireSize;
+    case MessageId::CmdSetMachineConfig:
+    case MessageId::MsgMachineConfig:
+        return kMachineConfigPayloadWireSize;
+    case MessageId::CmdSetTestConfiguration:
+        return kTestConfigurationPayloadWireSize;
+    case MessageId::CmdSetPlateOrigin:
+        return kPlateOriginPayloadWireSize;
     default:
         return 0;
     }
@@ -163,7 +170,8 @@ bool encodeStatusReportPayload(const StatusReportPayload& payload, uint8_t* out,
         !writeU8(out, capacity, offset, payload.program_point_count) ||
         !writeU8(out, capacity, offset, payload.homing_state) ||
         !writeU8(out, capacity, offset, payload.blocked_directions) ||
-        !writeU8(out, capacity, offset, payload.flags))
+        !writeU8(out, capacity, offset, payload.flags) ||
+        !writeU8(out, capacity, offset, payload.procedure_phase))
     {
         return false;
     }
@@ -194,7 +202,8 @@ bool decodeStatusReportPayload(const uint8_t* data, std::size_t length, StatusRe
         !readU8(data, length, offset, out.program_point_count) ||
         !readU8(data, length, offset, out.homing_state) ||
         !readU8(data, length, offset, out.blocked_directions) ||
-        !readU8(data, length, offset, out.flags))
+        !readU8(data, length, offset, out.flags) ||
+        !readU8(data, length, offset, out.procedure_phase))
     {
         return false;
     }
@@ -375,6 +384,213 @@ EncodeResult encodeMessage(uint8_t message_id, const NackPayload& payload, uint8
         return result;
     }
     return encodePayloadBuffer(message_id, buffer, sizeof(buffer), out, out_capacity);
+}
+
+bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* out, std::size_t capacity)
+{
+    std::size_t offset = 0;
+    const bool ok =
+        writeF32LE(out, capacity, offset, payload.v_approach) &&
+        writeF32LE(out, capacity, offset, payload.v_slow) &&
+        writeF32LE(out, capacity, offset, payload.v_measure) &&
+        writeF32LE(out, capacity, offset, payload.v_homing) &&
+        writeF32LE(out, capacity, offset, payload.acceleration) &&
+        writeF32LE(out, capacity, offset, payload.force_filter) &&
+        writeF32LE(out, capacity, offset, payload.xy_tolerance_N) &&
+        writeF32LE(out, capacity, offset, payload.xy_correction_step) &&
+        writeF32LE(out, capacity, offset, payload.xy_max_correction) &&
+        writeF32LE(out, capacity, offset, payload.insertion_buffer) &&
+        writeF32LE(out, capacity, offset, payload.collision_approach_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_retract_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_clamp_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_unclamp_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_contact_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_measure_N) &&
+        writeF32LE(out, capacity, offset, payload.spreader_extend_time_s) &&
+        writeF32LE(out, capacity, offset, payload.spreader_retract_time_s) &&
+        writeF32LE(out, capacity, offset, payload.force_tolerance_N) &&
+        writeF32LE(out, capacity, offset, payload.z_correction_gain) &&
+        writeF32LE(out, capacity, offset, payload.z_correction_max) &&
+        writeF32LE(out, capacity, offset, payload.minimum_correction) &&
+        writeU16LE(out, capacity, offset, payload.max_optimization_iterations) &&
+        writeF32LE(out, capacity, offset, payload.probe_search_speed) &&
+        writeF32LE(out, capacity, offset, payload.probe_search_distance) &&
+        writeF32LE(out, capacity, offset, payload.probe_backoff) &&
+        writeF32LE(out, capacity, offset, payload.home_offset_x) &&
+        writeF32LE(out, capacity, offset, payload.home_offset_y) &&
+        writeF32LE(out, capacity, offset, payload.home_offset_z) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_x) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_y) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_z);
+    return ok && offset == kMachineConfigPayloadWireSize;
+}
+
+bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, MachineConfigPayload& out)
+{
+    std::size_t offset = 0;
+    const bool ok =
+        readF32LE(data, length, offset, out.v_approach, true) &&
+        readF32LE(data, length, offset, out.v_slow, true) &&
+        readF32LE(data, length, offset, out.v_measure, true) &&
+        readF32LE(data, length, offset, out.v_homing, true) &&
+        readF32LE(data, length, offset, out.acceleration, true) &&
+        readF32LE(data, length, offset, out.force_filter, true) &&
+        readF32LE(data, length, offset, out.xy_tolerance_N, true) &&
+        readF32LE(data, length, offset, out.xy_correction_step, true) &&
+        readF32LE(data, length, offset, out.xy_max_correction, true) &&
+        readF32LE(data, length, offset, out.insertion_buffer, true) &&
+        readF32LE(data, length, offset, out.collision_approach_N, true) &&
+        readF32LE(data, length, offset, out.collision_retract_N, true) &&
+        readF32LE(data, length, offset, out.collision_clamp_N, true) &&
+        readF32LE(data, length, offset, out.collision_unclamp_N, true) &&
+        readF32LE(data, length, offset, out.collision_contact_N, true) &&
+        readF32LE(data, length, offset, out.collision_measure_N, true) &&
+        readF32LE(data, length, offset, out.spreader_extend_time_s, true) &&
+        readF32LE(data, length, offset, out.spreader_retract_time_s, true) &&
+        readF32LE(data, length, offset, out.force_tolerance_N, true) &&
+        readF32LE(data, length, offset, out.z_correction_gain, true) &&
+        readF32LE(data, length, offset, out.z_correction_max, true) &&
+        readF32LE(data, length, offset, out.minimum_correction, true) &&
+        readU16LE(data, length, offset, out.max_optimization_iterations) &&
+        readF32LE(data, length, offset, out.probe_search_speed, true) &&
+        readF32LE(data, length, offset, out.probe_search_distance, true) &&
+        readF32LE(data, length, offset, out.probe_backoff, true) &&
+        readF32LE(data, length, offset, out.home_offset_x, true) &&
+        readF32LE(data, length, offset, out.home_offset_y, true) &&
+        readF32LE(data, length, offset, out.home_offset_z, true) &&
+        readF32LE(data, length, offset, out.tool_offset_x, true) &&
+        readF32LE(data, length, offset, out.tool_offset_y, true) &&
+        readF32LE(data, length, offset, out.tool_offset_z, true);
+    return ok && offset == length && length == kMachineConfigPayloadWireSize;
+}
+
+bool encodeTestConfigurationPayload(const TestConfigurationPayload& payload, uint8_t* out,
+                                    std::size_t capacity)
+{
+    if (payload.mode > 1)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    return writeU8(out, capacity, offset, payload.mode) &&
+           writeF32LE(out, capacity, offset, payload.target_force_N) &&
+           writeU16LE(out, capacity, offset, payload.iterations) &&
+           writeU8(out, capacity, offset, payload.active_point_index) &&
+           offset == kTestConfigurationPayloadWireSize;
+}
+
+bool decodeTestConfigurationPayload(const uint8_t* data, std::size_t length, TestConfigurationPayload& out)
+{
+    std::size_t offset = 0;
+    if (!readU8(data, length, offset, out.mode) ||
+        !readF32LE(data, length, offset, out.target_force_N, true) ||
+        !readU16LE(data, length, offset, out.iterations) ||
+        !readU8(data, length, offset, out.active_point_index))
+    {
+        return false;
+    }
+    return out.mode <= 1 && offset == length && length == kTestConfigurationPayloadWireSize;
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const MachineConfigPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kMachineConfigPayloadWireSize];
+    if (!encodeMachineConfigPayload(payload, buffer, sizeof(buffer)))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, sizeof(buffer), out, out_capacity);
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const TestConfigurationPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kTestConfigurationPayloadWireSize];
+    if (!encodeTestConfigurationPayload(payload, buffer, sizeof(buffer)))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, sizeof(buffer), out, out_capacity);
+}
+
+bool encodeForcePathChunkPayload(const ForcePathChunkPayload& payload, uint8_t* out, std::size_t capacity,
+                                 std::size_t& bytes_written)
+{
+    bytes_written = 0;
+    if (payload.sample_count > kForcePathChunkMaxSamples)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    if (!writeU8(out, capacity, offset, payload.point_index) ||
+        !writeU16LE(out, capacity, offset, payload.iteration) ||
+        !writeU32LE(out, capacity, offset, payload.sequence) ||
+        !writeU8(out, capacity, offset, payload.sample_count) ||
+        !writeU32LE(out, capacity, offset, payload.dropped))
+    {
+        return false;
+    }
+    for (uint8_t i = 0; i < payload.sample_count; ++i)
+    {
+        if (!writeF32LE(out, capacity, offset, payload.z[i]) ||
+            !writeF32LE(out, capacity, offset, payload.fz[i]))
+        {
+            return false;
+        }
+    }
+    bytes_written = offset;
+    return offset == forcePathChunkWireSize(payload.sample_count);
+}
+
+bool decodeForcePathChunkPayload(const uint8_t* data, std::size_t length, ForcePathChunkPayload& out)
+{
+    out = ForcePathChunkPayload{};
+    std::size_t offset = 0;
+    if (!readU8(data, length, offset, out.point_index) || !readU16LE(data, length, offset, out.iteration) ||
+        !readU32LE(data, length, offset, out.sequence) || !readU8(data, length, offset, out.sample_count) ||
+        !readU32LE(data, length, offset, out.dropped))
+    {
+        return false;
+    }
+    if (out.sample_count > kForcePathChunkMaxSamples)
+    {
+        return false;
+    }
+    if (length != forcePathChunkWireSize(out.sample_count))
+    {
+        return false;
+    }
+    for (uint8_t i = 0; i < out.sample_count; ++i)
+    {
+        if (!readF32LE(data, length, offset, out.z[i], true) ||
+            !readF32LE(data, length, offset, out.fz[i], true))
+        {
+            return false;
+        }
+    }
+    return offset == length;
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const ForcePathChunkPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kForcePathChunkMaxPayloadWireSize];
+    std::size_t payload_size = 0;
+    if (!encodeForcePathChunkPayload(payload, buffer, sizeof(buffer), payload_size))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, payload_size, out, out_capacity);
 }
 
 EncodeResult encodeEmptyMessage(uint8_t message_id, uint8_t* out, std::size_t out_capacity)

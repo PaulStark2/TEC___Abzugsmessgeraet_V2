@@ -280,6 +280,69 @@ export async function fetchCurrentResults() {
   return result;
 }
 
+export async function fetchParameterCatalog() {
+  const response = await fetch('/api/parameters/catalog', { method: 'GET' });
+  return response.json();
+}
+
+export async function fetchMachineConfig() {
+  const response = await fetch('/api/machine-config', { method: 'GET' });
+  return response.json();
+}
+
+export async function unlockParameters(password) {
+  const response = await fetch('/api/parameters/unlock', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function saveMachineConfig(config) {
+  const response = await fetch('/api/machine-config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function fetchCalibration() {
+  const response = await fetch('/api/calibration', { method: 'GET' });
+  return response.json();
+}
+
+export async function setPlateOrigin(pose) {
+  const response = await fetch('/api/calibration/plate-origin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(pose || {}),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function startProbeCalibration() {
+  const response = await fetch('/api/calibration/probe-start', { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
 /**
  * @param {(status: object) => void} onStatus
  * @param {(connected: boolean, message?: string) => void} [onConnection]

@@ -15,9 +15,14 @@ const {
   encodeMoveToMessage,
   encodeBoolMessage,
   encodeLoadProgramMessage,
+  encodeMachineConfigMessage,
+  encodeTestConfigurationMessage,
+  encodePlateOriginMessage,
   decodeAckPayload,
   decodeNackPayload,
   decodeStatusReportPayload,
+  decodeMachineConfigPayload,
+  decodeForcePathChunkPayload,
   statusReportToGuiStatus,
 } = require('./m12Codec');
 const { MessageId, AckResultCode, NackErrorCode, DecodeResult } = require('./protocolTypes');
@@ -96,6 +101,9 @@ function createProtocolMachineClient(options = {}) {
   let reconnectTimer = null;
   const streamBuffer = new FrameStreamBuffer();
 
+  let lastMachineConfig = null;
+  let sessionReadyHandler = null;
+  let forcePathHandler = null;
   /** @type {Map<number, { resolve: Function, timer: NodeJS.Timeout }>} */
   const pendingByMessageId = new Map();
 
@@ -137,10 +145,16 @@ function createProtocolMachineClient(options = {}) {
       return;
     }
     // First valid status after TCP connect arms the session for mutating commands.
+    const becameReady = connected && !sessionReady;
     if (connected) {
       sessionReady = true;
     }
     status = statusReportToGuiStatus(decoded, connected && sessionReady);
+    if (becameReady && typeof sessionReadyHandler === 'function') {
+      Promise.resolve()
+        .then(() => sessionReadyHandler())
+        .catch((err) => console.error(`onSessionReady: ${err.message || err}`));
+    }
   }
 
   function handleInboundFrame(frame, decodeResult) {
@@ -150,6 +164,19 @@ function createProtocolMachineClient(options = {}) {
 
     if (frame.messageId === MessageId.MsgStatusReport) {
       applyStatusReport(frame.payload);
+      return;
+    }
+
+    if (frame.messageId === MessageId.MsgMachineConfig) {
+      lastMachineConfig = decodeMachineConfigPayload(frame.payload);
+      return;
+    }
+
+    if (frame.messageId === MessageId.MsgForcePathChunk) {
+      const chunk = decodeForcePathChunkPayload(frame.payload);
+      if (chunk && typeof forcePathHandler === 'function') {
+        forcePathHandler(chunk);
+      }
       return;
     }
 
@@ -518,6 +545,73 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdStart, encoded.frame);
   }
 
+  async function setMachineConfig(cfg) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeMachineConfigMessage(cfg);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_MACHINE_CONFIG' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetMachineConfig, encoded.frame);
+  }
+
+  async function getMachineConfig() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdGetMachineConfig);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode GET_MACHINE_CONFIG' };
+    }
+    const result = await sendFrameAndWait(MessageId.CmdGetMachineConfig, encoded.frame);
+    if (!result.ok) {
+      return result;
+    }
+    return { ok: true, config: lastMachineConfig, status: getStatus() };
+  }
+
+  async function setTestConfiguration(cfg) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeTestConfigurationMessage(cfg);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_TEST_CONFIGURATION' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetTestConfiguration, encoded.frame);
+  }
+
+  async function setPlateOrigin(x, y, z) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodePlateOriginMessage(x, y, z);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_PLATE_ORIGIN' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetPlateOrigin, encoded.frame);
+  }
+
+  async function startProbeCalibration() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdStartProbeCalib);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode START_PROBE_CALIB' };
+    }
+    return sendFrameAndWait(MessageId.CmdStartProbeCalib, encoded.frame);
+  }
+
+  function onSessionReady(handler) {
+    sessionReadyHandler = handler;
+  }
+
+  function onForcePathChunk(handler) {
+    forcePathHandler = handler;
+  }
+
   function close() {
     closed = true;
     if (reconnectTimer) {
@@ -552,6 +646,13 @@ function createProtocolMachineClient(options = {}) {
     setSpeed,
     loadProgram,
     start,
+    setMachineConfig,
+    getMachineConfig,
+    setTestConfiguration,
+    setPlateOrigin,
+    startProbeCalibration,
+    onSessionReady,
+    onForcePathChunk,
     close,
   };
 }

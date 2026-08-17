@@ -263,6 +263,7 @@ int main(int argc, char** argv)
             if (client != kInvalidSocket)
             {
                 std::vector<simbridge::OutboundFrame> status_push;
+                bridge.appendForcePathChunks(status_push);
                 bridge.appendStatusPush(status_push);
                 if (!status_push.empty() && !sendFrames(client, status_push))
                 {

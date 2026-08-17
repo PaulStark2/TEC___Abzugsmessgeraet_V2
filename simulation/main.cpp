@@ -85,6 +85,7 @@ int main()
 
     // Host owns Machine; Executor references it (no ownership).
     Machine machine;
+    machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
     TestExecutor executor(machine);
 
     // Hardcoded 3-point demo program (M8 only; no JSON/GUI).

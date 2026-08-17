@@ -1,5 +1,6 @@
 #include "CommandDispatcher.hpp"
 
+#include "ConfigMapping.hpp"
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
 #include "StatusSnapshot.hpp"
@@ -76,6 +77,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
 
     case tecomm::MessageId::CmdPause:
     {
+        if (executor_.processState() == ProcessState::Running && !executor_.pauseAllowed())
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
         const MachineState before = machine_.machineState();
         if (executor_.processState() == ProcessState::Running)
         {
@@ -123,6 +129,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         if (program_point_count_ == 0)
         {
             appendAck(message_id, tecomm::AckResultCode::ProgramEmpty, out);
+            break;
+        }
+        if (!machine_.calibrationSet().plate_origin_valid)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
         if (executor_.processState() == ProcessState::Running)
@@ -255,6 +266,90 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         }
         machine_.setFixtureExtend(value.value != 0);
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdSetMachineConfig:
+    {
+        tecomm::MachineConfigPayload payload{};
+        if (!tecomm::decodeMachineConfigPayload(frame.payload, frame.payload_length, payload))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        ConfigValidationError error = ConfigValidationError::Ok;
+        if (!machine_.trySetMachineConfig(toMachineConfig(payload), error))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, static_cast<uint8_t>(error), out);
+            break;
+        }
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdGetMachineConfig:
+    {
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        {
+            OutboundFrame frame_out{};
+            const tecomm::EncodeResult encoded = tecomm::encodeMessage(
+                static_cast<uint8_t>(tecomm::MessageId::MsgMachineConfig),
+                toMachineConfigPayload(machine_.machineConfig()), frame_out.data, sizeof(frame_out.data));
+            if (encoded.ok)
+            {
+                frame_out.length = encoded.bytes_written;
+                out.push_back(frame_out);
+            }
+        }
+        break;
+    }
+
+    case tecomm::MessageId::CmdSetTestConfiguration:
+    {
+        tecomm::TestConfigurationPayload payload{};
+        if (!tecomm::decodeTestConfigurationPayload(frame.payload, frame.payload_length, payload))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        ConfigValidationError error = ConfigValidationError::Ok;
+        if (!machine_.trySetTestConfiguration(toTestConfiguration(payload), error))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, static_cast<uint8_t>(error), out);
+            break;
+        }
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdSetPlateOrigin:
+    {
+        tecomm::MoveToPayload pose{};
+        if (!tecomm::decodeMoveToPayload(frame.payload, frame.payload_length, pose))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        machine_.setPlateOrigin(TestPoint{pose.x, pose.y, pose.z});
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdStartProbeCalib:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (executor_.startProbeCalibration())
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
         break;
     }
 
@@ -401,6 +496,7 @@ bool CommandDispatcher::isFaultGuarded(uint8_t message_id) const
     case tecomm::MessageId::CmdNop:
     case tecomm::MessageId::CmdClearFault:
     case tecomm::MessageId::CmdRequestStatus:
+    case tecomm::MessageId::CmdGetMachineConfig:
         return false;
     default:
         return true;

@@ -12,6 +12,10 @@ const resultsStore = require('./results/resultsStore');
 const procedureStore = require('./procedure/procedureStore');
 const { createProcedureService } = require('./procedure/procedureService');
 const { createPlantClient } = require('./simulation/plantClient');
+const machineConfigStore = require('./config/machineConfigStore');
+const { GROUPS: parameterGroups } = require('./config/parameterCatalog');
+const calibrationStore = require('./config/calibrationStore');
+const forcePathStore = require('./results/forcePathStore');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -212,6 +216,28 @@ async function handleCommand(body) {
 const machineClient = createMachineClient();
 const procedureService = createProcedureService(machineClient);
 const plantClient = createPlantClient();
+const PARAMETER_MENU_PASSWORD = process.env.PARAMETER_MENU_PASSWORD || 'tec-admin';
+let parametersUnlocked = false;
+
+if (typeof machineClient.onForcePathChunk === 'function') {
+  machineClient.onForcePathChunk((chunk) => forcePathStore.appendChunk(chunk));
+}
+
+if (typeof machineClient.onSessionReady === 'function') {
+  machineClient.onSessionReady(async () => {
+    const cfg = machineConfigStore.load();
+    if (typeof machineClient.setMachineConfig === 'function') {
+      const pushed = await machineClient.setMachineConfig(cfg);
+      if (!pushed.ok) {
+        console.error(`[CONFIG] push on connect failed: ${pushed.error || 'unknown'}`);
+      }
+    }
+    const calib = calibrationStore.load();
+    if (calib.plateOriginValid && calib.plateOrigin && typeof machineClient.setPlateOrigin === 'function') {
+      await machineClient.setPlateOrigin(calib.plateOrigin.x, calib.plateOrigin.y, calib.plateOrigin.z);
+    }
+  });
+}
 
 /**
  * Forward a simulation plant result. Connection problems answer with 503 so the
@@ -437,6 +463,97 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     sendJson(res, 200, { ok: true, results: current });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/parameters/unlock') {
+    try {
+      const body = await readJsonBody(req);
+      if (String(body.password || '') !== PARAMETER_MENU_PASSWORD) {
+        sendJson(res, 401, { ok: false, error: 'Ungültiges Passwort' });
+        return;
+      }
+      parametersUnlocked = true;
+      sendJson(res, 200, { ok: true, unlocked: true });
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/parameters/catalog') {
+    sendJson(res, 200, { ok: true, unlocked: parametersUnlocked, groups: parameterGroups });
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/machine-config') {
+    sendJson(res, 200, { ok: true, unlocked: parametersUnlocked, config: machineConfigStore.load() });
+    return;
+  }
+
+  if (req.method === 'PUT' && urlPath === '/api/machine-config') {
+    if (!parametersUnlocked) {
+      sendJson(res, 403, { ok: false, error: 'Parametereinstellungen sind gesperrt' });
+      return;
+    }
+    try {
+      const body = await readJsonBody(req);
+      const incoming = body.config || body;
+      if (typeof machineClient.setMachineConfig === 'function' && machineClient.getStatus().connected) {
+        const result = await machineClient.setMachineConfig(incoming);
+        if (!result.ok) {
+          sendJson(res, 400, {
+            ok: false,
+            error: result.error || 'Controller hat die Konfiguration abgelehnt (bisheriger Wert bleibt).',
+          });
+          return;
+        }
+      }
+      const saved = machineConfigStore.save(incoming);
+      sendJson(res, 200, { ok: true, config: saved });
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/calibration') {
+    sendJson(res, 200, { ok: true, calibration: calibrationStore.load() });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/plate-origin') {
+    try {
+      const body = await readJsonBody(req);
+      const status = machineClient.getStatus();
+      const x = Number(body.x !== undefined ? body.x : status.x);
+      const y = Number(body.y !== undefined ? body.y : status.y);
+      const z = Number(body.z !== undefined ? body.z : status.z);
+      if (![x, y, z].every(Number.isFinite)) {
+        sendJson(res, 400, { ok: false, error: 'x, y, z must be finite' });
+        return;
+      }
+      if (typeof machineClient.setPlateOrigin === 'function' && status.connected) {
+        const result = await machineClient.setPlateOrigin(x, y, z);
+        if (!result.ok) {
+          sendJson(res, 400, { ok: false, error: result.error || 'CmdSetPlateOrigin failed' });
+          return;
+        }
+      }
+      sendJson(res, 200, { ok: true, calibration: calibrationStore.setPlateOrigin({ x, y, z }) });
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/probe-start') {
+    if (typeof machineClient.startProbeCalibration !== 'function') {
+      sendJson(res, 400, { ok: false, error: 'Probe-Kalibrierung ist auf diesem Backend nicht verfügbar' });
+      return;
+    }
+    const result = await machineClient.startProbeCalibration();
+    sendJson(res, result.ok ? 200 : 400, result);
     return;
   }
 

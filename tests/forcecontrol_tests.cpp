@@ -323,6 +323,7 @@ int main()
         params.fz_safety_threshold_N = 10.0f;
 
         Machine machine(params);
+        machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
         TestExecutor ex(machine);
 
         TestProgram program;
