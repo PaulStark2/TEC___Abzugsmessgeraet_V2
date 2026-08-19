@@ -219,7 +219,7 @@ ends (`Completed`).
 ### Automatic — `CmdStart` (0x13)
 
 ```text
-ProbeApproach (Safe-Z → XY to nominal_probe → approach Z)
+ProbeApproach (Safe-Z → XY to probe_center → approach Z)
   → ProbeCalibration
   → MoveSafePose
   → normal test/aging cycle
@@ -267,7 +267,7 @@ Writable via Parametereinstellungen. SafetyLimits are **not** GUI-editable.
 | `approach_distance` | 10 mm |
 | `fine_search_speed` | 1 mm/s |
 | `num_fine_searches` | 3 |
-| `nominal_probe_{x,y,z}` | (40, 40, 10) mm |
+| `probe_offset_reference_{x,y,z}` | (40, 40, 10) mm |
 
 `MachineConfig` payload is **196 bytes** (was 184 after the first M19.0 cut,
 142 in M18): 48 × float32 + `max_optimization_iterations` u16 +
@@ -281,7 +281,7 @@ Writable via Parametereinstellungen. SafetyLimits are **not** GUI-editable.
   `CmdGetMachineConfig` returns the replaced value.
 - After a successful manual calib the GUI can `POST /api/calibration/sync`:
   store `tool_offset` in `machine-config.json` and reconstruct
-  `probe_center = nominal_probe − tool_offset` in `calibration.json`.
+  `probe_center = probe_offset_reference − tool_offset` in `calibration.json`.
 
 ## Failure modes
 

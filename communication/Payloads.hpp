@@ -132,9 +132,12 @@ struct MachineConfigPayload
     float search_depth;
     float approach_distance;
     float fine_search_speed;
-    float nominal_probe_x;
-    float nominal_probe_y;
-    float nominal_probe_z;
+    // Fixed reference used exclusively for tool_offset definition:
+    // tool_offset = probe_offset_reference - measured_probe.
+    // Must never be used as a motion/search target.
+    float probe_offset_reference_x;
+    float probe_offset_reference_y;
+    float probe_offset_reference_z;
     float tool_cylindrical_height;
     float probe_xy_search_margin;
     float insert_search_distance;

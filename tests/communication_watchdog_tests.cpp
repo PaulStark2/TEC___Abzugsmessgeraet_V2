@@ -127,6 +127,7 @@ int main()
             return 30;
         }
         homeMachine(machine);
+        (void)calibrateProbeCenter(machine);
         TestExecutor ex(machine);
         TestProgram program;
         program.add(TestPoint{3.0f, 0.0f, 0.0f});

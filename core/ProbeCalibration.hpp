@@ -33,7 +33,10 @@ public:
         Error = 8
     };
 
-    bool start(Machine& machine);
+    // search_reference: current TCP pose used as origin for ProbeSearch moves.
+    // IMPORTANT: must be provided by the caller so ProbeCalibration never assumes any
+    // configured probe position. The probe_offset_reference is used ONLY for tool_offset math.
+    bool start(Machine& machine, const TestPoint& search_reference);
     void tick(float dt, Machine& machine);
     void abort();
 

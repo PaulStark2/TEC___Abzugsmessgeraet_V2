@@ -97,6 +97,7 @@ int main()
     {
         return 90;
     }
+    (void)calibrateProbeCenter(machine);
     TestExecutor executor(machine);
     simbridge::CommandDispatcher dispatcher(machine, executor);
 
@@ -399,6 +400,7 @@ int main()
         {
             return 79;
         }
+        (void)calibrateProbeCenter(m4);
         TestExecutor ex4(m4);
         simbridge::CommandDispatcher d4(m4, ex4);
 

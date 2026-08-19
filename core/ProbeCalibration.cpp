@@ -4,7 +4,7 @@
 
 #include <cmath>
 
-bool ProbeCalibration::start(Machine& machine)
+bool ProbeCalibration::start(Machine& machine, const TestPoint& search_reference)
 {
     if (machine.machineState() == MachineState::Fault)
     {
@@ -13,7 +13,7 @@ bool ProbeCalibration::start(Machine& machine)
     }
 
     const MachineConfig::Probe& probe = machine.machineConfig().probe;
-    reference_ = probe.nominal_probe;
+    reference_ = search_reference;
     result_ = TestPoint{};
     tool_offset_ = TestPoint{};
     contact_z_ = TestPoint{};
@@ -205,7 +205,7 @@ bool ProbeCalibration::finishAndStore(Machine& machine)
     result_.x = xy_center.x;
     result_.y = xy_center.y;
     result_.z = z_center.z;
-    if (!computeToolOffset(probe.nominal_probe, result_, tool_offset_))
+    if (!computeToolOffset(probe.probe_offset_reference, result_, tool_offset_))
     {
         enterError();
         return false;

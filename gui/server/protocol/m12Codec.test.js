@@ -247,9 +247,9 @@ function sampleMachineConfig() {
     search_depth: 5,
     approach_distance: 10,
     fine_search_speed: 1,
-    nominal_probe_x: 0,
-    nominal_probe_y: 0,
-    nominal_probe_z: 5,
+    probe_offset_reference_x: 0,
+    probe_offset_reference_y: 0,
+    probe_offset_reference_z: 5,
     num_fine_searches: 3,
   };
 }

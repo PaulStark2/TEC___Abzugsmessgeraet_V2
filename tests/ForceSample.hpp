@@ -19,12 +19,13 @@ inline HostInputs withFreshForce(HostInputs in)
     return in;
 }
 
-// Geometric probe disc at the configured nominal center (aligned plant for tests).
-inline HostInputs withVirtualProbe(const Machine& machine, HostInputs in = HostInputs{})
+// Core-independent virtual probe disc for architecture tests.
+// disc_center represents the SimPlant "ground truth" disc center in machine coordinates.
+inline HostInputs withVirtualProbeDisc(const Machine& machine, const TestPoint& disc_center,
+                                         HostInputs in = HostInputs{})
 {
     const MachineConfig::Probe& probe = machine.machineConfig().probe;
-    const TestPoint disc = probe.nominal_probe;
-    if (toolContactsProbeDisc(machine.x(), machine.y(), machine.z(), disc.x, disc.y, disc.z,
+    if (toolContactsProbeDisc(machine.x(), machine.y(), machine.z(), disc_center.x, disc_center.y, disc_center.z,
                               probe.measuring_head_diameter, probe.measuring_head_thickness,
                               probe.tool_diameter, probe.tool_cylindrical_height))
     {
@@ -38,6 +39,14 @@ inline HostInputs withVirtualProbe(const Machine& machine, HostInputs in = HostI
         in.probeTriggerSequence = probe_seq++;
     }
     return in;
+}
+
+// Default helper: disc center equals the configured probe_offset_reference.
+// This keeps legacy unit tests stable; architecture tests should prefer withVirtualProbeDisc().
+inline HostInputs withVirtualProbe(const Machine& machine, HostInputs in = HostInputs{})
+{
+    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    return withVirtualProbeDisc(machine, probe.probe_offset_reference, in);
 }
 
 inline HostInputs withPlantInputs(const Machine& machine, HostInputs in = HostInputs{})
@@ -99,4 +108,49 @@ inline bool homeMachine(Machine& machine)
     machine.setHostInputs(withFreshForce(in));
     machine.tick(0.05f);
     return machine.isHomed();
+}
+
+// For tests that require the automatic procedure to start,
+// we must calibrate probe_center via a standalone M19 run first.
+inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 2500)
+{
+    // Preserve the test's intended machine pose. Some unit tests assume that
+    // after homing the TCP is at/near (0,0,...) when they start an automatic process.
+    const TestPoint start_pose{machine.x(), machine.y(), machine.z()};
+
+    // Manual calibration is defined as: user jogs TCP near the probe,
+    // then M19 uses current TCP pose as search_reference.
+    // For the default virtual probe, the disc center equals probe_offset_reference.
+    const MachineConfig::Probe& probe_cfg = machine.machineConfig().probe;
+    machine.moveTo(probe_cfg.probe_offset_reference.x, probe_cfg.probe_offset_reference.y,
+                    probe_cfg.probe_offset_reference.z);
+    for (int i = 0; i < 600 && machine.motionState() != MotionState::AtTarget; ++i)
+    {
+        machine.setHostInputs(withFreshForce(HostInputs{}));
+        machine.tick(0.05f);
+    }
+
+    TestExecutor ex(machine);
+    if (!ex.startProbeCalibration())
+    {
+        return false;
+    }
+    for (int i = 0; i < max_ticks && ex.processState() == ProcessState::Running; ++i)
+    {
+        machine.setHostInputs(withPlantInputs(machine));
+        ex.tick(0.05f);
+    }
+    const bool ok = machine.calibrationSet().probe_center_valid;
+
+    // Restore pose for tests. Automatic procedures assume the machine starts at Safe-Z,
+    // and `atSafeZ()` is intentionally strict.
+    const float safe_z = machine.machineConfig().motion.safe_z;
+    machine.moveTo(start_pose.x, start_pose.y, safe_z);
+    for (int i = 0; i < 600 && machine.motionState() != MotionState::AtTarget; ++i)
+    {
+        machine.setHostInputs(withFreshForce(HostInputs{}));
+        machine.tick(0.05f);
+    }
+
+    return ok;
 }

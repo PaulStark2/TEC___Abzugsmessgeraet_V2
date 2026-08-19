@@ -17,6 +17,21 @@ function load() {
   try {
     const raw = fs.readFileSync(FILE_PATH, 'utf8');
     const parsed = JSON.parse(raw);
+    // Migration: nominal_probe_* -> probe_offset_reference_*
+    // (keeps legacy user configs working after the semantic rename).
+    if (parsed.nominal_probe_x !== undefined) {
+      parsed.probe_offset_reference_x = parsed.probe_offset_reference_x ?? parsed.nominal_probe_x;
+      delete parsed.nominal_probe_x;
+    }
+    if (parsed.nominal_probe_y !== undefined) {
+      parsed.probe_offset_reference_y = parsed.probe_offset_reference_y ?? parsed.nominal_probe_y;
+      delete parsed.nominal_probe_y;
+    }
+    if (parsed.nominal_probe_z !== undefined) {
+      parsed.probe_offset_reference_z = parsed.probe_offset_reference_z ?? parsed.nominal_probe_z;
+      delete parsed.nominal_probe_z;
+    }
+
     return { ...defaultMachineConfigPayload(), ...parsed };
   } catch {
     return defaultMachineConfigPayload();

@@ -437,9 +437,9 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.search_depth) &&
         writeF32LE(out, capacity, offset, payload.approach_distance) &&
         writeF32LE(out, capacity, offset, payload.fine_search_speed) &&
-        writeF32LE(out, capacity, offset, payload.nominal_probe_x) &&
-        writeF32LE(out, capacity, offset, payload.nominal_probe_y) &&
-        writeF32LE(out, capacity, offset, payload.nominal_probe_z) &&
+        writeF32LE(out, capacity, offset, payload.probe_offset_reference_x) &&
+        writeF32LE(out, capacity, offset, payload.probe_offset_reference_y) &&
+        writeF32LE(out, capacity, offset, payload.probe_offset_reference_z) &&
         writeF32LE(out, capacity, offset, payload.tool_cylindrical_height) &&
         writeF32LE(out, capacity, offset, payload.probe_xy_search_margin) &&
         writeF32LE(out, capacity, offset, payload.insert_search_distance) &&
@@ -494,9 +494,9 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.search_depth, true) &&
         readF32LE(data, length, offset, out.approach_distance, true) &&
         readF32LE(data, length, offset, out.fine_search_speed, true) &&
-        readF32LE(data, length, offset, out.nominal_probe_x, true) &&
-        readF32LE(data, length, offset, out.nominal_probe_y, true) &&
-        readF32LE(data, length, offset, out.nominal_probe_z, true) &&
+        readF32LE(data, length, offset, out.probe_offset_reference_x, true) &&
+        readF32LE(data, length, offset, out.probe_offset_reference_y, true) &&
+        readF32LE(data, length, offset, out.probe_offset_reference_z, true) &&
         readF32LE(data, length, offset, out.tool_cylindrical_height, true) &&
         readF32LE(data, length, offset, out.probe_xy_search_margin, true) &&
         readF32LE(data, length, offset, out.insert_search_distance, true) &&

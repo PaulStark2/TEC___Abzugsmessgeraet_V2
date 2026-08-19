@@ -72,7 +72,10 @@ struct MachineConfig
         float tool_cylindrical_height = 15.0f; // vertical tool cylinder from TCP in +Z
         float xy_search_margin = 2.0f; // extra inward XY travel past probe radius; not tool radius
         unsigned num_fine_searches = 3u;
-        TestPoint nominal_probe{40.0f, 40.0f, 10.0f}; // expected disc center, inside default 0..100 travel
+        // Fixed reference point used exclusively for tool_offset definition:
+        // tool_offset = probe_offset_reference - measured_probe.
+        // This is NOT the real/expected probe center and must never be used as a motion/search target.
+        TestPoint probe_offset_reference{40.0f, 40.0f, 10.0f};
     };
 
     struct Communication
@@ -83,7 +86,7 @@ struct MachineConfig
     struct Calibration
     {
         TestPoint home_offset{0.0f, 0.0f, 0.0f}; // pose written after homing
-        TestPoint tool_offset{0.0f, 0.0f, 0.0f}; // TCP correction: nominal_probe - measured_probe
+        TestPoint tool_offset{0.0f, 0.0f, 0.0f}; // TCP correction in machine coordinates
     };
 
     Motion motion{};

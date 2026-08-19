@@ -176,6 +176,18 @@ async function handleCommand(body) {
       }
       result = await machineClient.pneumaticClose();
       break;
+    case 'fixtureOpen':
+      if (typeof machineClient.fixtureOpen !== 'function') {
+        return { ok: false, error: 'fixtureOpen not supported by client' };
+      }
+      result = await machineClient.fixtureOpen();
+      break;
+    case 'fixtureClose':
+      if (typeof machineClient.fixtureClose !== 'function') {
+        return { ok: false, error: 'fixtureClose not supported by client' };
+      }
+      result = await machineClient.fixtureClose();
+      break;
     case 'home':
       if (typeof machineClient.home !== 'function') {
         return { ok: false, error: 'home not supported by client' };
@@ -592,9 +604,9 @@ const server = http.createServer(async (req, res) => {
     if (status.probeCenterValid) {
       calib = calibrationStore.setProbeCenter(
         {
-          x: c.nominal_probe_x - c.tool_offset_x,
-          y: c.nominal_probe_y - c.tool_offset_y,
-          z: c.nominal_probe_z - c.tool_offset_z,
+          x: c.probe_offset_reference_x - c.tool_offset_x,
+          y: c.probe_offset_reference_y - c.tool_offset_y,
+          z: c.probe_offset_reference_z - c.tool_offset_z,
         },
         { x: c.tool_offset_x, y: c.tool_offset_y, z: c.tool_offset_z }
       );

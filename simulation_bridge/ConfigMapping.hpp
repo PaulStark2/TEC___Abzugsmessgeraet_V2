@@ -44,7 +44,8 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.probe.search_depth = p.search_depth;
     cfg.probe.approach_distance = p.approach_distance;
     cfg.probe.fine_search_speed = p.fine_search_speed;
-    cfg.probe.nominal_probe = TestPoint{p.nominal_probe_x, p.nominal_probe_y, p.nominal_probe_z};
+    cfg.probe.probe_offset_reference = TestPoint{p.probe_offset_reference_x, p.probe_offset_reference_y,
+                                                  p.probe_offset_reference_z};
     cfg.probe.num_fine_searches = p.num_fine_searches;
     cfg.calibration.home_offset = TestPoint{p.home_offset_x, p.home_offset_y, p.home_offset_z};
     cfg.calibration.tool_offset = TestPoint{p.tool_offset_x, p.tool_offset_y, p.tool_offset_z};
@@ -105,9 +106,9 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.search_depth = cfg.probe.search_depth;
     p.approach_distance = cfg.probe.approach_distance;
     p.fine_search_speed = cfg.probe.fine_search_speed;
-    p.nominal_probe_x = cfg.probe.nominal_probe.x;
-    p.nominal_probe_y = cfg.probe.nominal_probe.y;
-    p.nominal_probe_z = cfg.probe.nominal_probe.z;
+    p.probe_offset_reference_x = cfg.probe.probe_offset_reference.x;
+    p.probe_offset_reference_y = cfg.probe.probe_offset_reference.y;
+    p.probe_offset_reference_z = cfg.probe.probe_offset_reference.z;
     p.num_fine_searches = static_cast<uint16_t>(cfg.probe.num_fine_searches);
     return p;
 }

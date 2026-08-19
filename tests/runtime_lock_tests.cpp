@@ -50,6 +50,7 @@ static void seed(Machine& machine, TestExecutor& ex)
     ConfigValidationError err = ConfigValidationError::Ok;
     machine.trySetTestConfiguration(cfg, err);
     homeMachine(machine);
+    (void)calibrateProbeCenter(machine);
     TestProgram program;
     program.add(TestPoint{2.0f, 0.0f, 0.0f});
     ex.setProgram(program);

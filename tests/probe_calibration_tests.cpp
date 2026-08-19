@@ -65,6 +65,20 @@ static bool runCalib(ProbeCalibration& calib, Machine& machine, const TestPoint&
     return calib.isComplete() && !calib.isError();
 }
 
+static void moveMachineTo(Machine& machine, const TestPoint& target, int max_ticks = 800)
+{
+    machine.moveTo(target.x, target.y, target.z);
+    for (int i = 0; i < max_ticks; ++i)
+    {
+        machine.setHostInputs(withFreshForce(HostInputs{}));
+        machine.tick(0.05f);
+        if (machine.motionState() == MotionState::AtTarget)
+        {
+            return;
+        }
+    }
+}
+
 int main()
 {
     // Search end without trigger is not a valid result and does not store a center.
@@ -75,7 +89,7 @@ int main()
             return 1;
         }
         ProbeCalibration calib;
-        if (!calib.start(m))
+        if (!calib.start(m, m.machineConfig().probe.probe_offset_reference))
         {
             return 2;
         }
@@ -102,9 +116,9 @@ int main()
         {
             return 10;
         }
-        const TestPoint disc = m.machineConfig().probe.nominal_probe;
+        const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration calib;
-        if (!calib.start(m) || !runCalib(calib, m, disc, 4000))
+        if (!calib.start(m, disc) || !runCalib(calib, m, disc, 4000))
         {
             return 11;
         }
@@ -131,10 +145,10 @@ int main()
         {
             return 20;
         }
-        const TestPoint nominal = m.machineConfig().probe.nominal_probe;
+        const TestPoint nominal = m.machineConfig().probe.probe_offset_reference;
         const TestPoint disc{nominal.x + 1.0f, nominal.y - 2.0f, nominal.z + 1.0f};
         ProbeCalibration calib;
-        if (!calib.start(m) || !runCalib(calib, m, disc, 4000))
+        if (!calib.start(m, disc) || !runCalib(calib, m, disc, 4000))
         {
             return 21;
         }
@@ -152,7 +166,7 @@ int main()
         }
 
         ProbeCalibration calib2;
-        if (!calib2.start(m) || !runCalib(calib2, m, disc, 4000))
+        if (!calib2.start(m, disc) || !runCalib(calib2, m, disc, 4000))
         {
             return 24;
         }
@@ -173,7 +187,7 @@ int main()
         Machine m;
         applyFastProbeConfig(m);
         ProbeCalibration calib;
-        calib.start(m);
+        calib.start(m, m.machineConfig().probe.probe_offset_reference);
         calib.abort();
         if (!calib.isError() || calib.isComplete())
         {
@@ -189,9 +203,9 @@ int main()
     {
         Machine m;
         applyFastProbeConfig(m);
-        const TestPoint disc = m.machineConfig().probe.nominal_probe;
+        const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration first;
-        if (!first.start(m) || !runCalib(first, m, disc, 4000))
+        if (!first.start(m, disc) || !runCalib(first, m, disc, 4000))
         {
             return 40;
         }
@@ -199,7 +213,7 @@ int main()
         const TestPoint kept_offset = m.calibrationSet().tool_offset;
 
         ProbeCalibration calib;
-        calib.start(m);
+        calib.start(m, m.machineConfig().probe.probe_offset_reference);
         HostInputs in{};
         in.e_stop = true;
         m.setHostInputs(withFreshForce(in));
@@ -224,15 +238,16 @@ int main()
     {
         Machine m;
         applyFastProbeConfig(m);
-        const TestPoint disc = m.machineConfig().probe.nominal_probe;
+        const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration first;
-        if (!first.start(m) || !runCalib(first, m, disc, 4000))
+        if (!first.start(m, disc) || !runCalib(first, m, disc, 4000))
         {
             return 50;
         }
+        const TestPoint kept_center = m.calibrationSet().probe_center;
         const TestPoint kept = m.calibrationSet().tool_offset;
         ProbeCalibration fail;
-        fail.start(m);
+        fail.start(m, m.machineConfig().probe.probe_offset_reference);
         for (int i = 0; i < 2500 && !fail.isComplete() && !fail.isError(); ++i)
         {
             m.setHostInputs(withFreshForce(HostInputs{}));
@@ -249,6 +264,16 @@ int main()
         {
             return 52;
         }
+        if (!m.calibrationSet().probe_center_valid)
+        {
+            return 53;
+        }
+        if (!nearEqual(m.calibrationSet().probe_center.x, kept_center.x) ||
+            !nearEqual(m.calibrationSet().probe_center.y, kept_center.y) ||
+            !nearEqual(m.calibrationSet().probe_center.z, kept_center.z))
+        {
+            return 54;
+        }
     }
 
     // XY contact Z stays at measured center Z minus search_depth (not disc mid-plane).
@@ -258,7 +283,7 @@ int main()
         {
             return 60;
         }
-        const TestPoint disc = m.machineConfig().probe.nominal_probe;
+        const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeSearch search;
         ProbeSearch::Request r{};
         r.reference = disc;
@@ -301,9 +326,9 @@ int main()
         {
             return 70;
         }
-        const TestPoint disc = m.machineConfig().probe.nominal_probe;
+        const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration calib;
-        if (!calib.start(m))
+        if (!calib.start(m, disc))
         {
             return 71;
         }
@@ -345,9 +370,9 @@ int main()
         {
             return 80;
         }
-        const TestPoint disc1 = m1.machineConfig().probe.nominal_probe;
+        const TestPoint disc1 = m1.machineConfig().probe.probe_offset_reference;
         ProbeCalibration c1;
-        if (!c1.start(m1))
+        if (!c1.start(m1, disc1))
         {
             return 81;
         }
@@ -378,9 +403,9 @@ int main()
             {
                 return 84;
             }
-            const TestPoint disc0 = m0.machineConfig().probe.nominal_probe;
+            const TestPoint disc0 = m0.machineConfig().probe.probe_offset_reference;
             ProbeCalibration c0;
-            if (!c0.start(m0))
+            if (!c0.start(m0, disc0))
             {
                 return 85;
             }
@@ -422,9 +447,9 @@ int main()
             {
                 return 90;
             }
-            const TestPoint disc2 = m2.machineConfig().probe.nominal_probe;
+            const TestPoint disc2 = m2.machineConfig().probe.probe_offset_reference;
             ProbeCalibration c2;
-            if (!c2.start(m2))
+            if (!c2.start(m2, disc2))
             {
                 return 91;
             }
@@ -471,12 +496,13 @@ int main()
         const float tcp_z_top = expected_center.z + 0.5f * thickness;
         const float tcp_z_lat = expected_center.z - search_depth;
 
-        const TestPoint nominal = m.machineConfig().probe.nominal_probe;
+        const TestPoint nominal = m.machineConfig().probe.probe_offset_reference;
         const TestPoint expected_offset{nominal.x - expected_center.x, nominal.y - expected_center.y,
                                           nominal.z - expected_center.z};
 
         ProbeCalibration calib;
-        if (!calib.start(m))
+        const TestPoint search_ref{m.x(), m.y(), m.z()};
+        if (!calib.start(m, search_ref))
         {
             return 91;
         }
@@ -528,6 +554,87 @@ int main()
         }
     }
 
+    // Architecture proof: disc center differs strongly from probe_offset_reference.
+    // M19 must discover the real disc center via trigger contacts and must not search
+    // around probe_offset_reference.
+    {
+        Machine m;
+        if (!applyFastProbeConfig(m))
+        {
+            return 200;
+        }
+
+        const TestPoint probe_ref = m.machineConfig().probe.probe_offset_reference;
+        const TestPoint disc1{73.0f, 31.0f, 14.0f};
+        const TestPoint start_tcp{72.0f, 30.0f, 20.0f};
+
+        moveMachineTo(m, start_tcp);
+
+        ProbeCalibration calib;
+        const TestPoint search_ref{m.x(), m.y(), m.z()};
+        if (!calib.start(m, search_ref) || !runCalib(calib, m, disc1, 8000))
+        {
+            return 201;
+        }
+
+        const TestPoint measured_center = m.calibrationSet().probe_center;
+        if (!nearEqual(measured_center.x, disc1.x) || !nearEqual(measured_center.y, disc1.y) ||
+            !nearEqual(measured_center.z, disc1.z, 1.0f))
+        {
+            return 202;
+        }
+
+        // tool_offset definition must stay unchanged:
+        // tool_offset = probe_offset_reference - measured_probe
+        const TestPoint expected_offset{probe_ref.x - disc1.x, probe_ref.y - disc1.y, probe_ref.z - disc1.z};
+        const TestPoint measured_offset = m.calibrationSet().tool_offset;
+        if (!nearEqual(measured_offset.x, expected_offset.x, 1.0f) ||
+            !nearEqual(measured_offset.y, expected_offset.y, 1.0f) ||
+            !nearEqual(measured_offset.z, expected_offset.z, 1.0f))
+        {
+            return 203;
+        }
+    }
+
+    // Multiple discs with the same core configuration:
+    // Core must keep using the current search_reference and discover the new disc center.
+    {
+        Machine m;
+        if (!applyFastProbeConfig(m))
+        {
+            return 210;
+        }
+        const TestPoint probe_ref = m.machineConfig().probe.probe_offset_reference;
+        const TestPoint disc2{55.0f, 67.0f, 8.0f};
+        // Pick a TCP z so ProbeSearch's Z end aligns with disc z.
+        const float search_depth = m.machineConfig().probe.search_depth;
+        const TestPoint start_tcp2{54.0f, 66.0f, disc2.z + search_depth};
+        moveMachineTo(m, start_tcp2);
+
+        ProbeCalibration calib2;
+        const TestPoint search_ref2{m.x(), m.y(), m.z()};
+        if (!calib2.start(m, search_ref2) || !runCalib(calib2, m, disc2, 8000))
+        {
+            return 211;
+        }
+
+        const TestPoint measured_center2 = m.calibrationSet().probe_center;
+        if (!nearEqual(measured_center2.x, disc2.x) || !nearEqual(measured_center2.y, disc2.y) ||
+            !nearEqual(measured_center2.z, disc2.z, 1.0f))
+        {
+            return 212;
+        }
+
+        const TestPoint expected_offset2{probe_ref.x - disc2.x, probe_ref.y - disc2.y, probe_ref.z - disc2.z};
+        const TestPoint measured_offset2 = m.calibrationSet().tool_offset;
+        if (!nearEqual(measured_offset2.x, expected_offset2.x, 1.0f) ||
+            !nearEqual(measured_offset2.y, expected_offset2.y, 1.0f) ||
+            !nearEqual(measured_offset2.z, expected_offset2.z, 1.0f))
+        {
+            return 213;
+        }
+    }
+
     // Trigger without a valid trigger pose must not complete calibration nor overwrite offsets.
     {
         Machine kept_machine;
@@ -535,9 +642,11 @@ int main()
         {
             return 100;
         }
-        const TestPoint disc = kept_machine.machineConfig().probe.nominal_probe;
+        const TestPoint disc = kept_machine.machineConfig().probe.probe_offset_reference;
+        moveMachineTo(kept_machine, disc);
         ProbeCalibration kept_calib;
-        if (!kept_calib.start(kept_machine))
+        const TestPoint kept_search_ref{kept_machine.x(), kept_machine.y(), kept_machine.z()};
+        if (!kept_calib.start(kept_machine, kept_search_ref))
         {
             return 101;
         }
@@ -557,7 +666,8 @@ int main()
 
         Machine fail_machine = kept_machine;
         ProbeCalibration fail_calib;
-        if (!fail_calib.start(fail_machine))
+        const TestPoint fail_search_ref{fail_machine.x(), fail_machine.y(), fail_machine.z()};
+        if (!fail_calib.start(fail_machine, fail_search_ref))
         {
             return 103;
         }

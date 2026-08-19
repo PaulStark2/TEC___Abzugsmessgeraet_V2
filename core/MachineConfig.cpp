@@ -212,11 +212,12 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     {
         return ConfigValidationError::IterationsZero;
     }
-    if (!std::isfinite(config.probe.nominal_probe.x) || !std::isfinite(config.probe.nominal_probe.y) ||
-        !std::isfinite(config.probe.nominal_probe.z) ||
-        std::fabs(config.probe.nominal_probe.x) > SafetyLimits::kMaxNominalAbs ||
-        std::fabs(config.probe.nominal_probe.y) > SafetyLimits::kMaxNominalAbs ||
-        std::fabs(config.probe.nominal_probe.z) > SafetyLimits::kMaxNominalAbs)
+    if (!std::isfinite(config.probe.probe_offset_reference.x) ||
+        !std::isfinite(config.probe.probe_offset_reference.y) ||
+        !std::isfinite(config.probe.probe_offset_reference.z) ||
+        std::fabs(config.probe.probe_offset_reference.x) > SafetyLimits::kMaxNominalAbs ||
+        std::fabs(config.probe.probe_offset_reference.y) > SafetyLimits::kMaxNominalAbs ||
+        std::fabs(config.probe.probe_offset_reference.z) > SafetyLimits::kMaxNominalAbs)
     {
         return ConfigValidationError::SafeZInvalid;
     }

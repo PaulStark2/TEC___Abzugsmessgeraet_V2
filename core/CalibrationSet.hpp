@@ -13,7 +13,7 @@ struct CalibrationSet
     bool probe_center_valid = false; // false until ProbeCalibration completes
 
     // TCP correction in machine coordinates. Replaced on each successful calib:
-    // tool_offset = nominal_probe - measured_probe. Never accumulated.
+    // tool_offset = probe_offset_reference - measured_probe. Never accumulated.
     TestPoint tool_offset{0.0f, 0.0f, 0.0f};
     TestPoint home_offset{0.0f, 0.0f, 0.0f}; // pose applied after successful homing
 };

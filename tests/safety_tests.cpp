@@ -210,6 +210,7 @@ int main()
         {
             return 31;
         }
+        (void)calibrateProbeCenter(machine);
         TestExecutor ex(machine);
         TestProgram program;
         program.add(TestPoint{20.0f, 0.0f, 0.0f});
@@ -342,6 +343,7 @@ int main()
         {
             return 49;
         }
+        (void)calibrateProbeCenter(machine);
         TestExecutor ex(machine);
 
         TestProgram program;

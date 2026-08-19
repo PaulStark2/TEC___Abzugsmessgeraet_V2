@@ -331,6 +331,7 @@ int main()
         {
             return 20;
         }
+        (void)calibrateProbeCenter(machine);
         TestExecutor ex(machine);
 
         TestProgram program;

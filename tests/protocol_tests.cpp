@@ -589,9 +589,9 @@ int main()
         cfg.search_depth = 5.0f;
         cfg.approach_distance = 10.0f;
         cfg.fine_search_speed = 1.0f;
-        cfg.nominal_probe_x = 0.0f;
-        cfg.nominal_probe_y = 0.0f;
-        cfg.nominal_probe_z = 5.0f;
+        cfg.probe_offset_reference_x = 0.0f;
+        cfg.probe_offset_reference_y = 0.0f;
+        cfg.probe_offset_reference_z = 5.0f;
         cfg.tool_cylindrical_height = 15.0f;
         cfg.probe_xy_search_margin = 2.0f;
         cfg.insert_search_distance = 10.0f;
@@ -611,7 +611,7 @@ int main()
             parsed.heartbeat_timeout_s != cfg.heartbeat_timeout_s ||
             parsed.max_optimization_iterations != 10 || parsed.v_homing != cfg.v_homing ||
             parsed.measuring_head_diameter != cfg.measuring_head_diameter ||
-            parsed.num_fine_searches != 3 || parsed.nominal_probe_z != cfg.nominal_probe_z ||
+            parsed.num_fine_searches != 3 || parsed.probe_offset_reference_z != cfg.probe_offset_reference_z ||
             parsed.tool_cylindrical_height != cfg.tool_cylindrical_height ||
             parsed.probe_xy_search_margin != cfg.probe_xy_search_margin ||
             parsed.insert_search_distance != cfg.insert_search_distance)

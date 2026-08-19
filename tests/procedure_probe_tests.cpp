@@ -34,6 +34,17 @@ int main()
     {
         Machine machine;
         homeMachine(machine);
+        // Manual calibration requires user-jogged TCP near the probe:
+        // ProbeCalibration starts from current TCP pose as search_reference.
+        {
+            const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
+            machine.moveTo(disc.x, disc.y, disc.z);
+            for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
+            {
+                machine.setHostInputs(withFreshForce(HostInputs{}));
+                machine.tick(0.05f);
+            }
+        }
         TestExecutor ex(machine);
         if (!ex.startProbeCalibration())
         {
@@ -54,7 +65,7 @@ int main()
         }
     }
 
-    // Automatic: ProbeApproach → ProbeCalibrate → MoveSafePose/PointApproach.
+    // Automatic: must reject start while probe_center_valid == false.
     {
         Machine machine;
         machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
@@ -63,14 +74,63 @@ int main()
         TestProgram program;
         program.add(TestPoint{8.0f, 0.0f, 0.0f});
         ex.setProgram(program);
+        if (ex.start())
+        {
+            return 10; // must not start without a calibrated probe_center
+        }
+    }
+
+    // Automatic after manual calibration: ProbeApproach → ProbeCalibrate → MoveSafePose/PointApproach.
+    {
+        Machine machine;
+        machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        homeMachine(machine);
+
+        // Manual calibration first.
+        {
+            TestExecutor ex(machine);
+            const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
+            machine.moveTo(disc.x, disc.y, disc.z);
+            for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
+            {
+                machine.setHostInputs(withFreshForce(HostInputs{}));
+                machine.tick(0.05f);
+            }
+            if (!ex.startProbeCalibration())
+            {
+                return 11;
+            }
+            for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
+            {
+                machine.setHostInputs(withPlantInputs(machine));
+                ex.tick(0.05f);
+            }
+            if (!machine.calibrationSet().probe_center_valid)
+            {
+                return 12;
+            }
+        }
+
+        // Now start the automatic procedure.
+        // Automatic ProbeApproach requires Safe-Z (ProcedureController::atSafeZ is strict).
+        machine.moveTo(machine.x(), machine.y(), machine.machineConfig().motion.safe_z);
+        for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
+        {
+            machine.setHostInputs(withFreshForce(HostInputs{}));
+            machine.tick(0.05f);
+        }
+        TestExecutor ex(machine);
+        TestProgram program;
+        program.add(TestPoint{8.0f, 0.0f, 0.0f});
+        ex.setProgram(program);
         if (!ex.start())
         {
-            return 10;
+            return 13;
         }
         if (ex.procedurePhase() != ProcedurePhase::ProbeApproach &&
             ex.procedurePhase() != ProcedurePhase::ProbeCalibrate)
         {
-            return 11;
+            return 14;
         }
         bool saw_approach = ex.procedurePhase() == ProcedurePhase::ProbeApproach;
         bool saw_calib = ex.procedurePhase() == ProcedurePhase::ProbeCalibrate;
@@ -95,26 +155,20 @@ int main()
         }
         if (!saw_calib)
         {
-            return 12;
+            return 15;
         }
-        if (!machine.calibrationSet().probe_center_valid)
+        if (!runUntil(ex, machine, ProcedurePhase::Clamp, 8000))
         {
-            return 13;
+            return 16;
         }
-        if (!runUntil(ex, machine, ProcedurePhase::Clamp, 2500))
-        {
-            return 14;
-        }
-        if (saw_approach == false && machine.machineConfig().probe.nominal_probe.x == 0.0f &&
-            machine.machineConfig().probe.nominal_probe.y == 0.0f)
-        {
-            // Approach can finish in the start() kick; still acceptable.
-        }
-        const TestPoint nominal = machine.machineConfig().probe.nominal_probe;
+
+        // After calibration, probe_center.xy should match the configured virtual disc center
+        // used by withPlantInputs() (disc == probe_offset_reference by default).
+        const TestPoint nominal = machine.machineConfig().probe.probe_offset_reference;
         if (!nearEqual(machine.calibrationSet().probe_center.x, nominal.x) ||
             !nearEqual(machine.calibrationSet().probe_center.y, nominal.y))
         {
-            return 15;
+            return 17;
         }
     }
 

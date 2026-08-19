@@ -600,6 +600,28 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdSetPlateOrigin, encoded.frame);
   }
 
+  async function fixtureOpen() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeBoolMessage(MessageId.CmdSetFixture, true);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_FIXTURE' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetFixture, encoded.frame);
+  }
+
+  async function fixtureClose() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeBoolMessage(MessageId.CmdSetFixture, false);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_FIXTURE' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetFixture, encoded.frame);
+  }
+
   async function startProbeCalibration() {
     if (!isLiveSession()) {
       return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
@@ -657,6 +679,8 @@ function createProtocolMachineClient(options = {}) {
     getMachineConfig,
     setTestConfiguration,
     setPlateOrigin,
+    fixtureOpen,
+    fixtureClose,
     startProbeCalibration,
     onSessionReady,
     onForcePathChunk,

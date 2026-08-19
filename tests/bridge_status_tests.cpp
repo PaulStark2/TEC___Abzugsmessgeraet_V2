@@ -82,6 +82,7 @@ int main()
     {
         return 19;
     }
+    (void)calibrateProbeCenter(machine);
     executor.start();
 
     machine.setHostInputs(provider.build(machine));

@@ -19,6 +19,7 @@ static void seedPlate(Machine& machine)
 {
     machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
     homeMachine(machine);
+    (void)calibrateProbeCenter(machine);
 }
 
 static HostInputs makeInputs(float fx = 0.0f, float fy = 0.0f, float fz = 0.0f)

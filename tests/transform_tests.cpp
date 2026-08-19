@@ -66,6 +66,7 @@ int main()
         {
             return 14;
         }
+        (void)calibrateProbeCenter(machine);
         if (!ex.start())
         {
             return 11;

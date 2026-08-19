@@ -49,6 +49,7 @@ static void seedIdentityPlate(Machine& machine)
     ConfigValidationError err = ConfigValidationError::Ok;
     machine.trySetTestConfiguration(cfg, err);
     homeMachine(machine);
+    (void)calibrateProbeCenter(machine);
 }
 
 int main()

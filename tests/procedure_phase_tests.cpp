@@ -11,6 +11,7 @@ int main()
     Machine machine;
     machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
     homeMachine(machine);
+    (void)calibrateProbeCenter(machine);
     TestExecutor ex(machine);
     TestProgram program;
     program.add(TestPoint{8.0f, 0.0f, 0.0f});
@@ -60,6 +61,7 @@ int main()
     Machine m2;
     m2.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
     homeMachine(m2);
+    (void)calibrateProbeCenter(m2);
     TestExecutor ex2(m2);
     TestProgram p2;
     p2.add(TestPoint{20.0f, 0.0f, 0.0f});

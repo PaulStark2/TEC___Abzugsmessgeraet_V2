@@ -20,6 +20,7 @@ static void seed(Machine& machine)
     cfg.iterations = 3u;
     machine.trySetTestConfiguration(cfg, err);
     homeMachine(machine);
+    (void)calibrateProbeCenter(machine);
     machine.moveTo(0.0f, 0.0f, 0.0f);
     for (int i = 0; i < 80 && machine.machineState() != MachineState::Idle; ++i)
     {

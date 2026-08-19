@@ -45,6 +45,7 @@ int main()
         {
             return 98;
         }
+        (void)calibrateProbeCenter(bridge.machine());
 
         simplant::PlantLimits limits{};
         limits.x_min = -100.0f;

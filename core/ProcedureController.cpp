@@ -60,6 +60,11 @@ bool ProcedureController::start()
     {
         return false;
     }
+    if (!machine_.calibrationSet().probe_center_valid)
+    {
+        // Automatic procedure requires a known, calibrated probe_center.
+        return false;
+    }
     if (!machine_.isHomed())
     {
         return false;
@@ -94,7 +99,8 @@ bool ProcedureController::startProbeCalibration()
     {
         return false;
     }
-    if (!probe_calib_.start(machine_))
+    const TestPoint search_ref{machine_.x(), machine_.y(), machine_.z()};
+    if (!probe_calib_.start(machine_, search_ref))
     {
         return false;
     }
@@ -477,8 +483,12 @@ void ProcedureController::handleProbeApproach()
     {
         return;
     }
-    const TestPoint nominal = machine_.machineConfig().probe.nominal_probe;
-    const float approach_z = nominal.z + machine_.machineConfig().probe.approach_distance;
+    const CalibrationSet& calib = machine_.calibrationSet();
+    const TestPoint target = calib.probe_center;
+    // M19 starts from the current TCP pose as search_reference.
+    // Therefore, the automatic approach must bring the TCP Z close to probe_center.z
+    // (otherwise the Z-referenced search movement may miss the probe-disc contacts).
+    const float approach_z = target.z;
     if (approach_leg_ == 0)
     {
         if (!atSafeZ())
@@ -486,7 +496,7 @@ void ProcedureController::handleProbeApproach()
             abortProcess();
             return;
         }
-        commandTraverseXY(nominal.x, nominal.y);
+        commandTraverseXY(target.x, target.y);
         approach_leg_ = 1;
         return;
     }
@@ -501,7 +511,8 @@ void ProcedureController::handleProbeApproach()
         approach_leg_ = 2;
         return;
     }
-    if (!probe_calib_.start(machine_))
+    const TestPoint search_ref{machine_.x(), machine_.y(), machine_.z()};
+    if (!probe_calib_.start(machine_, search_ref))
     {
         abortProcess();
         return;

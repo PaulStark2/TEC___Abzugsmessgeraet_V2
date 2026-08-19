@@ -316,6 +316,14 @@ export async function saveMachineConfig(config) {
   return result;
 }
 
+export async function fixtureOpen() {
+  return sendCommand({ command: 'fixtureOpen' });
+}
+
+export async function fixtureClose() {
+  return sendCommand({ command: 'fixtureClose' });
+}
+
 export async function fetchCalibration() {
   const response = await fetch('/api/calibration', { method: 'GET' });
   return response.json();
