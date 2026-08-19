@@ -13,7 +13,8 @@ enum class PlantCommandType
     GetState,
     SetLimits,
     TriggerProbe,
-    SetEStop
+    SetEStop,
+    SetProbeDisc
 };
 
 struct PlantCommand
@@ -37,6 +38,21 @@ struct PlantCommand
     float pulse_ms = 0.0f;
 
     bool e_stop_active = false;
+
+    bool has_probe_x = false;
+    bool has_probe_y = false;
+    bool has_probe_z = false;
+    bool has_probe_diameter = false;
+    bool has_probe_thickness = false;
+    bool has_tool_diameter = false;
+    bool has_tool_cylindrical_height = false;
+    float probe_x = 0.0f;
+    float probe_y = 0.0f;
+    float probe_z = 0.0f;
+    float probe_diameter = 0.0f;
+    float probe_thickness = 0.0f;
+    float tool_diameter = 0.0f;
+    float tool_cylindrical_height = 0.0f;
 };
 
 PlantCommand parsePlantCommand(const std::string& line);

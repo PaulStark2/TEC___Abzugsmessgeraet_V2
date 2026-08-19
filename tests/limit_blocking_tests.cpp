@@ -1,4 +1,5 @@
 // M16 soft limit blocking tests (per-direction, no global fault).
+#include "ForceSample.hpp"
 #include "Machine.hpp"
 
 #include "HostInputs.hpp"
@@ -15,7 +16,7 @@ static HostInputs makeSafeInputs()
     HostInputs in{};
     in.force = ForceVector{0.0f, 0.0f, 0.0f};
     in.e_stop = false;
-    return in;
+    return withFreshForce(in);
 }
 
 int main()
@@ -32,6 +33,8 @@ int main()
         m.moveTo(10.0f, 5.0f, 0.0f);
         for (int t = 0; t < 50; ++t)
         {
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
             m.tick(kDt);
             if (m.machineState() == MachineState::Fault)
             {

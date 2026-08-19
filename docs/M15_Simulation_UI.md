@@ -71,10 +71,13 @@ Min limit switches are not simulated in M15.
 
 ## Probe
 
-`HostInputs.probeTriggered` is a new digital input. The simulation UI button
-sends `{"cmd":"triggerProbe","pulseMs":100}`; `SimPlant` keeps the signal HIGH
-for that duration and clears it in `advance(dt)`. The Core only receives the
-signal — no calibration or teach-in logic exists yet. M12 was not extended.
+`HostInputs.probeTriggered` is a digital input. SimPlant now also raises it on
+**geometric contact** of the spreader TCP with the virtual measuring disc
+(center, diameter, thickness, tool diameter). A manual `triggerProbe` pulse
+remains for debugging. The host latches TCP at the rising edge.
+
+The simulation UI can move the disc with `setProbeDisc`. See
+[`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md).
 
 ## Force
 
@@ -95,14 +98,15 @@ channel is PC-simulation only and carries no machine commands.
 | --- | --- |
 | `{"cmd":"getState"}` | read plant state + Core pose |
 | `{"cmd":"setLimits","xMax":190,"yMax":140,"zMax":110}` | set trip points (omitted axes keep their value) |
-| `{"cmd":"triggerProbe","pulseMs":100}` | one probe pulse |
+| `{"cmd":"triggerProbe","pulseMs":100}` | one probe pulse (debug) |
+| `{"cmd":"setProbeDisc","x":40,"y":40,"z":10,"diameter":8,"thickness":3,"toolDiameter":2.5,"toolCylindricalHeight":15}` | virtual measuring disc |
 | `{"cmd":"setEStop","active":true}` | set/clear the virtual e-stop input |
 
 Response: `{"ok":true,"state":{...},"pose":{"x":…,"y":…,"z":…}}` or
 `{"ok":false,"error":"…"}`. Unknown commands (for example `moveTo`) are rejected.
 
 Node exposes it as `GET /api/simulation/state` and
-`POST /api/simulation/{limits,probe,estop}`. If the simulation host is down, the
+`POST /api/simulation/{limits,probe,probe-disc,estop}`. If the simulation host is down, the
 proxy answers HTTP 503 with a readable message.
 
 ## 3D gantry hierarchy

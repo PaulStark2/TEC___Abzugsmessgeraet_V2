@@ -3,6 +3,7 @@
 
 #include "ConfigMapping.hpp"
 #include "Decoder.hpp"
+#include "ForceSample.hpp"
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
 #include "Payloads.hpp"
@@ -92,6 +93,10 @@ int main()
 {
     Machine machine;
     machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+    if (!homeMachine(machine))
+    {
+        return 90;
+    }
     TestExecutor executor(machine);
     simbridge::CommandDispatcher dispatcher(machine, executor);
 
@@ -390,6 +395,10 @@ int main()
     {
         Machine m4;
         m4.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(m4))
+        {
+            return 79;
+        }
         TestExecutor ex4(m4);
         simbridge::CommandDispatcher d4(m4, ex4);
 

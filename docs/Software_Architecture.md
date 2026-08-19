@@ -70,6 +70,10 @@ plant channel on port 8767, and the hierarchical gantry visualization.
 ## Soft limits and homing (M16)
 
 End stops block only the affected axis direction. Homing is Z+ → X+ → Y+.
-The M12 StatusReport is 39 bytes (`homingState`, `blockedDirections`, `flags`,
-`procedurePhase`); `CmdHome` is `0x15`. See [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md)
-and [`docs/M17_Procedure.md`](M17_Procedure.md). STM32 firmware hosting is **M18**.
+The M12 StatusReport is 41 bytes (`homingState`, `blockedDirections`, `flags`,
+`procedurePhase`, `faultReason`, `spreaderState`); `CmdHome` is `0x15`. See
+[`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md),
+[`docs/M17_Procedure.md`](M17_Procedure.md), and [`docs/M18_Procedure.md`](M18_Procedure.md).
+Probe calibration on the 3-axis Core is **M19.0**
+([`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md)). STM32 firmware
+hosting follows later. M19.0 is not a hardware release.

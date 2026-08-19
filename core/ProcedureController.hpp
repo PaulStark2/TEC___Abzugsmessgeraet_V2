@@ -41,14 +41,20 @@ public:
 private:
     bool motionSettled() const;
     bool zMinBlocked() const;
+    bool atSafeZ() const;
+    bool resolveCurrentMachinePoint();
+    bool programPointsBelowSafeZ() const;
     void enterPhase(ProcedurePhase phase);
-    void commandSafePose();
-    void commandCurrentPlatePoint();
+    void commandRaiseSafeZ();
+    void commandTraverseXY(float x, float y);
+    void commandLowerToZ(float z);
     void abortProcess();
+    void setAutomaticProcessGuards(bool active);
     void handleMoveSafePose();
-    void handleProbeCalibrate();
+    void handleProbeApproach();
+    void handleProbeCalibrate(float dt);
     void handlePointApproach();
-    void handlePreClamp();
+    void handlePreClamp(float dt);
     void handleClamp();
     void handleInsertInitial();
     void handleOptimizeInsert();
@@ -71,4 +77,12 @@ private:
     unsigned optimize_attempts_;
     unsigned cycle_iteration_;
     uint8_t cycle_leg_; // 0 = at insertion, 1 = at extraction, 2 = extract then TestOrAge
+    uint8_t approach_leg_; // 0 = Safe-Z, 1 = XY, 2 = lower Z
+    TestPoint target_machine_;
+    float end_x_;
+    float end_y_;
+    float preclamp_elapsed_s_;
+    int8_t phase2_last_error_sign_;
+    unsigned phase2_sign_flips_;
+    bool probe_calib_standalone_;
 };

@@ -1,12 +1,14 @@
 // Milestone 8: PC host end-to-end loop over Machine + TestExecutor.
 #include "HostInputs.hpp"
 #include "Machine.hpp"
+#include "MachineConfig.hpp"
 #include "TestExecutor.hpp"
 #include "TestPoint.hpp"
 #include "TestProgram.hpp"
 #include "Types.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 
 // Convert ProcessState to a short label for console output.
@@ -42,6 +44,8 @@ static const char* toString(MachineState s)
         return "Stopped";
     case MachineState::Fault:
         return "Fault";
+    case MachineState::Homing:
+        return "Homing";
     default:
         return "Unknown";
     }
@@ -69,13 +73,40 @@ static bool nearEqual(float a, float b, float epsilon = 1e-3f)
     return std::fabs(a - b) <= epsilon;
 }
 
-// M9 deterministic 3D force stub [N]: fx=kx*x, fy=ky*y, fz=kz*z (not a physical sensor model).
-static ForceVector demoForceFromPose(float x, float y, float z)
+// Host force for the M8 demo: zero except tensile-positive Fz during insert/measure
+// so Phase 1 cannot succeed from AtTarget or from pose-proportional stubs.
+
+static HostInputs withHostSamples(HostInputs in)
 {
-    constexpr float kx = 1.0f; // N per machine unit along +X
-    constexpr float ky = 1.0f; // N per machine unit along +Y
-    constexpr float kz = 1.0f; // N per machine unit along +Z
-    return ForceVector{kx * x, ky * y, kz * z};
+    static std::uint32_t seq = 1;
+    in.forceSampleValid = true;
+    in.forceSampleSequence = seq;
+    in.hostHeartbeatValid = true;
+    in.hostHeartbeatSequence = seq;
+    ++seq;
+    return in;
+}
+
+static bool homeMachine(Machine& machine)
+{
+    HostInputs in = withHostSamples(HostInputs{});
+    machine.setHostInputs(in);
+    if (!machine.home())
+    {
+        return false;
+    }
+    in.limitZMax = true;
+    machine.setHostInputs(withHostSamples(in));
+    machine.tick(0.05f);
+    in.limitZMax = false;
+    in.limitXMax = true;
+    machine.setHostInputs(withHostSamples(in));
+    machine.tick(0.05f);
+    in.limitXMax = false;
+    in.limitYMax = true;
+    machine.setHostInputs(withHostSamples(in));
+    machine.tick(0.05f);
+    return machine.isHomed();
 }
 
 int main()
@@ -101,17 +132,22 @@ int main()
     }
 
     executor.setProgram(program);
+    if (!homeMachine(machine))
+    {
+        std::cout << "ERROR: demo homing failed" << std::endl;
+        return 5;
+    }
     if (!executor.start())
     {
         std::cout << "ERROR: executor.start() failed" << std::endl;
         return 2;
     }
 
-    std::cout << "M8 host loop started (3 demo points)" << std::endl;
+    std::cout << "M8 host loop started (3 demo points, Safe-Z approach)" << std::endl;
 
     // Fixed dt host loop (deterministic; no sleep).
     constexpr float kDt = 1.0f;
-    constexpr int kMaxTicks = 100;
+    constexpr int kMaxTicks = 200;
     constexpr int kPrintEvery = 1;
 
     int tick_count = 0;
@@ -120,11 +156,15 @@ int main()
     while (executor.processState() == ProcessState::Running && tick_count < kMaxTicks)
     {
         // M9: pose -> deterministic 3D force stub; Machine stores only (no evaluation).
-        const ForceVector force = demoForceFromPose(machine.x(), machine.y(), machine.z());
         HostInputs inputs{};
-        inputs.force = force;
+        const ProcedurePhase phase = executor.procedurePhase();
+        if (phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::OptimizeInsert ||
+            phase == ProcedurePhase::TestOrAge)
+        {
+            inputs.force.fz = machine.testConfiguration().target_force_N;
+        }
         inputs.e_stop = false;
-        machine.setHostInputs(inputs);
+        machine.setHostInputs(withHostSamples(inputs));
 
         // Only executor.tick drives Machine::tick internally.
         executor.tick(kDt);
@@ -149,8 +189,8 @@ int main()
             {
                 std::cout << " target=(" << cur.x << "," << cur.y << "," << cur.z << ")";
             }
-            std::cout << " force=(Fx=" << force.fx << ", Fy=" << force.fy << ", Fz=" << force.fz << ")"
-                      << std::endl;
+            std::cout << " force=(Fx=" << inputs.force.fx << ", Fy=" << inputs.force.fy
+                      << ", Fz=" << inputs.force.fz << ")" << std::endl;
         }
     }
 
@@ -162,12 +202,13 @@ int main()
         return 3;
     }
 
-    // End pose must match the last demo point.
-    if (!nearEqual(machine.x(), p2.x) || !nearEqual(machine.y(), p2.y) || !nearEqual(machine.z(), p2.z))
+    // Safe-End: XY at home_offset, Z remains at configured Safe-Z.
+    const float safe_z = machine.machineConfig().motion.safe_z;
+    if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f) || !nearEqual(machine.z(), safe_z))
     {
         std::cout << "ERROR: end pose mismatch. got=("
                   << machine.x() << "," << machine.y() << "," << machine.z()
-                  << ") expected=(" << p2.x << "," << p2.y << "," << p2.z << ")" << std::endl;
+                  << ") expected=(0,0," << safe_z << ")" << std::endl;
         return 4;
     }
 

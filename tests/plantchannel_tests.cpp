@@ -129,6 +129,42 @@ static int testSetEStop()
     return 0;
 }
 
+static int testSetProbeDisc()
+{
+    const PlantCommand command = simplant::parsePlantCommand(
+        "{\"cmd\":\"setProbeDisc\",\"x\":12.5,\"y\":-1,\"diameter\":9}");
+    if (command.type != PlantCommandType::SetProbeDisc)
+    {
+        return 24;
+    }
+    if (!command.has_probe_x || !command.has_probe_y || command.has_probe_z || !command.has_probe_diameter)
+    {
+        return 25;
+    }
+
+    SimPlant plant;
+    const float previous_z = plant.probeDisc().center.z;
+    const float previous_thickness = plant.probeDisc().thickness;
+    if (!simplant::applyPlantCommand(plant, command))
+    {
+        return 26;
+    }
+    if (!nearEqual(plant.probeDisc().center.x, 12.5f) || !nearEqual(plant.probeDisc().center.y, -1.0f))
+    {
+        return 27;
+    }
+    if (!nearEqual(plant.probeDisc().diameter, 9.0f))
+    {
+        return 28;
+    }
+    if (!nearEqual(plant.probeDisc().center.z, previous_z) ||
+        !nearEqual(plant.probeDisc().thickness, previous_thickness))
+    {
+        return 29;
+    }
+    return 0;
+}
+
 static int testResponseFormat()
 {
     SimPlant plant;
@@ -151,6 +187,11 @@ static int testResponseFormat()
     {
         return 21;
     }
+    if (!contains(response, "\"diameter\":8.0000") || !contains(response, "\"toolDiameter\":2.5000") ||
+        !contains(response, "\"toolCylindricalHeight\":15.0000"))
+    {
+        return 30;
+    }
     if (!contains(response, "\"pose\":{\"x\":11.0000"))
     {
         return 22;
@@ -167,7 +208,8 @@ static int testResponseFormat()
 int main()
 {
     const int results[] = {
-        testParseUnknown(), testSetLimits(), testTriggerProbe(), testSetEStop(), testResponseFormat(),
+        testParseUnknown(), testSetLimits(), testTriggerProbe(), testSetEStop(), testSetProbeDisc(),
+        testResponseFormat(),
     };
 
     for (const int result : results)

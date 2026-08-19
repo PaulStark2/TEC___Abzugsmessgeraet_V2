@@ -3,7 +3,9 @@
 This document tracks the Core + M12 surface for the automated procedure.
 GUI work consumes only fields that exist here. Do not invent byte offsets.
 
-STM32 firmware hosting is **M18** (renumbered; previously M17).
+STM32 firmware hosting follows after M19.0. M18 is Core/Safety hardening
+([`docs/M18_Procedure.md`](M18_Procedure.md)). Probe calibration is documented in
+[`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md).
 
 ## M17.1 — Configuration types
 
@@ -30,8 +32,8 @@ Communication stays Core-free. Core mapping lives in
 
 | ID | Name | Payload |
 |----|------|---------|
-| `0x50` | `CmdSetMachineConfig` | 126 B `MachineConfigPayload` |
-| `0x51` | `CmdGetMachineConfig` | empty; reply `MsgMachineConfig` (`0xA3`, 126 B) |
+| `0x50` | `CmdSetMachineConfig` | 196 B `MachineConfigPayload` (M19.0 geometry correction; was 184 B, 142 B in M18, 126 B in M17) |
+| `0x51` | `CmdGetMachineConfig` | empty; reply `MsgMachineConfig` (`0xA3`, 196 B) |
 | `0x52` | `CmdSetTestConfiguration` | 8 B: mode u8, targetForce f32, iterations u16, activePointIndex u8 |
 | `0x53` | `CmdSetPlateOrigin` | 12 B `x,y,z` machine pose |
 
@@ -56,14 +58,14 @@ active `CollisionContext`. Trip → latched `Fault`.
 `TestExecutor::start()` and `CmdStart` require a valid `plateOrigin`.
 Successful homing snaps the pose to `CalibrationSet.homeOffset` (from MachineConfig).
 
-## M17.5 — ProbeCalibration (placeholder)
+## M17.5 — ProbeCalibration
 
-`core/ProbeCalibration.hpp` is the only probe protocol surface used by
-`ProcedureController`. The current body is a **placeholder** (+X search, trigger or
-AtTarget writes `ProbeCenter`). Historical multi-touch probing is not ported.
+Historical note: M17 shipped a +X placeholder. **M19.0** replaces it with the
+full Z + four-point protocol. See [`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md).
 
-`CmdStartProbeCalib` (`0x54`, empty) starts this placeholder via
-`TestExecutor::startProbeCalibration()`.
+`CmdStartProbeCalib` (`0x54`, empty) starts the **manual** protocol via
+`TestExecutor::startProbeCalibration()` (no ProbeApproach). `CmdStart` runs
+ProbeApproach then the same protocol before MoveSafePose.
 
 ## M17.6 — ProcedureController
 
@@ -96,7 +98,8 @@ TestOrAge / Unclamp. STOP always aborts to `Aborted`.
 Chunk fields: `pointIndex u8`, `iteration u16`, `sequence u32`, `sampleCount u8`,
 `dropped u32`, then `(z f32, fz f32) * sampleCount`.
 
-StatusReport is **39 bytes**: previous M16 layout plus trailing `procedurePhase u8`.
+StatusReport is **41 bytes** as of M18 (M17 was 39 bytes plus trailing `procedurePhase`;
+M18 adds `faultReason` and `spreaderState`). See [`docs/M18_Procedure.md`](M18_Procedure.md).
 
 The controller streams chunks opportunistically. If the Raspberry Pi lags, samples may
 be dropped; the realtime loop does not wait.
@@ -108,7 +111,7 @@ be dropped; the realtime loop does not wait.
 - Persistenz: `gui/server/data/machine-config.json` (Pi). Core hält die aktive Kopie nur im RAM.
 - Beim Protocol-Connect wird die gespeicherte Config per `CmdSetMachineConfig` übertragen.
 - TestConfiguration und PlateOrigin werden vor `CmdStart` gesendet.
-- Messtaster-Button sendet `CmdStartProbeCalib` (Platzhalter).
+- Messtaster-Button sendet `CmdStartProbeCalib` (manuelle Einmessung, M19.0).
 - Kraft-Weg-Kurven aus `MsgForcePathChunk` in den Ergebnissen.
 
 Kein EEPROM/Flash auf dem STM32 in M17. Keine STM32-HAL, kein ADC-Treiber.

@@ -139,11 +139,47 @@ add_executable(spreader_timing_tests
 target_link_libraries(spreader_timing_tests PRIVATE core)
 add_test(NAME spreader_timing_tests COMMAND spreader_timing_tests)
 
+add_executable(spreader_safety_tests
+    spreader_safety_tests.cpp
+)
+target_link_libraries(spreader_safety_tests PRIVATE simulation_bridge)
+add_test(NAME spreader_safety_tests COMMAND spreader_safety_tests)
+
+add_executable(communication_watchdog_tests
+    communication_watchdog_tests.cpp
+)
+target_link_libraries(communication_watchdog_tests PRIVATE core)
+add_test(NAME communication_watchdog_tests COMMAND communication_watchdog_tests)
+
+add_executable(runtime_lock_tests
+    runtime_lock_tests.cpp
+)
+target_link_libraries(runtime_lock_tests PRIVATE simulation_bridge)
+add_test(NAME runtime_lock_tests COMMAND runtime_lock_tests)
+
+add_executable(preclamp_tests
+    preclamp_tests.cpp
+)
+target_link_libraries(preclamp_tests PRIVATE core)
+add_test(NAME preclamp_tests COMMAND preclamp_tests)
+
 add_executable(transform_tests
     transform_tests.cpp
 )
 target_link_libraries(transform_tests PRIVATE core)
 add_test(NAME transform_tests COMMAND transform_tests)
+
+add_executable(probe_geometry_tests
+    probe_geometry_tests.cpp
+)
+target_link_libraries(probe_geometry_tests PRIVATE core)
+add_test(NAME probe_geometry_tests COMMAND probe_geometry_tests)
+
+add_executable(probe_search_tests
+    probe_search_tests.cpp
+)
+target_link_libraries(probe_search_tests PRIVATE core)
+add_test(NAME probe_search_tests COMMAND probe_search_tests)
 
 add_executable(probe_calibration_tests
     probe_calibration_tests.cpp
@@ -157,6 +193,12 @@ add_executable(procedure_phase_tests
 target_link_libraries(procedure_phase_tests PRIVATE core)
 add_test(NAME procedure_phase_tests COMMAND procedure_phase_tests)
 
+add_executable(procedure_probe_tests
+    procedure_probe_tests.cpp
+)
+target_link_libraries(procedure_probe_tests PRIVATE core)
+add_test(NAME procedure_probe_tests COMMAND procedure_probe_tests)
+
 add_executable(force_path_recorder_tests
     force_path_recorder_tests.cpp
 )
@@ -168,6 +210,30 @@ add_executable(procedure_insert_tests
 )
 target_link_libraries(procedure_insert_tests PRIVATE core)
 add_test(NAME procedure_insert_tests COMMAND procedure_insert_tests)
+
+add_executable(safe_z_tests
+    safe_z_tests.cpp
+)
+target_link_libraries(safe_z_tests PRIVATE core)
+add_test(NAME safe_z_tests COMMAND safe_z_tests)
+
+add_executable(homing_start_tests
+    homing_start_tests.cpp
+)
+target_link_libraries(homing_start_tests PRIVATE simulation_bridge)
+add_test(NAME homing_start_tests COMMAND homing_start_tests)
+
+add_executable(force_safety_tests
+    force_safety_tests.cpp
+)
+target_link_libraries(force_safety_tests PRIVATE core)
+add_test(NAME force_safety_tests COMMAND force_safety_tests)
+
+add_executable(procedure_abort_tests
+    procedure_abort_tests.cpp
+)
+target_link_libraries(procedure_abort_tests PRIVATE core)
+add_test(NAME procedure_abort_tests COMMAND procedure_abort_tests)
 
 # CMake definition for M12 communication protocol tests.
 add_executable(protocol_tests

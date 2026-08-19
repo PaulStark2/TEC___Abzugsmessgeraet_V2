@@ -30,6 +30,9 @@ const {
   homingStateName,
   processStateName,
   procedurePhaseName,
+  faultReasonName,
+  spreaderStateName,
+  StatusFlag,
 } = require('./protocolTypes');
 
 function isFiniteNumber(value) {
@@ -122,6 +125,23 @@ function encodeMachineConfigPayload(cfg) {
     'tool_offset_x',
     'tool_offset_y',
     'tool_offset_z',
+    'safe_z',
+    'sample_timeout_s',
+    'heartbeat_timeout_s',
+    'xy_correct_timeout_s',
+    'head_diameter',
+    'measuring_head_diameter',
+    'measuring_head_thickness',
+    'tool_diameter',
+    'search_depth',
+    'approach_distance',
+    'fine_search_speed',
+    'nominal_probe_x',
+    'nominal_probe_y',
+    'nominal_probe_z',
+    'tool_cylindrical_height',
+    'probe_xy_search_margin',
+    'insert_search_distance',
   ];
   for (const key of tail) {
     if (!writeF32LE(out, offset, cfg[key])) {
@@ -129,6 +149,11 @@ function encodeMachineConfigPayload(cfg) {
     }
     offset += 4;
   }
+  if (!Number.isInteger(cfg.num_fine_searches) || cfg.num_fine_searches < 0) {
+    return null;
+  }
+  out.writeUInt16LE(cfg.num_fine_searches & 0xffff, offset);
+  offset += 2;
   return offset === MACHINE_CONFIG_PAYLOAD_WIRE_SIZE ? out : null;
 }
 
@@ -158,6 +183,23 @@ function decodeMachineConfigPayload(payload) {
     'tool_offset_x',
     'tool_offset_y',
     'tool_offset_z',
+    'safe_z',
+    'sample_timeout_s',
+    'heartbeat_timeout_s',
+    'xy_correct_timeout_s',
+    'head_diameter',
+    'measuring_head_diameter',
+    'measuring_head_thickness',
+    'tool_diameter',
+    'search_depth',
+    'approach_distance',
+    'fine_search_speed',
+    'nominal_probe_x',
+    'nominal_probe_y',
+    'nominal_probe_z',
+    'tool_cylindrical_height',
+    'probe_xy_search_margin',
+    'insert_search_distance',
   ];
   for (const key of tail) {
     const value = readF32LE(payload, offset);
@@ -167,7 +209,9 @@ function decodeMachineConfigPayload(payload) {
     out[key] = value.value;
     offset += 4;
   }
-  return out;
+  out.num_fine_searches = payload.readUInt16LE(offset);
+  offset += 2;
+  return offset === MACHINE_CONFIG_PAYLOAD_WIRE_SIZE ? out : null;
 }
 
 function encodeTestConfigurationPayload({ mode, target_force_N, iterations, active_point_index }) {
@@ -291,6 +335,8 @@ function decodeStatusReportPayload(payload) {
   const blockedDirections = payload[offset++];
   const flags = payload[offset++];
   const procedurePhase = payload[offset++];
+  const faultReason = payload[offset++];
+  const spreaderState = payload[offset++];
 
   const boolFields = [eStop, spreaderExtend, spreaderExtended, fixtureExtend, fixtureExtended];
   if (boolFields.some((v) => v !== 0 && v !== 1)) {
@@ -319,6 +365,8 @@ function decodeStatusReportPayload(payload) {
     blockedDirections,
     flags,
     procedurePhase,
+    faultReason,
+    spreaderState,
   };
 }
 
@@ -351,12 +399,15 @@ function encodeStatusReportPayload(status) {
   out[offset++] = status.blockedDirections & 0xff;
   out[offset++] = status.flags & 0xff;
   out[offset++] = (status.procedurePhase || 0) & 0xff;
+  out[offset++] = (status.faultReason || 0) & 0xff;
+  out[offset++] = (status.spreaderState || 0) & 0xff;
   return out;
 }
 
 function statusReportToGuiStatus(decoded, connected = true) {
+  const flagBit = (bit) => (decoded.flags & (1 << bit)) !== 0;
   const limitWarning =
-    (decoded.flags & (1 << 1)) !== 0 ||
+    flagBit(StatusFlag.LimitWarning) ||
     decoded.limits !== 0 ||
     decoded.blockedDirections !== 0;
   return {
@@ -364,7 +415,11 @@ function statusReportToGuiStatus(decoded, connected = true) {
     motionState: motionStateName(decoded.motionState),
     processState: processStateName(decoded.processState),
     homingState: homingStateName(decoded.homingState),
-    isHomed: (decoded.flags & 1) !== 0,
+    isHomed: flagBit(StatusFlag.IsHomed),
+    communicationWatchdogEnabled: flagBit(StatusFlag.CommWatchdog),
+    forceSampleFresh: flagBit(StatusFlag.ForceFresh),
+    plateOriginValid: flagBit(StatusFlag.PlateOriginValid),
+    probeCenterValid: flagBit(StatusFlag.ProbeCenterValid),
     limitWarning,
     x: decoded.x,
     y: decoded.y,
@@ -385,6 +440,10 @@ function statusReportToGuiStatus(decoded, connected = true) {
     programPointCount: decoded.programPointCount,
     procedurePhase: procedurePhaseName(decoded.procedurePhase),
     procedurePhaseOrdinal: decoded.procedurePhase,
+    faultReason: faultReasonName(decoded.faultReason || 0),
+    faultReasonOrdinal: decoded.faultReason || 0,
+    spreaderState: spreaderStateName(decoded.spreaderState || 0),
+    spreaderStateOrdinal: decoded.spreaderState || 0,
     connected: Boolean(connected),
   };
 }

@@ -31,6 +31,14 @@ int main()
         {
             return 2;
         }
+        if (!in.forceSampleValid || in.forceSampleSequence != 0)
+        {
+            return 8;
+        }
+        if (!in.hostHeartbeatValid || in.hostHeartbeatSequence != 0)
+        {
+            return 9;
+        }
     }
 
     // Positive components.

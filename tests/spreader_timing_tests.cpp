@@ -1,3 +1,4 @@
+#include "ForceSample.hpp"
 #include "Machine.hpp"
 #include "MachineConfig.hpp"
 #include "SpreaderTimer.hpp"
@@ -51,12 +52,12 @@ int main()
         {
             return 11;
         }
-        m.tick(0.1f);
+        tickWithForce(m, 0.1f);
         if (m.hostOutputs().spreaderExtended)
         {
             return 12;
         }
-        m.tick(0.1f);
+        tickWithForce(m, 0.1f);
         if (!m.hostOutputs().spreaderExtended)
         {
             return 13;
@@ -66,7 +67,7 @@ int main()
         {
             return 14;
         }
-        m.tick(0.1f);
+        tickWithForce(m, 0.1f);
         if (m.hostOutputs().spreaderExtended)
         {
             return 15;

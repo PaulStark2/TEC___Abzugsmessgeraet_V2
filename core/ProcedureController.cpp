@@ -15,6 +15,14 @@ ProcedureController::ProcedureController(Machine& machine)
     , optimize_attempts_(0)
     , cycle_iteration_(0)
     , cycle_leg_(0)
+    , approach_leg_(0)
+    , target_machine_{}
+    , end_x_(0.0f)
+    , end_y_(0.0f)
+    , preclamp_elapsed_s_(0.0f)
+    , phase2_last_error_sign_(0)
+    , phase2_sign_flips_(0)
+    , probe_calib_standalone_(false)
 {
 }
 
@@ -52,16 +60,26 @@ bool ProcedureController::start()
     {
         return false;
     }
+    if (!machine_.isHomed())
+    {
+        return false;
+    }
+    if (!programPointsBelowSafeZ())
+    {
+        return false;
+    }
     current_index_ = machine_.testConfiguration().active_point_index;
     if (current_index_ >= program_.size())
     {
         current_index_ = 0;
     }
     process_state_ = ProcessState::Running;
-    enterPhase(ProcedurePhase::MoveSafePose);
-    if (phase_ == ProcedurePhase::MoveSafePose && motionSettled())
+    setAutomaticProcessGuards(true);
+    probe_calib_standalone_ = false;
+    enterPhase(ProcedurePhase::ProbeApproach);
+    if (phase_ == ProcedurePhase::ProbeApproach && motionSettled())
     {
-        handleMoveSafePose();
+        handleProbeApproach();
     }
     return true;
 }
@@ -72,11 +90,17 @@ bool ProcedureController::startProbeCalibration()
     {
         return false;
     }
+    if (!machine_.isHomed())
+    {
+        return false;
+    }
     if (!probe_calib_.start(machine_))
     {
         return false;
     }
     process_state_ = ProcessState::Running;
+    setAutomaticProcessGuards(true);
+    probe_calib_standalone_ = true;
     phase_ = ProcedurePhase::ProbeCalibrate;
     return true;
 }
@@ -103,11 +127,14 @@ void ProcedureController::tick(float dt)
     case ProcedurePhase::MoveSafePose:
         handleMoveSafePose();
         break;
+    case ProcedurePhase::ProbeApproach:
+        handleProbeApproach();
+        break;
     case ProcedurePhase::PointApproach:
         handlePointApproach();
         break;
     case ProcedurePhase::PreClampXyCorrect:
-        handlePreClamp();
+        handlePreClamp(dt);
         break;
     case ProcedurePhase::Clamp:
         handleClamp();
@@ -122,7 +149,7 @@ void ProcedureController::tick(float dt)
         handleTestOrAge();
         break;
     case ProcedurePhase::ProbeCalibrate:
-        handleProbeCalibrate();
+        handleProbeCalibrate(dt);
         break;
     case ProcedurePhase::Unclamp:
         handleUnclamp();
@@ -238,20 +265,42 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
     switch (phase)
     {
     case ProcedurePhase::MoveSafePose:
+        machine_.setCollisionContext(CollisionContext::Approach);
+        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        approach_leg_ = 0;
+        commandRaiseSafeZ();
+        break;
+    case ProcedurePhase::ProbeApproach:
+        machine_.setCollisionContext(CollisionContext::Approach);
+        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        approach_leg_ = 0;
+        commandRaiseSafeZ();
+        break;
     case ProcedurePhase::MoveSafeEnd:
         machine_.setCollisionContext(CollisionContext::Approach);
         machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
-        commandSafePose();
+        approach_leg_ = 0;
+        end_x_ = machine_.calibrationSet().home_offset.x;
+        end_y_ = machine_.calibrationSet().home_offset.y;
+        commandRaiseSafeZ();
         break;
     case ProcedurePhase::PointApproach:
         machine_.setPreClampXyEnabled(false);
         machine_.setCollisionContext(CollisionContext::Approach);
         machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
-        commandCurrentPlatePoint();
+        if (!resolveCurrentMachinePoint())
+        {
+            abortProcess();
+            return;
+        }
+        approach_leg_ = 0;
+        commandRaiseSafeZ();
         break;
     case ProcedurePhase::PreClampXyCorrect:
         machine_.setCollisionContext(CollisionContext::Contact);
         machine_.setActiveVelocity(machine_.machineConfig().motion.v_slow);
+        preclamp_elapsed_s_ = 0.0f;
+        machine_.loadPreClampForceParams();
         machine_.setPreClampXyEnabled(true);
         machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
         break;
@@ -266,11 +315,13 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         point_x_ = machine_.x();
         point_y_ = machine_.y();
         machine_.moveTo(point_x_, point_y_,
-                        machine_.z() - machine_.machineConfig().probe.search_distance);
+                        machine_.z() - machine_.machineConfig().force.insert_search_distance);
         break;
     case ProcedurePhase::OptimizeInsert:
         optimize_attempts_ = 0;
         cycle_leg_ = 0;
+        phase2_last_error_sign_ = 0;
+        phase2_sign_flips_ = 0;
         machine_.setCollisionContext(CollisionContext::Contact);
         machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
         machine_.moveTo(point_x_, point_y_, insertion_z_);
@@ -279,6 +330,7 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         cycle_iteration_ = 0;
         cycle_leg_ = 0;
         force_path_.reset();
+        force_path_.setIteration(0);
         machine_.setCollisionContext(CollisionContext::Measure);
         machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
         machine_.moveTo(point_x_, point_y_, insertion_z_);
@@ -288,6 +340,7 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         machine_.setSpreaderExtend(false);
         break;
     case ProcedurePhase::Completed:
+        setAutomaticProcessGuards(false);
         process_state_ = ProcessState::Completed;
         break;
     case ProcedurePhase::Aborted:
@@ -298,52 +351,184 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
     }
 }
 
-void ProcedureController::commandSafePose()
+bool ProcedureController::atSafeZ() const
 {
-    const TestPoint home = machine_.calibrationSet().home_offset;
-    machine_.moveTo(home.x, home.y, home.z);
+    const float safe_z = machine_.machineConfig().motion.safe_z;
+    return std::fabs(machine_.z() - safe_z) <= 1.0e-3f;
 }
 
-void ProcedureController::commandCurrentPlatePoint()
+bool ProcedureController::resolveCurrentMachinePoint()
 {
     TestPoint plate{};
     if (!program_.pointAt(current_index_, plate))
     {
-        abortProcess();
-        return;
+        return false;
     }
-    TestPoint machine_point{};
-    if (!toMachinePoint(machine_.calibrationSet(), plate, machine_point))
+    return toMachinePoint(machine_.calibrationSet(), plate, target_machine_);
+}
+
+bool ProcedureController::programPointsBelowSafeZ() const
+{
+    const float safe_z = machine_.machineConfig().motion.safe_z;
+    for (std::size_t i = 0; i < program_.size(); ++i)
     {
-        abortProcess();
-        return;
+        TestPoint plate{};
+        if (!program_.pointAt(i, plate))
+        {
+            return false;
+        }
+        TestPoint machine_point{};
+        if (!toMachinePoint(machine_.calibrationSet(), plate, machine_point))
+        {
+            return false;
+        }
+        if (!(machine_point.z < safe_z))
+        {
+            return false;
+        }
     }
-    machine_.moveTo(machine_point.x, machine_point.y, machine_point.z);
+    return program_.size() > 0;
+}
+
+void ProcedureController::commandRaiseSafeZ()
+{
+    const float safe_z = machine_.machineConfig().motion.safe_z;
+    machine_.moveTo(machine_.x(), machine_.y(), safe_z);
+}
+
+void ProcedureController::commandTraverseXY(float x, float y)
+{
+    const float safe_z = machine_.machineConfig().motion.safe_z;
+    machine_.moveTo(x, y, safe_z);
+}
+
+void ProcedureController::commandLowerToZ(float z)
+{
+    machine_.moveTo(machine_.x(), machine_.y(), z);
+}
+
+void ProcedureController::setAutomaticProcessGuards(bool active)
+{
+    machine_.setCommunicationWatchdogEnabled(active);
+    machine_.setRuntimeConfigLocked(active);
 }
 
 void ProcedureController::abortProcess()
 {
     probe_calib_.abort();
     machine_.setPreClampXyEnabled(false);
+    setAutomaticProcessGuards(false);
+    if (machine_.machineState() != MachineState::Fault)
+    {
+        machine_.stop();
+    }
     phase_ = ProcedurePhase::Aborted;
     process_state_ = ProcessState::Aborted;
 }
 
 void ProcedureController::handleMoveSafePose()
 {
-    if (motionSettled())
+    if (!motionSettled())
     {
-        enterPhase(ProcedurePhase::PointApproach);
+        return;
     }
+    if (!atSafeZ())
+    {
+        abortProcess();
+        return;
+    }
+    enterPhase(ProcedurePhase::PointApproach);
 }
 
-void ProcedureController::handleProbeCalibrate()
+void ProcedureController::handlePointApproach()
 {
-    probe_calib_.tick(0.0f, machine_);
+    if (!motionSettled())
+    {
+        return;
+    }
+    if (approach_leg_ == 0)
+    {
+        if (!atSafeZ())
+        {
+            abortProcess();
+            return;
+        }
+        commandTraverseXY(target_machine_.x, target_machine_.y);
+        approach_leg_ = 1;
+        return;
+    }
+    if (approach_leg_ == 1)
+    {
+        if (!atSafeZ())
+        {
+            abortProcess();
+            return;
+        }
+        commandLowerToZ(target_machine_.z);
+        approach_leg_ = 2;
+        return;
+    }
+    enterPhase(ProcedurePhase::PreClampXyCorrect);
+}
+
+void ProcedureController::handleProbeApproach()
+{
+    if (!motionSettled())
+    {
+        return;
+    }
+    const TestPoint nominal = machine_.machineConfig().probe.nominal_probe;
+    const float approach_z = nominal.z + machine_.machineConfig().probe.approach_distance;
+    if (approach_leg_ == 0)
+    {
+        if (!atSafeZ())
+        {
+            abortProcess();
+            return;
+        }
+        commandTraverseXY(nominal.x, nominal.y);
+        approach_leg_ = 1;
+        return;
+    }
+    if (approach_leg_ == 1)
+    {
+        if (!atSafeZ())
+        {
+            abortProcess();
+            return;
+        }
+        commandLowerToZ(approach_z);
+        approach_leg_ = 2;
+        return;
+    }
+    if (!probe_calib_.start(machine_))
+    {
+        abortProcess();
+        return;
+    }
+    phase_ = ProcedurePhase::ProbeCalibrate;
+}
+
+void ProcedureController::handleProbeCalibrate(float dt)
+{
+    probe_calib_.tick(dt, machine_);
     if (probe_calib_.isComplete())
     {
-        phase_ = ProcedurePhase::Completed;
-        process_state_ = ProcessState::Completed;
+        if (probe_calib_standalone_)
+        {
+            machine_.stop();
+            setAutomaticProcessGuards(false);
+            phase_ = ProcedurePhase::Completed;
+            process_state_ = ProcessState::Completed;
+        }
+        else
+        {
+            enterPhase(ProcedurePhase::MoveSafePose);
+            if (motionSettled())
+            {
+                handleMoveSafePose();
+            }
+        }
     }
     else if (probe_calib_.isError())
     {
@@ -351,23 +536,23 @@ void ProcedureController::handleProbeCalibrate()
     }
 }
 
-void ProcedureController::handlePointApproach()
+void ProcedureController::handlePreClamp(float dt)
 {
-    if (motionSettled())
-    {
-        enterPhase(ProcedurePhase::PreClampXyCorrect);
-    }
-}
-
-void ProcedureController::handlePreClamp()
-{
-    const float tol = machine_.machineConfig().force.xy_tolerance_N;
+    const MachineConfig::Force& force_cfg = machine_.machineConfig().force;
+    preclamp_elapsed_s_ += dt;
     const float fx = machine_.hostInputs().force.fx;
     const float fy = machine_.hostInputs().force.fy;
-    if (std::fabs(fx) <= tol && std::fabs(fy) <= tol && motionSettled())
+    if (std::fabs(fx) <= force_cfg.xy_tolerance_N && std::fabs(fy) <= force_cfg.xy_tolerance_N &&
+        motionSettled())
     {
         machine_.setPreClampXyEnabled(false);
         enterPhase(ProcedurePhase::Clamp);
+        return;
+    }
+    if (preclamp_elapsed_s_ >= force_cfg.xy_correct_timeout_s ||
+        machine_.xyCorrectionSteps() >= force_cfg.xy_max_attempts)
+    {
+        abortProcess();
     }
 }
 
@@ -382,11 +567,17 @@ void ProcedureController::handleClamp()
 void ProcedureController::handleInsertInitial()
 {
     const float target = machine_.testConfiguration().target_force_N;
-    if (machine_.hostInputs().force.fz >= target || motionSettled() || zMinBlocked())
+    const float fz = machine_.hostInputs().force.fz;
+    if (fz >= target)
     {
         insertion_z_ = machine_.z();
         extraction_z_ = insertion_z_ + machine_.machineConfig().force.insertion_buffer;
         enterPhase(ProcedurePhase::OptimizeInsert);
+        return;
+    }
+    if (motionSettled() || zMinBlocked())
+    {
+        abortProcess();
     }
 }
 
@@ -394,6 +585,11 @@ void ProcedureController::handleOptimizeInsert()
 {
     if (!motionSettled())
     {
+        return;
+    }
+    if (zMinBlocked())
+    {
+        abortProcess();
         return;
     }
     if (cycle_leg_ == 0)
@@ -408,6 +604,20 @@ void ProcedureController::handleOptimizeInsert()
             cycle_leg_ = 2;
             return;
         }
+        const int8_t sign = (error > 0.0f) ? static_cast<int8_t>(1) : static_cast<int8_t>(-1);
+        if (phase2_last_error_sign_ != 0 && sign != phase2_last_error_sign_)
+        {
+            ++phase2_sign_flips_;
+        }
+        if (sign != 0)
+        {
+            phase2_last_error_sign_ = sign;
+        }
+        if (phase2_sign_flips_ > p2.max_sign_flips)
+        {
+            abortProcess();
+            return;
+        }
         float dz = p2.z_correction_gain * error;
         if (dz > p2.z_correction_max)
         {
@@ -420,6 +630,13 @@ void ProcedureController::handleOptimizeInsert()
         if (std::fabs(dz) >= p2.minimum_correction)
         {
             insertion_z_ += dz;
+        }
+        const float depth_floor =
+            target_machine_.z - machine_.machineConfig().force.insert_search_distance;
+        if (insertion_z_ < depth_floor)
+        {
+            abortProcess();
+            return;
         }
         ++optimize_attempts_;
         if (optimize_attempts_ >= p2.max_optimization_iterations)
@@ -466,6 +683,7 @@ void ProcedureController::handleTestOrAge()
         enterPhase(ProcedurePhase::Unclamp);
         return;
     }
+    force_path_.setIteration(static_cast<std::uint16_t>(cycle_iteration_));
     machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
     machine_.setCollisionContext(CollisionContext::Contact);
     machine_.moveTo(point_x_, point_y_, insertion_z_);
@@ -494,8 +712,20 @@ void ProcedureController::handleNextPoint()
 
 void ProcedureController::handleMoveSafeEnd()
 {
-    if (motionSettled())
+    if (!motionSettled())
     {
-        enterPhase(ProcedurePhase::Completed);
+        return;
     }
+    if (approach_leg_ == 0)
+    {
+        if (!atSafeZ())
+        {
+            abortProcess();
+            return;
+        }
+        commandTraverseXY(end_x_, end_y_);
+        approach_leg_ = 1;
+        return;
+    }
+    enterPhase(ProcedurePhase::Completed);
 }

@@ -62,6 +62,13 @@ export function applyStatus(status) {
   const speedEl = $('manual-speed-display');
   const pneumaticEl = $('pneumatic-state');
   const homingEl = $('homing-state');
+  const phaseEl = $('procedure-phase');
+  const faultEl = $('fault-reason');
+  const commWdEl = $('comm-watchdog');
+  const forceFreshEl = $('force-fresh');
+  const plateCalibEl = $('plate-calib');
+  const probeCalibEl = $('probe-calib');
+  const spreaderStateEl = $('spreader-state');
   const fxEl = $('force-fx');
   const fyEl = $('force-fy');
   const fzEl = $('force-fz');
@@ -99,6 +106,27 @@ export function applyStatus(status) {
 
   if (homingEl) {
     homingEl.textContent = formatHomingStatus(status);
+  }
+  if (phaseEl) {
+    phaseEl.textContent = status.procedurePhase || '—';
+  }
+  if (faultEl) {
+    faultEl.textContent = status.faultReason && status.faultReason !== 'None' ? status.faultReason : '—';
+  }
+  if (commWdEl) {
+    commWdEl.textContent = status.communicationWatchdogEnabled ? 'aktiv' : 'aus';
+  }
+  if (forceFreshEl) {
+    forceFreshEl.textContent = status.forceSampleFresh ? 'frisch' : 'alt';
+  }
+  if (plateCalibEl) {
+    plateCalibEl.textContent = status.plateOriginValid ? 'gültig' : 'ungültig';
+  }
+  if (probeCalibEl) {
+    probeCalibEl.textContent = status.probeCenterValid ? 'gültig' : 'ungültig';
+  }
+  if (spreaderStateEl) {
+    spreaderStateEl.textContent = status.spreaderState || '—';
   }
 
   const fx = readForce(status, ['fx', 'forceX', 'forceFx']);

@@ -55,8 +55,10 @@ struct StatusReportPayload
     uint8_t program_point_count;
     uint8_t homing_state; // ProtocolHomingState
     uint8_t blocked_directions; // same bit order as limits
-    uint8_t flags; // kStatusFlagIsHomed, kStatusFlagLimitWarning
+    uint8_t flags; // kStatusFlag*
     uint8_t procedure_phase; // Core ProcedurePhase ordinal
+    uint8_t fault_reason; // Core FaultReason ordinal
+    uint8_t spreader_state; // Core SpreaderState ordinal
 };
 
 struct ProgramSummaryPayload
@@ -119,6 +121,24 @@ struct MachineConfigPayload
     float tool_offset_x;
     float tool_offset_y;
     float tool_offset_z;
+    float safe_z;
+    float sample_timeout_s;
+    float heartbeat_timeout_s;
+    float xy_correct_timeout_s;
+    float head_diameter;
+    float measuring_head_diameter;
+    float measuring_head_thickness;
+    float tool_diameter;
+    float search_depth;
+    float approach_distance;
+    float fine_search_speed;
+    float nominal_probe_x;
+    float nominal_probe_y;
+    float nominal_probe_z;
+    float tool_cylindrical_height;
+    float probe_xy_search_margin;
+    float insert_search_distance;
+    uint16_t num_fine_searches;
 };
 
 struct TestConfigurationPayload

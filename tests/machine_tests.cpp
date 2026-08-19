@@ -1,4 +1,5 @@
 // Deterministic unit tests for the Core Machine model (Milestone 5).
+#include "ForceSample.hpp"
 #include "Machine.hpp"
 #include "HostInputs.hpp"
 
@@ -26,7 +27,7 @@ int main()
         const float y0 = m.y(); // initial pose y
         const float z0 = m.z(); // initial pose z
 
-        m.tick(1.0f); // tick while idle
+        tickWithForce(m, 1.0f); // tick while idle
         if (!nearEqual(m.x(), x0) || !nearEqual(m.y(), y0) || !nearEqual(m.z(), z0)) // position unchanged
         {
             return 2; // fail
@@ -44,7 +45,7 @@ int main()
         }
 
         const float x0 = m.x(); // current x before tick
-        m.tick(1.0f); // advance
+        tickWithForce(m, 1.0f); // advance
 
         // With default MotionPlanner params (maxVelocity=10, accel=0), in dt=1.0:
         // X should reach 10, Y should advance by 10 to 10, Z should advance by -10 to -10.
@@ -62,7 +63,7 @@ int main()
         // Advance in fixed dt steps until Idle.
         for (int i = 0; i < 10 && m.machineState() != MachineState::Idle; ++i)
         {
-            m.tick(1.0f); // tick
+            tickWithForce(m, 1.0f); // tick
         }
 
         if (m.machineState() != MachineState::Idle) // must end idle
@@ -81,7 +82,7 @@ int main()
         Machine m; // create
         m.moveTo(30.0f, 0.0f, 0.0f); // target far enough
 
-        m.tick(1.0f); // advance some
+        tickWithForce(m, 1.0f); // advance some
         const float x_before = m.x(); // remember pose
 
         m.pause(); // pause
@@ -90,7 +91,7 @@ int main()
             return 7; // fail
         }
 
-        m.tick(1.0f); // tick while paused
+        tickWithForce(m, 1.0f); // tick while paused
         if (!nearEqual(m.x(), x_before)) // pose frozen
         {
             return 8; // fail
@@ -102,7 +103,7 @@ int main()
         Machine m; // create
         m.moveTo(30.0f, 0.0f, 0.0f); // target
 
-        m.tick(1.0f); // move partially
+        tickWithForce(m, 1.0f); // move partially
         m.pause(); // pause
 
         const float x_pause = m.x(); // remember position during pause
@@ -116,7 +117,7 @@ int main()
         // Progress until Idle again.
         for (int i = 0; i < 20 && m.machineState() != MachineState::Idle; ++i)
         {
-            m.tick(1.0f); // tick
+            tickWithForce(m, 1.0f); // tick
         }
 
         if (m.machineState() != MachineState::Idle) // end idle
@@ -141,7 +142,7 @@ int main()
         Machine m; // create
         m.moveTo(30.0f, 0.0f, 0.0f); // target
 
-        m.tick(1.0f); // partially move
+        tickWithForce(m, 1.0f); // partially move
         const float x_before = m.x(); // remember
 
         m.stop(); // stop
@@ -150,14 +151,14 @@ int main()
             return 13; // fail
         }
 
-        m.tick(1.0f); // should not move
+        tickWithForce(m, 1.0f); // should not move
         if (!nearEqual(m.x(), x_before)) // frozen
         {
             return 14; // fail
         }
 
         m.resume(); // illegal resume after stop
-        m.tick(1.0f); // still must not move
+        tickWithForce(m, 1.0f); // still must not move
         if (!nearEqual(m.x(), x_before)) // still frozen
         {
             return 15; // fail
@@ -168,12 +169,12 @@ int main()
     {
         Machine m; // create
         m.moveTo(10.0f, 0.0f, 0.0f); // command
-        m.tick(1.0f); // maybe moved
+        tickWithForce(m, 1.0f); // maybe moved
         m.stop(); // stop
 
         const float x_before = m.x(); // store
         m.resume(); // no-op
-        m.tick(1.0f); // still no movement
+        tickWithForce(m, 1.0f); // still no movement
 
         if (m.machineState() != MachineState::Stopped) // unchanged
         {
@@ -189,7 +190,7 @@ int main()
     {
         Machine m; // create
         m.moveTo(10.0f, 0.0f, 0.0f); // command
-        m.tick(0.5f); // partial
+        tickWithForce(m, 0.5f); // partial
         m.stop(); // stop
 
         if (m.machineState() != MachineState::Stopped) // check
@@ -205,7 +206,7 @@ int main()
 
         for (int i = 0; i < 10 && m.machineState() != MachineState::Idle; ++i)
         {
-            m.tick(1.0f); // tick
+            tickWithForce(m, 1.0f); // tick
         }
         if (m.machineState() != MachineState::Idle) // finished
         {

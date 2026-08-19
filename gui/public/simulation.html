@@ -84,6 +84,26 @@
           <dt>E-Stop</dt>
           <dd id="sim-estop">—</dd>
         </div>
+        <div>
+          <dt>Phase</dt>
+          <dd id="sim-procedure-phase">—</dd>
+        </div>
+        <div>
+          <dt>Fault</dt>
+          <dd id="sim-fault-reason">—</dd>
+        </div>
+        <div>
+          <dt>SpreizerState</dt>
+          <dd id="sim-spreader-state">—</dd>
+        </div>
+        <div>
+          <dt>CommWD</dt>
+          <dd id="sim-comm-watchdog">—</dd>
+        </div>
+        <div>
+          <dt>ForceFresh</dt>
+          <dd id="sim-force-fresh">—</dd>
+        </div>
       </dl>
     </div>
 
@@ -95,9 +115,21 @@
         <section class="sim-group">
           <h3>Messtaster</h3>
           <p class="placeholder-note">
-            Digitales Signal: kurzer HIGH-Impuls, danach automatisch LOW.
+            Automatischer geometrischer Trigger bei Kontakt des Spreizerzylinders mit der Messscheibe
+            (TCP muss nicht auf Scheibenmitte liegen). Der manuelle Impuls bleibt für Debugging.
+            Die Scheibenmitte ist unabhängig positionierbar. Ø/Dicke/Spreizergeometrie folgen der MachineConfig.
           </p>
-          <button type="button" id="btn-probe-trigger">Messtaster auslösen</button>
+          <div class="sim-limit-grid">
+            <div class="sim-field"><label for="input-probe-x">Mitte X [mm]</label><input type="number" id="input-probe-x" step="0.1" value="40" /></div>
+            <div class="sim-field"><label for="input-probe-y">Mitte Y [mm]</label><input type="number" id="input-probe-y" step="0.1" value="40" /></div>
+            <div class="sim-field"><label for="input-probe-z">Mitte Z [mm]</label><input type="number" id="input-probe-z" step="0.1" value="10" /></div>
+            <div class="sim-field"><label for="input-probe-diameter">Scheibe Ø [mm]</label><input type="number" id="input-probe-diameter" step="0.1" value="8" /></div>
+            <div class="sim-field"><label for="input-probe-thickness">Dicke [mm]</label><input type="number" id="input-probe-thickness" step="0.1" value="3" /></div>
+            <div class="sim-field"><label for="input-probe-tool">Spreizer Ø [mm]</label><input type="number" id="input-probe-tool" step="0.1" value="2.5" /></div>
+            <div class="sim-field"><label for="input-probe-tool-height">Spreizerhöhe [mm]</label><input type="number" id="input-probe-tool-height" step="0.1" value="15" /></div>
+          </div>
+          <button type="button" id="btn-apply-probe-disc">Messtaster-Geometrie übernehmen</button>
+          <button type="button" id="btn-probe-trigger">Manuell auslösen</button>
           <p class="sim-readout">
             probeTriggered: <span id="sim-probe-state">—</span>
           </p>

@@ -123,6 +123,32 @@ enum class ProcedurePhase : uint8_t
     Aborted = 16
 };
 
+// Latched reason for MachineState::Fault (M18). None when not in Fault.
+enum class FaultReason : uint8_t
+{
+    None = 0,
+    EStop = 1,
+    ForceHardLimit = 2,
+    ForceCollision = 3,
+    ForceNonFinite = 4,
+    ForceInvalidSample = 5,
+    ForceStale = 6,
+    CommunicationTimeout = 7,
+    ProcedureAbort = 8
+};
+
+// Electrical/timing view of the spreader. There is no end-position sensor.
+// SafeDeenergized: valve off after STOP/Fault; extended() is last confirmed timer
+// state only and must not be read as a mechanical guarantee.
+enum class SpreaderState : uint8_t
+{
+    Retracted = 0,
+    Extending = 1,
+    Extended = 2,
+    Retracting = 3,
+    SafeDeenergized = 4
+};
+
 // Config validation result: Ok or a specific rejection (never silent clamp).
 enum class ConfigValidationError : uint8_t
 {
@@ -140,5 +166,7 @@ enum class ConfigValidationError : uint8_t
     GainNotPositive,
     IterationsZero,
     TargetForceInvalid,
-    FilterInvalid
+    FilterInvalid,
+    SafeZInvalid,
+    RuntimeLocked
 };

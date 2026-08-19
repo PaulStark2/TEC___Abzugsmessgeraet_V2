@@ -136,6 +136,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
+        if (!machine_.isHomed())
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
         if (executor_.processState() == ProcessState::Running)
         {
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
@@ -245,6 +250,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
 
     case tecomm::MessageId::CmdSetSpreader:
     {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
         tecomm::BoolPayload value{};
         if (!tecomm::decodeBoolPayload(frame.payload, frame.payload_length, value))
         {
@@ -271,6 +281,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
 
     case tecomm::MessageId::CmdSetMachineConfig:
     {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
         tecomm::MachineConfigPayload payload{};
         if (!tecomm::decodeMachineConfigPayload(frame.payload, frame.payload_length, payload))
         {
@@ -306,6 +321,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
 
     case tecomm::MessageId::CmdSetTestConfiguration:
     {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
         tecomm::TestConfigurationPayload payload{};
         if (!tecomm::decodeTestConfigurationPayload(frame.payload, frame.payload_length, payload))
         {
@@ -324,6 +344,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
 
     case tecomm::MessageId::CmdSetPlateOrigin:
     {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
         tecomm::MoveToPayload pose{};
         if (!tecomm::decodeMoveToPayload(frame.payload, frame.payload_length, pose))
         {
@@ -338,6 +363,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
     case tecomm::MessageId::CmdStartProbeCalib:
     {
         if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (!machine_.isHomed())
         {
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;

@@ -108,8 +108,12 @@ constexpr uint8_t kLimitBitYMax = 3;
 constexpr uint8_t kLimitBitZMin = 4;
 constexpr uint8_t kLimitBitZMax = 5;
 
-// StatusReportPayload.flags bit indices (byte 37).
+// StatusReportPayload.flags bit indices (not GUI byte offsets).
 constexpr uint8_t kStatusFlagIsHomed = 0;
 constexpr uint8_t kStatusFlagLimitWarning = 1;
+constexpr uint8_t kStatusFlagCommWatchdog = 2;
+constexpr uint8_t kStatusFlagForceFresh = 3;
+constexpr uint8_t kStatusFlagPlateOriginValid = 4;
+constexpr uint8_t kStatusFlagProbeCenterValid = 5;
 
 } // namespace tecomm

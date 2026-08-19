@@ -1,4 +1,5 @@
 #include "StatusSnapshot.hpp"
+#include "ProtocolTypes.hpp"
 
 namespace simbridge
 {
@@ -70,8 +71,26 @@ tecomm::StatusReportPayload buildStatusReport(const Machine& machine, const Test
     {
         flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagLimitWarning);
     }
+    if (machine.communicationWatchdogEnabled())
+    {
+        flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagCommWatchdog);
+    }
+    if (machine.forceSampleAge() < machine.machineConfig().force.sample_timeout_s)
+    {
+        flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagForceFresh);
+    }
+    if (machine.calibrationSet().plate_origin_valid)
+    {
+        flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagPlateOriginValid);
+    }
+    if (machine.calibrationSet().probe_center_valid)
+    {
+        flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagProbeCenterValid);
+    }
     status.flags = flags;
     status.procedure_phase = static_cast<uint8_t>(executor.procedurePhase());
+    status.fault_reason = static_cast<uint8_t>(machine.lastFaultReason());
+    status.spreader_state = static_cast<uint8_t>(machine.spreaderState());
 
     if (executor.processState() == ProcessState::Running)
     {

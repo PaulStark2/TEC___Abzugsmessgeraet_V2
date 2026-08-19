@@ -34,8 +34,24 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.probe.search_speed = p.probe_search_speed;
     cfg.probe.search_distance = p.probe_search_distance;
     cfg.probe.backoff = p.probe_backoff;
+    cfg.probe.head_diameter = p.head_diameter;
+    cfg.probe.measuring_head_diameter = p.measuring_head_diameter;
+    cfg.probe.measuring_head_thickness = p.measuring_head_thickness;
+    cfg.probe.tool_diameter = p.tool_diameter;
+    cfg.probe.tool_cylindrical_height = p.tool_cylindrical_height;
+    cfg.probe.xy_search_margin = p.probe_xy_search_margin;
+    cfg.force.insert_search_distance = p.insert_search_distance;
+    cfg.probe.search_depth = p.search_depth;
+    cfg.probe.approach_distance = p.approach_distance;
+    cfg.probe.fine_search_speed = p.fine_search_speed;
+    cfg.probe.nominal_probe = TestPoint{p.nominal_probe_x, p.nominal_probe_y, p.nominal_probe_z};
+    cfg.probe.num_fine_searches = p.num_fine_searches;
     cfg.calibration.home_offset = TestPoint{p.home_offset_x, p.home_offset_y, p.home_offset_z};
     cfg.calibration.tool_offset = TestPoint{p.tool_offset_x, p.tool_offset_y, p.tool_offset_z};
+    cfg.motion.safe_z = p.safe_z;
+    cfg.force.sample_timeout_s = p.sample_timeout_s;
+    cfg.communication.heartbeat_timeout_s = p.heartbeat_timeout_s;
+    cfg.force.xy_correct_timeout_s = p.xy_correct_timeout_s;
     return cfg;
 }
 
@@ -75,6 +91,24 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.tool_offset_x = cfg.calibration.tool_offset.x;
     p.tool_offset_y = cfg.calibration.tool_offset.y;
     p.tool_offset_z = cfg.calibration.tool_offset.z;
+    p.safe_z = cfg.motion.safe_z;
+    p.sample_timeout_s = cfg.force.sample_timeout_s;
+    p.heartbeat_timeout_s = cfg.communication.heartbeat_timeout_s;
+    p.xy_correct_timeout_s = cfg.force.xy_correct_timeout_s;
+    p.head_diameter = cfg.probe.head_diameter;
+    p.measuring_head_diameter = cfg.probe.measuring_head_diameter;
+    p.measuring_head_thickness = cfg.probe.measuring_head_thickness;
+    p.tool_diameter = cfg.probe.tool_diameter;
+    p.tool_cylindrical_height = cfg.probe.tool_cylindrical_height;
+    p.probe_xy_search_margin = cfg.probe.xy_search_margin;
+    p.insert_search_distance = cfg.force.insert_search_distance;
+    p.search_depth = cfg.probe.search_depth;
+    p.approach_distance = cfg.probe.approach_distance;
+    p.fine_search_speed = cfg.probe.fine_search_speed;
+    p.nominal_probe_x = cfg.probe.nominal_probe.x;
+    p.nominal_probe_y = cfg.probe.nominal_probe.y;
+    p.nominal_probe_z = cfg.probe.nominal_probe.z;
+    p.num_fine_searches = static_cast<uint16_t>(cfg.probe.num_fine_searches);
     return p;
 }
 

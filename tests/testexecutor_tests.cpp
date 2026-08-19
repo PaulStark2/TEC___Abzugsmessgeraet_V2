@@ -1,4 +1,5 @@
 // Deterministic unit tests for TestExecutor (Milestone 7).
+#include "ForceSample.hpp"
 #include "Machine.hpp"
 #include "TestExecutor.hpp"
 #include "TestPoint.hpp"
@@ -14,11 +15,17 @@ static bool nearEqual(float a, float b, float epsilon = 1e-3f)
 }
 
 // Drive the executor until terminal or max steps. // helper
-static void runUntilDone(TestExecutor& ex, int max_steps)
+static void tickEx(TestExecutor& ex, Machine& machine, float dt = 0.05f)
+{
+    machine.setHostInputs(withProcessForce(ex, machine));
+    ex.tick(dt);
+}
+
+static void runUntilDone(TestExecutor& ex, Machine& machine, int max_steps)
 {
     for (int i = 0; i < max_steps && ex.processState() == ProcessState::Running; ++i)
     {
-        ex.tick(1.0f); // fixed dt
+        tickEx(ex, machine);
     }
 }
 
@@ -41,6 +48,7 @@ static void seedIdentityPlate(Machine& machine)
     cfg.mode = TestMode::Aging;
     ConfigValidationError err = ConfigValidationError::Ok;
     machine.trySetTestConfiguration(cfg, err);
+    homeMachine(machine);
 }
 
 int main()
@@ -90,16 +98,18 @@ int main()
 
         // One tick should begin motion toward point 0. // motion begins
         const float x0 = machine.x(); // before
-        ex.tick(1.0f); // advance
-        if (nearEqual(machine.x(), x0) && machine.machineState() == MachineState::Active)
+        bool moved = false;
+        for (int i = 0; i < 2500 && !moved; ++i)
         {
-            // If already at target (unlikely from origin), Active would not hold;
-            // from 0 toward 10 with v=10, x must change. // expect move
-            return 7; // fail
+            tickEx(ex, machine);
+            if (machine.x() > x0 + 1.0e-4f)
+            {
+                moved = true;
+            }
         }
-        if (!nearEqual(machine.x(), x0) && machine.x() <= x0)
+        if (!moved)
         {
-            return 7; // fail unexpected direction
+            return 7;
         }
     }
 
@@ -120,7 +130,7 @@ int main()
         bool saw1 = false; // later
         bool saw2 = false; // later
 
-        for (int i = 0; i < 400 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
         {
             const std::size_t idx = ex.currentIndex(); // sample
             if (idx == 1)
@@ -131,7 +141,7 @@ int main()
             {
                 saw2 = true; // visited
             }
-            ex.tick(1.0f); // step
+            tickEx(ex, machine); // step
         }
 
         if (ex.processState() != ProcessState::Completed) // must complete
@@ -152,7 +162,8 @@ int main()
         {
             return 12; // fail
         }
-        if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f) || !nearEqual(machine.z(), 0.0f))
+        if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f) ||
+            !nearEqual(machine.z(), machine.machineConfig().motion.safe_z))
         {
             return 13; // fail end pose (safe pose)
         }
@@ -179,8 +190,8 @@ int main()
             return 15; // fail
         }
 
-        ex.tick(1.0f); // should not advance process
-        ex.tick(1.0f); // again
+        tickEx(ex, machine); // should not advance process
+        tickEx(ex, machine); // again
         if (ex.currentIndex() != idx_before) // index frozen
         {
             return 16; // fail
@@ -198,7 +209,7 @@ int main()
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
         ex.start(); // run
-        ex.tick(1.0f); // partial
+        tickEx(ex, machine); // partial
         ex.pause(); // pause
         ex.resume(); // resume
 
@@ -207,7 +218,7 @@ int main()
             return 18; // fail
         }
 
-        runUntilDone(ex, 400); // finish
+        runUntilDone(ex, machine, 2500); // finish
         if (ex.processState() != ProcessState::Completed) // complete
         {
             return 19; // fail
@@ -225,7 +236,7 @@ int main()
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
         ex.start(); // run
-        ex.tick(1.0f); // partial
+        tickEx(ex, machine); // partial
         const float x_before = machine.x(); // snapshot
 
         ex.stop(); // abort
@@ -238,7 +249,7 @@ int main()
             return 22; // fail
         }
 
-        ex.tick(1.0f); // no further motion
+        tickEx(ex, machine); // no further motion
         if (!nearEqual(machine.x(), x_before)) // frozen
         {
             return 23; // fail
@@ -310,7 +321,7 @@ int main()
         TestExecutor ex(machine); // executor
         ex.setProgram(makeThreePointProgram()); // load
         ex.start(); // Running
-        ex.tick(1.0f); // partial
+        tickEx(ex, machine); // partial
 
         machine.stop(); // external stop
         if (ex.processState() != ProcessState::Running) // not yet observed
@@ -318,7 +329,7 @@ int main()
             return 32; // fail
         }
 
-        ex.tick(1.0f); // executor observes Stopped
+        tickEx(ex, machine); // executor observes Stopped
         if (ex.processState() != ProcessState::Aborted) // Aborted
         {
             return 33; // fail
@@ -334,7 +345,7 @@ int main()
         // Complete first run. // complete path
         ex.setProgram(makeThreePointProgram()); // prog A
         ex.start(); // run
-        runUntilDone(ex, 400); // finish
+        runUntilDone(ex, machine, 2500); // finish
         if (ex.processState() != ProcessState::Completed) // done
         {
             return 34; // fail
@@ -347,7 +358,7 @@ int main()
         {
             return 35; // fail
         }
-        runUntilDone(ex, 400); // finish
+        runUntilDone(ex, machine, 2500); // finish
         if (ex.processState() != ProcessState::Completed) // completed again
         {
             return 36; // fail
@@ -360,7 +371,7 @@ int main()
         // Abort then restart. // abort path
         ex.setProgram(makeThreePointProgram()); // prog C
         ex.start(); // run
-        ex.tick(1.0f); // partial
+        tickEx(ex, machine); // partial
         ex.stop(); // abort
         if (ex.processState() != ProcessState::Aborted) // aborted
         {
@@ -374,7 +385,7 @@ int main()
         {
             return 39; // fail
         }
-        runUntilDone(ex, 400); // finish
+        runUntilDone(ex, machine, 2500); // finish
         if (ex.processState() != ProcessState::Completed) // completed
         {
             return 40; // fail

@@ -7,6 +7,7 @@ import {
   fetchPlantState,
   setPlantEStop,
   setPlantLimits,
+  setPlantProbeDisc,
   triggerPlantProbe,
 } from '/js/sim/plantApi.js';
 
@@ -32,6 +33,11 @@ const dom = {
   fz: el('sim-force-fz'),
   limits: el('sim-limits'),
   estop: el('sim-estop'),
+  procedurePhase: el('sim-procedure-phase'),
+  faultReason: el('sim-fault-reason'),
+  spreaderState: el('sim-spreader-state'),
+  commWatchdog: el('sim-comm-watchdog'),
+  forceFresh: el('sim-force-fresh'),
   plantFeedback: el('sim-plant-feedback'),
   probeState: el('sim-probe-state'),
   limitState: el('sim-limit-state'),
@@ -44,6 +50,7 @@ let programPoints = [];
 let lastStatus = null;
 let estopActive = false;
 let limitInputsTouched = false;
+let probeInputsTouched = false;
 
 const LIMIT_LABELS = ['X-', 'X+', 'Y-', 'Y+', 'Z-', 'Z+'];
 
@@ -136,6 +143,22 @@ function renderStatus(status) {
   dom.fz.textContent = formatNumber(status.fz);
   dom.limits.textContent = formatLimits(status);
   dom.estop.textContent = status.eStop ? 'AKTIV' : 'inaktiv';
+  if (dom.procedurePhase) {
+    dom.procedurePhase.textContent = status.procedurePhase || '—';
+  }
+  if (dom.faultReason) {
+    dom.faultReason.textContent =
+      status.faultReason && status.faultReason !== 'None' ? status.faultReason : '—';
+  }
+  if (dom.spreaderState) {
+    dom.spreaderState.textContent = status.spreaderState || '—';
+  }
+  if (dom.commWatchdog) {
+    dom.commWatchdog.textContent = status.communicationWatchdogEnabled ? 'aktiv' : 'aus';
+  }
+  if (dom.forceFresh) {
+    dom.forceFresh.textContent = status.forceSampleFresh ? 'frisch' : 'alt';
+  }
 
   if (status.connected === false) {
     setHeaderStatus('Offline — Pose eingefroren, keine lokale Bewegung', true);
@@ -161,6 +184,9 @@ function renderPlantState(state) {
   dom.estopPlant.textContent = state.eStop ? 'AKTIV' : 'inaktiv';
   estopActive = Boolean(state.eStop);
   el('btn-estop-toggle').classList.toggle('sim-estop-btn--active', estopActive);
+  if (state.probe) {
+    gantry.setProbeDisc(state.probe);
+  }
 }
 
 function syncLimitInputs(limits) {
@@ -175,11 +201,37 @@ function syncLimitInputs(limits) {
   el('input-limit-z-max').value = String(limits.zMax);
 }
 
+function syncProbeDiscInputs(probe) {
+  if (probeInputsTouched || !probe) {
+    return;
+  }
+  if (Number.isFinite(probe.x)) el('input-probe-x').value = String(probe.x);
+  if (Number.isFinite(probe.y)) el('input-probe-y').value = String(probe.y);
+  if (Number.isFinite(probe.z)) el('input-probe-z').value = String(probe.z);
+  if (Number.isFinite(probe.diameter)) el('input-probe-diameter').value = String(probe.diameter);
+  if (Number.isFinite(probe.thickness)) el('input-probe-thickness').value = String(probe.thickness);
+  if (Number.isFinite(probe.toolDiameter)) el('input-probe-tool').value = String(probe.toolDiameter);
+  if (Number.isFinite(probe.toolCylindricalHeight)) el('input-probe-tool-height').value = String(probe.toolCylindricalHeight);
+}
+
+function readProbeDiscInputs() {
+  return {
+    x: readNumberInput('input-probe-x', 40),
+    y: readNumberInput('input-probe-y', 40),
+    z: readNumberInput('input-probe-z', 10),
+    diameter: readNumberInput('input-probe-diameter', 8),
+    thickness: readNumberInput('input-probe-thickness', 3),
+    toolDiameter: readNumberInput('input-probe-tool', 2.5),
+    toolCylindricalHeight: readNumberInput('input-probe-tool-height', 15),
+  };
+}
+
 async function pollPlantState() {
   try {
     const result = await fetchPlantState();
     renderPlantState(result.state);
     syncLimitInputs(result.state.limits);
+    syncProbeDiscInputs(result.state.probe);
     gantry.setLimits(normalizePlantLimits(result.state.limits));
   } catch (err) {
     dom.probeState.textContent = '—';
@@ -242,11 +294,25 @@ function bindPanel() {
     });
   }
 
+  for (const id of [
+    'input-probe-x', 'input-probe-y', 'input-probe-z',
+    'input-probe-diameter', 'input-probe-thickness', 'input-probe-tool', 'input-probe-tool-height',
+  ]) {
+    el(id).addEventListener('input', () => {
+      probeInputsTouched = true;
+    });
+  }
+
   el('btn-probe-trigger').addEventListener('click', () => {
     runPlantAction(
       () => triggerPlantProbe(PROBE_PULSE_MS),
       `Messtaster-Impuls gesendet (${PROBE_PULSE_MS} ms)`
     );
+  });
+
+  el('btn-apply-probe-disc').addEventListener('click', () => {
+    const disc = readProbeDiscInputs();
+    runPlantAction(() => setPlantProbeDisc(disc), 'Messtaster-Geometrie übernommen');
   });
 
   el('btn-apply-limits').addEventListener('click', () => {

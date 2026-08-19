@@ -23,11 +23,13 @@ export function applyFaultPanel(status) {
 
   if (detail) {
     if (status.eStop === true && status.machineState === 'Fault') {
-      detail.textContent = 'E-Stop / Controller Fault';
+      detail.textContent = `E-Stop / ${status.faultReason || 'Controller Fault'}`;
     } else if (status.eStop === true) {
       detail.textContent = 'E-Stop aktiv';
     } else if (status.machineState === 'Fault') {
-      detail.textContent = 'Controller Fault';
+      detail.textContent = status.faultReason && status.faultReason !== 'None'
+        ? `Controller Fault: ${status.faultReason}`
+        : 'Controller Fault';
     } else {
       detail.textContent = '—';
     }

@@ -1,3 +1,4 @@
+#include "ForceSample.hpp"
 #include "HostInputs.hpp"
 #include "Machine.hpp"
 #include "MachineConfig.hpp"
@@ -17,6 +18,7 @@ static bool nearEqual(float a, float b, float eps = 1e-2f)
 static void seedPlate(Machine& machine)
 {
     machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+    homeMachine(machine);
 }
 
 static HostInputs makeInputs(float fx = 0.0f, float fy = 0.0f, float fz = 0.0f)
@@ -31,17 +33,85 @@ static HostInputs makeInputs(float fx = 0.0f, float fy = 0.0f, float fz = 0.0f)
 static bool runUntilPhase(TestExecutor& ex, Machine& machine, ProcedurePhase phase, int max_steps,
                           float fz = 0.0f)
 {
-    machine.setHostInputs(makeInputs(0.0f, 0.0f, fz));
+    machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
     for (int i = 0; i < max_steps && ex.processState() == ProcessState::Running; ++i)
     {
         if (ex.procedurePhase() == phase)
         {
             return true;
         }
-        machine.setHostInputs(makeInputs(0.0f, 0.0f, fz));
+        machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
         ex.tick(0.05f);
     }
     return ex.procedurePhase() == phase;
+}
+
+static bool runInsertInitialAndGetInsertionZ(float probe_search_distance, float insert_search_distance,
+                                              float target_force_N, float& insertion_z_out)
+{
+    Machine machine;
+    seedPlate(machine);
+
+    // Configure only the two parameters under test.
+    {
+        MachineConfig mcfg = machine.machineConfig();
+        mcfg.probe.search_distance = probe_search_distance;
+        mcfg.force.insert_search_distance = insert_search_distance;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!machine.trySetMachineConfig(mcfg, err))
+        {
+            return false;
+        }
+    }
+
+    TestConfiguration cfg = machine.testConfiguration();
+    cfg.target_force_N = target_force_N;
+    cfg.mode = TestMode::Aging;
+    cfg.iterations = 1u;
+    ConfigValidationError err = ConfigValidationError::Ok;
+    if (!machine.trySetTestConfiguration(cfg, err))
+    {
+        return false;
+    }
+
+    TestExecutor ex(machine);
+    TestProgram program;
+    program.add(TestPoint{2.0f, 0.0f, 0.0f});
+    ex.setProgram(program);
+    if (!ex.start())
+    {
+        return false;
+    }
+
+    if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 2500))
+    {
+        return false;
+    }
+
+    // InsertInitial aborts if motionSettled() becomes true while fz is still
+    // below target. ProcedureController runs `machine_.tick()` before
+    // `handleInsertInitial()`, so we must approximate the moment where Z is
+    // close enough using the current machine.z() before the tick.
+    const float z_entry = machine.z();
+    const float commanded_insertion_z = z_entry - insert_search_distance;
+    const float fz_target = target_force_N;
+
+    for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
+    {
+        // Use a wider margin so fz is already >=target when
+        // handleInsertInitial() observes motionSettled() in the same tick.
+        const float fz = (machine.z() <= commanded_insertion_z + 0.8f) ? fz_target : 0.0f;
+        machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+        ex.tick(0.05f);
+        if (ex.procedurePhase() == ProcedurePhase::OptimizeInsert ||
+            ex.procedurePhase() == ProcedurePhase::TestOrAge)
+        {
+            insertion_z_out = ex.procedure().insertionZ();
+            return true;
+        }
+    }
+
+    return false;
 }
 
 int main()
@@ -69,7 +139,7 @@ int main()
             return 2;
         }
 
-        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 400))
+        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 2500))
         {
             return 3;
         }
@@ -79,7 +149,7 @@ int main()
         for (int i = 0; i < 400 && ex.processState() == ProcessState::Running; ++i)
         {
             const float fz = (machine.z() < -0.4f) ? 5.0f : 0.0f;
-            machine.setHostInputs(makeInputs(0.0f, 0.0f, fz));
+            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
             if (!captured && fz >= 5.0f)
             {
                 captured_z = machine.z();
@@ -109,6 +179,124 @@ int main()
         if (ex.pauseAllowed())
         {
             return 7;
+        }
+    }
+
+    // Regression: probe.search_distance must not affect InsertInitial depth
+    // (insert depth is force.insert_search_distance).
+    {
+        const float target_force = 5.0f;
+        float ins_a = 0.0f;
+        float ins_b = 0.0f;
+        if (!runInsertInitialAndGetInsertionZ(5.0f, 10.0f, target_force, ins_a))
+        {
+            return 500;
+        }
+        if (!runInsertInitialAndGetInsertionZ(25.0f, 10.0f, target_force, ins_b))
+        {
+            return 501;
+        }
+        if (!nearEqual(ins_a, ins_b, 0.05f))
+        {
+            return 502;
+        }
+    }
+
+    // Regression: insert_search_distance must affect InsertInitial depth.
+    {
+        const float target_force = 5.0f;
+        float ins_a = 0.0f;
+        float ins_b = 0.0f;
+        if (!runInsertInitialAndGetInsertionZ(20.0f, 10.0f, target_force, ins_a))
+        {
+            return 510;
+        }
+        if (!runInsertInitialAndGetInsertionZ(20.0f, 12.0f, target_force, ins_b))
+        {
+            return 511;
+        }
+        // Deeper insert_search_distance moves insertion_z by roughly the same amount.
+        if (!nearEqual(ins_a - ins_b, 2.0f, 0.2f))
+        {
+            return 512;
+        }
+    }
+
+    // Phase 1: search end without Sollkraft is a fault, not InsertionPoint.
+    {
+        Machine machine;
+        seedPlate(machine);
+        TestConfiguration cfg = machine.testConfiguration();
+        cfg.target_force_N = 8.0f;
+        cfg.mode = TestMode::Aging;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!machine.trySetTestConfiguration(cfg, err))
+        {
+            return 32;
+        }
+        TestExecutor ex(machine);
+        TestProgram program;
+        program.add(TestPoint{1.0f, 0.0f, 0.0f});
+        ex.setProgram(program);
+        if (!ex.start())
+        {
+            return 33;
+        }
+        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 2500))
+        {
+            return 34;
+        }
+        for (int i = 0; i < 800 && ex.processState() == ProcessState::Running; ++i)
+        {
+            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, 0.0f)));
+            ex.tick(0.05f);
+        }
+        if (ex.processState() != ProcessState::Aborted)
+        {
+            return 35;
+        }
+        if (machine.machineState() != MachineState::Stopped)
+        {
+            return 36;
+        }
+        if (machine.motionState() == MotionState::Moving)
+        {
+            return 37;
+        }
+    }
+
+    // Phase 1: Z-min before Sollkraft aborts.
+    {
+        Machine machine;
+        seedPlate(machine);
+        TestConfiguration cfg = machine.testConfiguration();
+        cfg.target_force_N = 8.0f;
+        cfg.mode = TestMode::Aging;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        machine.trySetTestConfiguration(cfg, err);
+        TestExecutor ex(machine);
+        TestProgram program;
+        program.add(TestPoint{1.0f, 0.0f, 0.0f});
+        ex.setProgram(program);
+        if (!ex.start())
+        {
+            return 38;
+        }
+        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 2500))
+        {
+            return 39;
+        }
+        HostInputs blocked = withPlantInputs(machine, makeInputs(0.0f, 0.0f, 0.0f));
+        blocked.limitZMin = true;
+        machine.setHostInputs(blocked);
+        ex.tick(0.05f);
+        if (ex.processState() != ProcessState::Aborted)
+        {
+            return 40;
+        }
+        if (machine.motionState() == MotionState::Moving)
+        {
+            return 41;
         }
     }
 
@@ -142,13 +330,14 @@ int main()
         {
             return 10;
         }
-        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 400))
+        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 2500))
         {
             return 11;
         }
         for (int i = 0; i < 800 && ex.processState() == ProcessState::Running; ++i)
         {
-            machine.setHostInputs(makeInputs(0.0f, 0.0f, 0.0f));
+            const float fz = (ex.procedurePhase() == ProcedurePhase::InsertInitial) ? 10.0f : 0.0f;
+            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
         }
         if (ex.processState() != ProcessState::Aborted)
@@ -184,12 +373,12 @@ int main()
             return 15;
         }
 
-        for (int i = 0; i < 800 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
         {
             const float fz = (ex.procedurePhase() == ProcedurePhase::InsertInitial && machine.z() < -0.2f)
                                  ? 8.0f
                                  : (ex.procedurePhase() == ProcedurePhase::OptimizeInsert ? 8.0f : 0.0f);
-            machine.setHostInputs(makeInputs(0.0f, 0.0f, fz));
+            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
             if (ex.procedurePhase() == ProcedurePhase::TestOrAge)
             {
@@ -212,7 +401,7 @@ int main()
         program.add(TestPoint{4.0f, 0.0f, 0.0f});
         ex.setProgram(program);
         ex.start();
-        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 400))
+        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 2500))
         {
             return 17;
         }
@@ -236,11 +425,11 @@ int main()
         program.add(TestPoint{4.0f, 0.0f, 0.0f});
         ex.setProgram(program);
         ex.start();
-        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 400))
+        if (!runUntilPhase(ex, machine, ProcedurePhase::InsertInitial, 2500))
         {
             return 20;
         }
-        machine.setHostInputs(makeInputs(0.0f, 0.0f, 50.0f));
+        machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, 50.0f)));
         ex.tick(0.05f);
         if (machine.machineState() != MachineState::Fault)
         {
@@ -270,9 +459,9 @@ int main()
         program.add(TestPoint{1.0f, 0.0f, 0.0f});
         ex.setProgram(program);
         ex.start();
-        for (int i = 0; i < 1200 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
         {
-            machine.setHostInputs(makeInputs());
+            machine.setHostInputs(withProcessForce(ex, machine));
             ex.tick(0.05f);
         }
         if (ex.processState() != ProcessState::Completed)
@@ -303,9 +492,9 @@ int main()
         ex.setProgram(program);
         ex.start();
         bool saw_samples = false;
-        for (int i = 0; i < 1200 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
         {
-            machine.setHostInputs(makeInputs());
+            machine.setHostInputs(withProcessForce(ex, machine));
             ex.tick(0.05f);
             if (ex.procedure().forcePath().size() > 0)
             {
@@ -337,7 +526,7 @@ int main()
         program.add(TestPoint{1.0f, 0.0f, 0.0f});
         ex.setProgram(program);
         ex.start();
-        if (!runUntilPhase(ex, machine, ProcedurePhase::TestOrAge, 800, 0.0f))
+        if (!runUntilPhase(ex, machine, ProcedurePhase::TestOrAge, 2500, 0.1f))
         {
             return 29;
         }

@@ -555,10 +555,18 @@ button:disabled {
 
 .param-field {
   display: grid;
-  grid-template-columns: minmax(8rem, 14rem) 8rem auto 1fr;
+  grid-template-columns: minmax(8rem, 14rem) 8rem auto auto 1fr;
   gap: 0.5rem 0.75rem;
   align-items: center;
   margin: 0.4rem 0;
+}
+
+.param-field__future {
+  font-size: 0.75rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
 }
 
 .param-info {

@@ -51,6 +51,13 @@ function createDefaultStatus(connected = false) {
     pneumaticExtended: false,
     currentPointIndex: null,
     programPointCount: 0,
+    procedurePhase: 'Idle',
+    faultReason: 'None',
+    spreaderState: 'Retracted',
+    communicationWatchdogEnabled: false,
+    forceSampleFresh: false,
+    plateOriginValid: false,
+    probeCenterValid: false,
     connected,
   };
 }

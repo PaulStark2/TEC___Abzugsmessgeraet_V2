@@ -13,7 +13,7 @@ const procedureStore = require('./procedure/procedureStore');
 const { createProcedureService } = require('./procedure/procedureService');
 const { createPlantClient } = require('./simulation/plantClient');
 const machineConfigStore = require('./config/machineConfigStore');
-const { GROUPS: parameterGroups } = require('./config/parameterCatalog');
+const { GROUPS: parameterGroups, validateMachineConfigPayload } = require('./config/parameterCatalog');
 const calibrationStore = require('./config/calibrationStore');
 const forcePathStore = require('./results/forcePathStore');
 
@@ -216,6 +216,9 @@ async function handleCommand(body) {
 const machineClient = createMachineClient();
 const procedureService = createProcedureService(machineClient);
 const plantClient = createPlantClient();
+// GUI-only parameter-menu unlock. Not part of the STM32 safety circuit.
+// Default 'tec-admin' is for development. Production password MUST be changed
+// (environment VARIABLE PARAMETER_MENU_PASSWORD).
 const PARAMETER_MENU_PASSWORD = process.env.PARAMETER_MENU_PASSWORD || 'tec-admin';
 let parametersUnlocked = false;
 
@@ -498,7 +501,12 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const body = await readJsonBody(req);
-      const incoming = body.config || body;
+      const incoming = { ...machineConfigStore.load(), ...(body.config || body) };
+      const check = validateMachineConfigPayload(incoming);
+      if (!check.ok) {
+        sendJson(res, 400, { ok: false, error: check.error });
+        return;
+      }
       if (typeof machineClient.setMachineConfig === 'function' && machineClient.getStatus().connected) {
         const result = await machineClient.setMachineConfig(incoming);
         if (!result.ok) {
@@ -554,6 +562,44 @@ const server = http.createServer(async (req, res) => {
     }
     const result = await machineClient.startProbeCalibration();
     sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/sync') {
+    if (typeof machineClient.getMachineConfig !== 'function') {
+      sendJson(res, 400, { ok: false, error: 'Kalibrierungssync ist auf diesem Backend nicht verfügbar' });
+      return;
+    }
+    const status = machineClient.getStatus();
+    if (!status.connected) {
+      sendJson(res, 400, { ok: false, error: 'Controller nicht verbunden' });
+      return;
+    }
+    const cfgResult = await machineClient.getMachineConfig();
+    if (!cfgResult.ok || !cfgResult.config) {
+      sendJson(res, 400, { ok: false, error: cfgResult.error || 'CmdGetMachineConfig failed' });
+      return;
+    }
+    const c = cfgResult.config;
+    const storedCfg = machineConfigStore.load();
+    machineConfigStore.save({
+      ...storedCfg,
+      tool_offset_x: c.tool_offset_x,
+      tool_offset_y: c.tool_offset_y,
+      tool_offset_z: c.tool_offset_z,
+    });
+    let calib = calibrationStore.load();
+    if (status.probeCenterValid) {
+      calib = calibrationStore.setProbeCenter(
+        {
+          x: c.nominal_probe_x - c.tool_offset_x,
+          y: c.nominal_probe_y - c.tool_offset_y,
+          z: c.nominal_probe_z - c.tool_offset_z,
+        },
+        { x: c.tool_offset_x, y: c.tool_offset_y, z: c.tool_offset_z }
+      );
+    }
+    sendJson(res, 200, { ok: true, calibration: calib, config: machineConfigStore.load() });
     return;
   }
 
@@ -648,6 +694,31 @@ const server = http.createServer(async (req, res) => {
         }
       }
       sendPlantResult(res, await plantClient.triggerProbe(pulseMs));
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/simulation/probe-disc') {
+    try {
+      const body = await readJsonBody(req);
+      const disc = {};
+      for (const key of ['x', 'y', 'z', 'diameter', 'thickness', 'toolDiameter', 'toolCylindricalHeight']) {
+        if (body[key] !== undefined) {
+          const value = readFiniteNumber(body[key]);
+          if (value === null) {
+            sendJson(res, 400, { ok: false, error: `Invalid ${key}` });
+            return;
+          }
+          disc[key] = value;
+        }
+      }
+      if (Object.keys(disc).length === 0) {
+        sendJson(res, 400, { ok: false, error: 'No probe disc values provided' });
+        return;
+      }
+      sendPlantResult(res, await plantClient.setProbeDisc(disc));
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
     }

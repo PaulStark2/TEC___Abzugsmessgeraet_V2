@@ -1,4 +1,5 @@
 // Deterministic unit tests for M11 safety (limits, E-Stop, pneumatics).
+#include "ForceSample.hpp"
 #include "Machine.hpp"
 #include "TestExecutor.hpp"
 
@@ -15,7 +16,7 @@ static bool nearEqual(float a, float b, float epsilon = 1e-4f)
 
 static void setHostSafety(Machine& machine, const HostInputs& base)
 {
-    machine.setHostInputs(base);
+    machine.setHostInputs(withFreshForce(base));
 }
 
 static HostInputs makeSafeInputs()
@@ -205,6 +206,10 @@ int main()
     {
         Machine machine;
         machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(machine))
+        {
+            return 31;
+        }
         TestExecutor ex(machine);
         TestProgram program;
         program.add(TestPoint{20.0f, 0.0f, 0.0f});
@@ -333,6 +338,10 @@ int main()
         params.fz_safety_threshold_N = 10.0f;
         Machine machine(params);
         machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(machine))
+        {
+            return 49;
+        }
         TestExecutor ex(machine);
 
         TestProgram program;
@@ -387,7 +396,7 @@ int main()
         {
             return 60;
         }
-        m.tick(m.machineConfig().spreader.extend_time_s);
+        tickWithForce(m, m.machineConfig().spreader.extend_time_s);
         if (!m.hostOutputs().spreaderExtended)
         {
             return 60;
@@ -414,7 +423,7 @@ int main()
         Machine m;
         m.setSpreaderExtend(true);
         m.setFixtureExtend(false);
-        m.tick(m.machineConfig().spreader.extend_time_s);
+        tickWithForce(m, m.machineConfig().spreader.extend_time_s);
         const HostOutputs out = m.hostOutputs();
         if (!out.spreaderExtend || !out.spreaderExtended)
         {
@@ -427,13 +436,13 @@ int main()
     }
 
     // -------------------------------
-    // P4: Pneumatics unchanged on E-Stop safety fault
+    // P4: E-Stop de-energizes the valve; does not invent a retracted pose
     // -------------------------------
     {
         Machine m;
         m.setSpreaderExtend(true);
         m.setFixtureExtend(false);
-        const HostOutputs before = m.hostOutputs();
+        const bool latch_before = m.hostOutputs().spreaderExtended;
 
         HostInputs in = makeSafeInputs();
         in.e_stop = true;
@@ -444,7 +453,19 @@ int main()
         {
             return 64;
         }
-        if (!outputsMatch(m.hostOutputs(), before))
+        if (m.hostOutputs().spreaderExtend || m.spreaderBusy())
+        {
+            return 65;
+        }
+        if (m.hostOutputs().spreaderExtended != latch_before)
+        {
+            return 65;
+        }
+        if (m.spreaderState() != SpreaderState::SafeDeenergized)
+        {
+            return 65;
+        }
+        if (m.hostOutputs().fixtureExtend || m.hostOutputs().fixtureExtended)
         {
             return 65;
         }
@@ -512,7 +533,7 @@ int main()
         }
 
         m.setSpreaderExtend(true);
-        m.tick(m.machineConfig().spreader.extend_time_s);
+        tickWithForce(m, m.machineConfig().spreader.extend_time_s);
         if (!m.hostOutputs().spreaderExtend || !m.hostOutputs().spreaderExtended)
         {
             return 71; // commands work after clearFault

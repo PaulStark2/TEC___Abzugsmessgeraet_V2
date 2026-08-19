@@ -3,6 +3,7 @@
 #include "SimPlant.hpp"
 
 #include "Machine.hpp"
+#include "ProbeGeometry.hpp"
 #include "Types.hpp"
 
 #include <cmath>
@@ -70,25 +71,25 @@ static int testProbePulse()
     SimPlant plant;
     plant.setProbePulseSeconds(0.1f);
 
-    if (plant.sample(0.0f, 0.0f, 0.0f).probeTriggered)
+    if (plant.sample(40.0f, 40.0f, 40.0f).probeTriggered)
     {
         return 6;
     }
 
     plant.triggerProbe();
-    if (!plant.sample(0.0f, 0.0f, 0.0f).probeTriggered)
+    if (!plant.sample(40.0f, 40.0f, 40.0f).probeTriggered)
     {
         return 7;
     }
 
     plant.advance(0.05f);
-    if (!plant.sample(0.0f, 0.0f, 0.0f).probeTriggered)
+    if (!plant.sample(40.0f, 40.0f, 40.0f).probeTriggered)
     {
         return 8;
     }
 
     plant.advance(0.05f);
-    if (plant.sample(0.0f, 0.0f, 0.0f).probeTriggered)
+    if (plant.sample(40.0f, 40.0f, 40.0f).probeTriggered)
     {
         return 9;
     }
@@ -96,7 +97,7 @@ static int testProbePulse()
     // Pulse timer must not go negative and must be re-armable.
     plant.advance(1.0f);
     plant.triggerProbe();
-    if (!plant.sample(0.0f, 0.0f, 0.0f).probeTriggered)
+    if (!plant.sample(40.0f, 40.0f, 40.0f).probeTriggered)
     {
         return 10;
     }
@@ -193,6 +194,59 @@ static int testStateReadback()
     return 0;
 }
 
+static int testGeometricTriggerLatchesPose()
+{
+    SimPlant plant;
+    simplant::ProbeDisc disc{};
+    disc.center = TestPoint{10.0f, 20.0f, 5.0f};
+    disc.diameter = 8.0f;
+    disc.thickness = 3.0f;
+    disc.tool_diameter = 2.5f;
+    plant.setProbeDisc(disc);
+
+    const HostInputs far = plant.sample(40.0f, 40.0f, 40.0f);
+    if (far.probeTriggered)
+    {
+        return 30;
+    }
+
+    const HostInputs hit = plant.sample(10.0f, 20.0f, 6.5f);
+    if (!hit.probeTriggered || !hit.probeTriggerPoseValid)
+    {
+        return 31;
+    }
+    if (!nearEqual(hit.probeTriggerX, 10.0f) || !nearEqual(hit.probeTriggerY, 20.0f) ||
+        !nearEqual(hit.probeTriggerZ, 6.5f))
+    {
+        return 32;
+    }
+    const std::uint32_t seq = hit.probeTriggerSequence;
+    const HostInputs later = plant.sample(10.2f, 20.0f, 6.4f);
+    if (!later.probeTriggered || later.probeTriggerSequence != seq)
+    {
+        return 33;
+    }
+    if (!nearEqual(later.probeTriggerX, 10.0f) || !nearEqual(later.probeTriggerZ, 6.5f))
+    {
+        return 34;
+    }
+
+    const float r_sum = expectedXyContactRadius(8.0f, 2.5f);
+    disc.tool_cylindrical_height = 15.0f;
+    plant.setProbeDisc(disc);
+    const HostInputs shaft = plant.sample(10.0f - r_sum, 20.0f, 0.0f);
+    if (!shaft.probeTriggered)
+    {
+        return 35;
+    }
+    const HostInputs below = plant.sample(10.0f - r_sum, 20.0f, -20.0f);
+    if (below.probeTriggered)
+    {
+        return 36;
+    }
+    return 0;
+}
+
 int main()
 {
     const int results[] = {
@@ -202,6 +256,7 @@ int main()
         testEStopPassthrough(),
         testCoreDecidesLimitReaction(),
         testStateReadback(),
+        testGeometricTriggerLatchesPose(),
     };
 
     for (const int result : results)

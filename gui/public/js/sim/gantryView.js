@@ -31,6 +31,9 @@ const COLORS = {
   tcp: 0xffb300,
   floor: 0x2a2f37,
   limit: 0xe57373,
+  probeDisc: 0xf0c040,
+  probeStem: 0x90a4ae,
+  probeBase: 0x546e7a,
 };
 
 function isFinitePose(pose) {
@@ -84,6 +87,7 @@ export function createGantryView(canvas, geometry = {}) {
   const testPointGroup = new THREE.Group();
   const plannedTrajectoryGroup = new THREE.Group();
   const traveledTrajectoryGroup = new THREE.Group();
+  const probeGroup = new THREE.Group();
 
   scene.add(staticGroup);
   scene.add(bridgeGroup);
@@ -91,6 +95,7 @@ export function createGantryView(canvas, geometry = {}) {
   scene.add(testPointGroup);
   scene.add(plannedTrajectoryGroup);
   scene.add(traveledTrajectoryGroup);
+  scene.add(probeGroup);
   bridgeGroup.add(carriageGroup);
   carriageGroup.add(columnGroup);
 
@@ -336,6 +341,43 @@ export function createGantryView(canvas, geometry = {}) {
       traveledTrajectoryGroup.add(
         new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x43a047 }))
       );
+    },
+
+    /**
+     * Visual measuring head: disc + stem + base. Collision uses disc geometry only.
+     * @param {{ x: number, y: number, z: number, diameter?: number, thickness?: number }} disc
+     */
+    setProbeDisc(disc) {
+      clearGroup(probeGroup);
+      if (!disc || !Number.isFinite(disc.x) || !Number.isFinite(disc.y) || !Number.isFinite(disc.z)) {
+        return;
+      }
+      const diameter = Number.isFinite(disc.diameter) && disc.diameter > 0 ? disc.diameter : 8;
+      const thickness = Number.isFinite(disc.thickness) && disc.thickness > 0 ? disc.thickness : 3;
+      const radius = diameter / 2;
+
+      const plate = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius, thickness, 32),
+        new THREE.MeshStandardMaterial({ color: COLORS.probeDisc, metalness: 0.25, roughness: 0.45 })
+      );
+      plate.rotation.x = Math.PI / 2;
+      plate.position.set(disc.x, disc.y, disc.z);
+      probeGroup.add(plate);
+
+      const discBottom = disc.z - thickness / 2;
+      const stemTop = Math.max(discBottom, 0.5);
+      const stemLength = Math.max(stemTop - 0.5, 1);
+      const stem = new THREE.Mesh(
+        new THREE.CylinderGeometry(Math.min(1.2, radius * 0.35), Math.min(1.2, radius * 0.35), stemLength, 12),
+        new THREE.MeshStandardMaterial({ color: COLORS.probeStem, metalness: 0.2, roughness: 0.6 })
+      );
+      stem.rotation.x = Math.PI / 2;
+      stem.position.set(disc.x, disc.y, 0.5 + stemLength / 2);
+      probeGroup.add(stem);
+
+      const base = box(Math.max(diameter * 1.6, 12), Math.max(diameter * 1.6, 12), 1.5, COLORS.probeBase);
+      base.position.set(disc.x, disc.y, 0.75);
+      probeGroup.add(base);
     },
 
     resetCamera,

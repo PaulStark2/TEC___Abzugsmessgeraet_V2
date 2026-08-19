@@ -2,6 +2,7 @@
 #include "SimProtocolBridge.hpp"
 
 #include "Decoder.hpp"
+#include "ForceSample.hpp"
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
 #include "Payloads.hpp"
@@ -40,9 +41,18 @@ int main()
     {
         simbridge::SimProtocolBridge bridge;
         bridge.machine().setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(bridge.machine()))
+        {
+            return 98;
+        }
 
         simplant::PlantLimits limits{};
+        limits.x_min = -100.0f;
+        limits.y_min = -100.0f;
         limits.z_min = -100.0f;
+        limits.x_max = 200.0f;
+        limits.y_max = 200.0f;
+        limits.z_max = 200.0f;
         bridge.plant().setLimits(limits);
 
         TestConfiguration cfg = bridge.machine().testConfiguration();
@@ -86,6 +96,14 @@ int main()
         while (bridge.executor().processState() == ProcessState::Running && ticks < kMaxTicks)
         {
             bridge.applyHostInputs();
+            HostInputs in = bridge.machine().hostInputs();
+            if (phaseNeedsProcessForce(bridge.executor().procedurePhase()))
+            {
+                in.force.fz = bridge.machine().testConfiguration().target_force_N;
+                in.forceSampleSequence += 1u;
+                in.hostHeartbeatSequence += 1u;
+                bridge.machine().setHostInputs(in);
+            }
             bridge.tick(kDt);
             ++ticks;
         }
@@ -95,7 +113,7 @@ int main()
             return 3;
         }
         if (!nearEqual(bridge.machine().x(), 0.0f) || !nearEqual(bridge.machine().y(), 0.0f) ||
-            !nearEqual(bridge.machine().z(), 0.0f))
+            !nearEqual(bridge.machine().z(), bridge.machine().machineConfig().motion.safe_z))
         {
             return 4;
         }

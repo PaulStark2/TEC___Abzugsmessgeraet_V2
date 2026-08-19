@@ -10,6 +10,8 @@
 #include "TestConfiguration.hpp"
 #include "Types.hpp" // MachineState and MotionState
 
+#include <cstdint>
+
 // Machine provides the overgeordneten Betriebszustandsautomaten über MotionPlanner. // state machine
 class Machine
 {
@@ -107,17 +109,34 @@ public:
     const TestConfiguration& testConfiguration() const;
     void setPlateOrigin(const TestPoint& machine_pose);
     void setProbeCenter(const TestPoint& machine_pose);
+    void setToolOffset(const TestPoint& offset);
     const CalibrationSet& calibrationSet() const;
 
     void setActiveVelocity(float velocity);
     void setPreClampXyEnabled(bool enabled);
+    void loadPreClampForceParams();
+    bool preClampXyEnabled() const;
+    unsigned xyCorrectionSteps() const;
 
     // Collision watchdog context (ProcedureController sets this per phase).
     void setCollisionContext(CollisionContext context);
     CollisionContext collisionContext() const;
     ForceWatchdogTrip lastForceWatchdogTrip() const;
+    FaultReason lastFaultReason() const;
+    float forceSampleAge() const;
 
     bool spreaderBusy() const;
+    SpreaderState spreaderState() const;
+
+    void setCommunicationWatchdogEnabled(bool enabled);
+    bool communicationWatchdogEnabled() const;
+    float hostHeartbeatAge() const;
+
+    void setRuntimeConfigLocked(bool locked);
+    bool runtimeConfigLocked() const;
+    // Consume one latched trigger event. Pose is the host-latched trigger pose.
+    bool consumeProbeTrigger();
+    bool consumeProbeTrigger(TestPoint& pose_out);
 
 private:
     enum class ForceControlPhase
@@ -164,13 +183,30 @@ private:
     ForceWatchdogTrip last_force_watchdog_trip_;
     SpreaderTimer spreader_timer_;
     bool pre_clamp_xy_enabled_;
+    unsigned xy_correction_steps_;
+    FaultReason last_fault_reason_;
+    float force_sample_age_s_;
+    std::uint32_t last_force_sample_sequence_;
+    bool have_force_sample_;
+    bool force_sample_fresh_;
+    bool comm_watchdog_enabled_;
+    bool heartbeat_fresh_;
+    float heartbeat_age_s_;
+    std::uint32_t last_heartbeat_sequence_;
+    bool have_heartbeat_;
+    bool runtime_config_locked_;
+    bool probe_trigger_latched_;
+    bool prev_probe_triggered_;
+    TestPoint probe_trigger_pose_{};
+    std::uint32_t last_probe_trigger_sequence_;
 
     // Host I/O containers (no evaluation). // placeholders
     HostInputs host_inputs_; // last inputs
     HostOutputs host_outputs_; // produced outputs
 
     // M11 safety helpers.
-    void enterSafetyFault(); // stopMotion + Fault only (no pneumatic changes)
+    void enterSafetyFault(FaultReason reason); // stopMotion + latched Fault
+    void applySpreaderSafeState(); // valve off; do not invent a retracted pose
     void updatePneumaticStub(); // mirror Extend -> Extended for both actuators
 
     // M16 limit helpers: derive blocked directions and effective planner targets without

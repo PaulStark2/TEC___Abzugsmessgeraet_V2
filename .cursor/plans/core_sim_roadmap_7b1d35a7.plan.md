@@ -1,6 +1,6 @@
 ---
 name: Core Sim Roadmap
-overview: Revised implementation roadmap for platform-independent Core and PC simulation first, then protocol/GUI-vs-Sim, then STM32. Incorporates review fixes for MotionPlanner, state layers, host I/O, force control, safety, and GUI without hardware.
+overview: Revised implementation roadmap for platform-independent Core and PC simulation first, then protocol/GUI-vs-Sim, then STM32. M19.0 is probe calibration on the 3-axis Core (inserted; no hardware release). STM32 firmware hosting is M19.x (later).
 todos:
   - id: m1-skeleton
     content: "M1: CMake + trivial Core + runnable simulation (compilable/testable)"
@@ -62,8 +62,14 @@ todos:
   - id: m17-procedure
     content: "M17: Automated test/aging procedure (config, protocol, ProcedureController, GUI parameters)"
     status: completed
-  - id: m18-stm32
-    content: "M18: STM32 firmware hosts Core (parallel to GUI path; formerly M17)"
+  - id: m18-safety
+    content: "M18: Safety hardening, Safe-Z, watchdogs, runtime lock (inserted before STM32)"
+    status: completed
+  - id: m19-0-probe
+    content: "M19.0: Probe calibration protocol on 3-axis Core (geometry, FSM, SimPlant, M12, GUI)"
+    status: completed
+  - id: m19-stm32
+    content: "M19.x (later): STM32 firmware hosts Core (postponed; was M19 before M19.0)"
     status: pending
 isProject: false
 ---
@@ -86,9 +92,11 @@ Revised after documentation review: clear **Machine / MotionPlanner / TestExecut
 | `Axis`                       | Single-axis kinematic state (position, velocity, acceleration, target); optional single-axis `tick`               |
 | `MotionPlanner`              | Multi-axis motion toward a target pose each `tick`; owns `MotionState`                                            |
 | `Machine`                    | Operational/safety state machine; STOP/PAUSE; applies `HostInputs`; exposes `HostOutputs`; commands MotionPlanner |
-| `TestExecutor`               | Process sequencing over `TestProgram`; owns `ProcessState`; advances on motion AtTarget                           |
+| `TestExecutor`               | Facade over `ProcedureController`; owns `ProcessState`                                                            |
+| `ProcedureController`        | Automated test/aging sequence including ProbeApproach / ProbeCalibration                                          |
+| `ProbeCalibration` / `ProbeSearch` | Non-blocking touch-probe protocol (Z + four XY contacts, tool_offset replace)                              |
 | `TestPoint` / `TestProgram`  | Fixed-capacity test data (no heap)                                                                                |
-| `HostInputs` / `HostOutputs` | Thin I/O snapshot filled by Sim today, STM32 later (force, limits, E-Stop in; setpoints/pneumatic out)            |
+| `HostInputs` / `HostOutputs` | Thin I/O snapshot filled by Sim today, STM32 later (force, limits, E-Stop, probe trigger in; setpoints/pneumatic out) |
 
 
 No dedicated `ForceSensor` class — force is a field on `HostInputs`.
@@ -126,8 +134,10 @@ flowchart LR
   M11 --> M16
   M16 --> M17[M17 Procedure]
   M12 --> M17
-  M17 --> M18[M18 STM32]
-  M12 --> M18
+  M17 --> M18[M18 Safety]
+  M18 --> M190[M19.0 Probe Calib]
+  M190 --> M19x[M19.x STM32]
+  M12 --> M19x
 ```
 
 
@@ -136,7 +146,9 @@ GUI path: M12 → M13 → M14 (formal protocol). **M14.1** hardens local dev sta
 
 **M15** adds the standalone simulation UI and the virtual outside world (sensors in the C++ host). **M16** refines Core limit reaction (directional soft block, no global Fault), adds homing Z+→X+→Y+, extends M12 StatusReport, and gives SimPlant all six limit switches.
 
-STM32 path: M12 → **M18** (parallel; does not block GUI). Previously numbered M17. **M17** is the automated test/aging procedure (Core + M12 + GUI parameters).
+**M17** is the automated test/aging procedure (Core + M12 + GUI parameters). **M18** is safety hardening (Safe-Z, watchdogs, runtime lock). **M19.0** (inserted) ports the historical ABB touch-probe protocol onto the 3-axis Core; no STM32 HAL. STM32 firmware hosting is **M19.x** (later; previously numbered M19, and before that M18/M17). Parallel to the GUI path; does not replace Core.
+
+**Hardwarefreigabe bleibt NEIN** until a dedicated hardware-validation milestone after STM32 hosting.
 
 ---
 
@@ -680,31 +692,73 @@ coordinate frames, force watchdog, force-path recorder, and matching M12/GUI sur
 
 **Dependencies:** M12–M16.
 
-**STM32 firmware hosting is M18.**
+**STM32 firmware hosting is M19.x (later).** Probe calibration is M19.0.
 
 ---
 
-## Milestone 18 — STM32 firmware host (parallel path)
+## Milestone 18 — Safety hardening (inserted)
 
-> Previously numbered M17. Renumbered because M17 is the automated procedure.
+**Objective:** Harden the M17 procedure so automatic motion cannot start without
+homing, cannot traverse XY below Safe-Z, cannot treat NaN/stale force as valid,
+and cannot keep moving after abort. Prepare HostInputs for STM32 without HAL.
 
-**Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12 (including the M16/M17 StatusReport fields).
+**Documentation:** [`docs/M18_Procedure.md`](../../docs/M18_Procedure.md)
+
+**Sub-milestones:** M18.1 finite force / abort=stop … M18.13 integration.
+
+**Dependencies:** M17.
+
+**Hardwarefreigabe: NEIN.** ProbeCalibration in M18 was still a placeholder. Full protocol is M19.0. STM32-HAL is M19.x (later).
+
+---
+
+## Milestone 19.0 — Probe calibration on the 3-axis Core (inserted)
+
+**Objective:** Transfer the historical ABB touch-probe measurement logic onto the Cartesian Core. Determine the geometric center of the one fixed measuring disc and **replace** `tool_offset` with `nominal_probe − measured_probe`. No Rx/Ry, no second probe, no STM32 HAL.
+
+**Documentation:** [`docs/M19_ProbeCalibration.md`](../../docs/M19_ProbeCalibration.md)
+
+**Sub-milestones:**
+
+- M19.0a Geometry + `ProbeSearch` FSM + unit tests
+- M19.0b `ProbeCalibration` FSM (Z + four XY points, offset replace, persist on success only)
+- M19.0c `ProcedureController`: `CmdStart` → ProbeApproach → ProbeCalibrate → MoveSafePose; `CmdStartProbeCalib` skips approach
+- M19.0d SimPlant geometric trigger + latch, GUI parameters, M12 MachineConfig 184 B
+- M19.0e Validation (CTest + protocol tests). No hardware release.
+
+**Dependencies:** M18.
+
+**Authoritative trigger:** STM32 (later) or SimPlant (now) latches pose + sequence. The Pi must not reconstruct contact from UART receive time. `consumeProbeTrigger()` consumes that event.
+
+**TCP:** spreader bottom tip of a vertical cylinder. Disc center is mid-plane. Default geometry: Ø8 × 3 mm disc, tool Ø2.5 mm, `head_diameter` reserved at 0. Default `nominal_probe` (40, 40, 10) mm so XY searches stay inside 0…100 mm travel.
+
+**Hardwarefreigabe: NEIN.**
+
+---
+
+## Milestone 19.x — STM32 firmware host (later; postponed)
+
+> Previously numbered M19 (and before that M18 / M17). Postponed so M19.0 could insert the probe protocol on Core + Sim.
+
+**Objective:** Same Core on STM32F446RE; HAL only outside Core; UART (or chosen link) uses protocol from M12 (including the M16–M19.0 StatusReport / MachineConfig fields). Digital probe input must latch pose within a few milliseconds.
 
 **Files/modules:**
 
 - `firmware/` / `stm32/` — timer tick → Core `tick`; map HAL sensors/actuators ↔ HostInputs/HostOutputs; protocol over UART
 
-**Dependencies:** Milestone 12 + Core behavior through M16/M17.
+**Dependencies:** Milestone 12 + Core behavior through M16–M19.0.
 
-**Expected behavior:** Same state progression as Sim for a demo program (step outputs may start stubbed). Limit switches on hardware use the same directional soft-block semantics as M16.
+**Expected behavior:** Same state progression as Sim for a demo program (step outputs may start stubbed). Limit switches on hardware use the same directional soft-block semantics as M16. Probe trigger matches SimPlant’s event + latched pose contract.
 
-**How to test:** Compare UART status stream to known Sim trace; E-Stop and STOP on target; homing against real +limits.
+**How to test:** Compare UART status stream to known Sim trace; E-Stop and STOP on target; homing against real +limits; probe latch vs. Core consume.
 
 **Definition of done:**
 
 - Core remains platform-independent (no HAL inside Core classes)
-- STM32 remains authority for real-time motion/safety when hardware is used
+- STM32 remains authority for real-time motion/safety and the probe trigger when hardware is used
 - Architectural shape unchanged from Sim host pattern (tick + Host I/O + protocol)
+
+**Hardwarefreigabe:** still a separate decision after this hosting work.
 
 ---
 

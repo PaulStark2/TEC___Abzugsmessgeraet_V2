@@ -76,13 +76,13 @@ void SimProtocolBridge::appendForcePathChunks(std::vector<OutboundFrame>& out)
     ForcePathRecorder& recorder = executor_.procedure().forcePath();
     tecomm::ForcePathChunkPayload chunk{};
     ForcePathRecorder::Sample samples[tecomm::kForcePathChunkMaxSamples];
-    const std::size_t n = recorder.pop(samples, tecomm::kForcePathChunkMaxSamples);
+    const std::size_t n = recorder.popSameIteration(samples, tecomm::kForcePathChunkMaxSamples);
     if (n == 0)
     {
         return;
     }
     chunk.point_index = static_cast<uint8_t>(executor_.currentIndex());
-    chunk.iteration = static_cast<uint16_t>(executor_.procedure().testIteration());
+    chunk.iteration = samples[0].iteration;
     chunk.sequence = recorder.sequence();
     chunk.sample_count = static_cast<uint8_t>(n);
     chunk.dropped = recorder.dropped();
@@ -104,6 +104,16 @@ void SimProtocolBridge::appendForcePathChunks(std::vector<OutboundFrame>& out)
 
 void SimProtocolBridge::applyHostInputs()
 {
+    // Disc center stays independently configurable. Collision geometry follows
+    // MachineConfig so the spreader cylinder and disc size match the Core.
+    simplant::ProbeDisc disc = plant_.probeDisc();
+    const MachineConfig::Probe& probe = machine_.machineConfig().probe;
+    disc.diameter = probe.measuring_head_diameter;
+    disc.thickness = probe.measuring_head_thickness;
+    disc.tool_diameter = probe.tool_diameter;
+    disc.tool_cylindrical_height = probe.tool_cylindrical_height;
+    plant_.setProbeDisc(disc);
+
     // Sensors are derived from the Core-reported pose; no safety decision here.
     machine_.setHostInputs(plant_.sample(machine_.x(), machine_.y(), machine_.z()));
 }

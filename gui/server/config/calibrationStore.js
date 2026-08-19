@@ -11,6 +11,7 @@ function empty() {
     plateOriginValid: false,
     probeCenter: null,
     probeCenterValid: false,
+    toolOffset: null,
   };
 }
 
@@ -42,13 +43,17 @@ function setPlateOrigin(pose) {
   });
 }
 
-function setProbeCenter(pose) {
+function setProbeCenter(pose, toolOffset) {
   const current = load();
-  return save({
+  const next = {
     ...current,
     probeCenter: { x: pose.x, y: pose.y, z: pose.z },
     probeCenterValid: true,
-  });
+  };
+  if (toolOffset) {
+    next.toolOffset = { x: toolOffset.x, y: toolOffset.y, z: toolOffset.z };
+  }
+  return save(next);
 }
 
 module.exports = {

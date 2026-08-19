@@ -74,5 +74,8 @@ For automated tests, see `tests/bridge_*_tests.cpp`.
   [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md).
 - **M17:** StatusReport 39 bytes (`procedurePhase`); config/test/plate/probe commands;
   `MsgForcePathChunk`. See [`docs/M17_Procedure.md`](M17_Procedure.md).
-- **M18:** Same M12 frames over UART on STM32; transport changes, bridge mapping
-  concept stays on the firmware side.
+- **M18:** Safety hardening. StatusReport 41 bytes; MachineConfig was 142 bytes. See
+  [`docs/M18_Procedure.md`](M18_Procedure.md). **No hardware release.**
+- **M19.0:** Probe calibration protocol. MachineConfig **196 bytes**. See
+  [`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md). STM32 UART hosting
+  is later; transport mapping stays the same. **No hardware release.**

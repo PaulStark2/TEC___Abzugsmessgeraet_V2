@@ -2,6 +2,7 @@
 #include "SimHostInputProvider.hpp"
 #include "StatusSnapshot.hpp"
 
+#include "ForceSample.hpp"
 #include "HostInputs.hpp"
 #include "Machine.hpp"
 #include "TestExecutor.hpp"
@@ -77,6 +78,10 @@ int main()
     program.add(TestPoint{1.0f, 0.0f, 0.0f});
     program.add(TestPoint{2.0f, 0.0f, 0.0f});
     executor.setProgram(program);
+    if (!homeMachine(machine))
+    {
+        return 19;
+    }
     executor.start();
 
     machine.setHostInputs(provider.build(machine));

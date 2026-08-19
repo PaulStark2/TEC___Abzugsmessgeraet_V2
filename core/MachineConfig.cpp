@@ -1,4 +1,7 @@
 #include "MachineConfig.hpp"
+#include "ProbeGeometry.hpp"
+
+#include <cmath>
 
 static bool forceAbsOk(float value_N, float max_abs_N)
 {
@@ -43,11 +46,11 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
 {
     if (!velocityOk(config.motion.v_approach) || !velocityOk(config.motion.v_slow) ||
         !velocityOk(config.motion.v_measure) || !velocityOk(config.motion.v_homing) ||
-        !velocityOk(config.probe.search_speed))
+        !velocityOk(config.probe.search_speed) || !velocityOk(config.probe.fine_search_speed))
     {
         if (config.motion.v_approach <= 0.0f || config.motion.v_slow <= 0.0f ||
             config.motion.v_measure <= 0.0f || config.motion.v_homing <= 0.0f ||
-            config.probe.search_speed <= 0.0f)
+            config.probe.search_speed <= 0.0f || config.probe.fine_search_speed <= 0.0f)
         {
             return ConfigValidationError::VelocityNotPositive;
         }
@@ -61,6 +64,12 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     if (config.motion.acceleration > SafetyLimits::kMaxAcceleration)
     {
         return ConfigValidationError::AccelerationExceedsSafety;
+    }
+
+    if (!std::isfinite(config.motion.safe_z) ||
+        std::fabs(config.motion.safe_z) > SafetyLimits::kMaxAbsSafeZ)
+    {
+        return ConfigValidationError::SafeZInvalid;
     }
 
     if (config.force.force_filter < 0.0f || config.force.force_filter > SafetyLimits::kMaxForceFilter)
@@ -88,7 +97,8 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     }
 
     if (config.force.xy_correction_step <= 0.0f || config.force.xy_max_correction <= 0.0f ||
-        config.probe.search_distance <= 0.0f || config.probe.backoff < 0.0f)
+        config.force.insert_search_distance <= 0.0f || config.probe.search_distance <= 0.0f ||
+        config.probe.backoff < 0.0f)
     {
         return ConfigValidationError::BufferNegative;
     }
@@ -104,6 +114,38 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     if (config.force.insertion_buffer > SafetyLimits::kMaxInsertionBuffer)
     {
         return ConfigValidationError::BufferExceedsSafety;
+    }
+
+    if (!(config.force.sample_timeout_s >= SafetyLimits::kMinForceSampleTimeout_s))
+    {
+        return ConfigValidationError::TimeNotPositive;
+    }
+    if (config.force.sample_timeout_s > SafetyLimits::kMaxForceSampleTimeout_s)
+    {
+        return ConfigValidationError::TimeExceedsSafety;
+    }
+
+    if (!(config.force.xy_correct_timeout_s >= SafetyLimits::kMinPreClampTimeout_s))
+    {
+        return ConfigValidationError::TimeNotPositive;
+    }
+    if (config.force.xy_correct_timeout_s > SafetyLimits::kMaxPreClampTimeout_s)
+    {
+        return ConfigValidationError::TimeExceedsSafety;
+    }
+    if (config.force.xy_max_attempts == 0u ||
+        config.force.xy_max_attempts > SafetyLimits::kMaxPreClampAttempts)
+    {
+        return ConfigValidationError::IterationsZero;
+    }
+
+    if (!(config.communication.heartbeat_timeout_s >= SafetyLimits::kMinHeartbeatTimeout_s))
+    {
+        return ConfigValidationError::TimeNotPositive;
+    }
+    if (config.communication.heartbeat_timeout_s > SafetyLimits::kMaxHeartbeatTimeout_s)
+    {
+        return ConfigValidationError::TimeExceedsSafety;
     }
 
     if (config.spreader.extend_time_s < SafetyLimits::kMinSpreaderTime_s ||
@@ -134,6 +176,49 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
         config.phase2.max_optimization_iterations > SafetyLimits::kMaxIterations)
     {
         return ConfigValidationError::IterationsZero;
+    }
+    if (config.phase2.max_sign_flips == 0u ||
+        config.phase2.max_sign_flips > SafetyLimits::kMaxIterations)
+    {
+        return ConfigValidationError::IterationsZero;
+    }
+
+    if (config.probe.search_depth <= 0.0f || config.probe.approach_distance <= 0.0f ||
+        config.probe.head_diameter < 0.0f || config.probe.measuring_head_diameter <= 0.0f ||
+        config.probe.measuring_head_thickness <= 0.0f || config.probe.tool_diameter <= 0.0f ||
+        config.probe.tool_cylindrical_height <= 0.0f || config.probe.xy_search_margin < 0.0f)
+    {
+        return ConfigValidationError::BufferNegative;
+    }
+    if (config.probe.search_depth > SafetyLimits::kMaxSearchDepth ||
+        config.probe.approach_distance > SafetyLimits::kMaxApproachDistance ||
+        config.probe.search_distance > SafetyLimits::kMaxApproachDistance ||
+        config.force.insert_search_distance > SafetyLimits::kMaxApproachDistance ||
+        config.probe.backoff > SafetyLimits::kMaxApproachDistance ||
+        config.probe.head_diameter > SafetyLimits::kMaxProbeDiameter ||
+        config.probe.measuring_head_diameter > SafetyLimits::kMaxProbeDiameter ||
+        config.probe.measuring_head_thickness > SafetyLimits::kMaxProbeThickness ||
+        config.probe.tool_diameter > SafetyLimits::kMaxProbeDiameter ||
+        config.probe.tool_cylindrical_height > SafetyLimits::kMaxToolCylindricalHeight ||
+        config.probe.xy_search_margin > SafetyLimits::kMaxXySearchMargin)
+    {
+        return ConfigValidationError::BufferExceedsSafety;
+    }
+    if (!(xySearchInnerRadius(config.probe.measuring_head_diameter, config.probe.xy_search_margin) > 0.0f))
+    {
+        return ConfigValidationError::BufferNegative;
+    }
+    if (config.probe.num_fine_searches > SafetyLimits::kMaxIterations)
+    {
+        return ConfigValidationError::IterationsZero;
+    }
+    if (!std::isfinite(config.probe.nominal_probe.x) || !std::isfinite(config.probe.nominal_probe.y) ||
+        !std::isfinite(config.probe.nominal_probe.z) ||
+        std::fabs(config.probe.nominal_probe.x) > SafetyLimits::kMaxNominalAbs ||
+        std::fabs(config.probe.nominal_probe.y) > SafetyLimits::kMaxNominalAbs ||
+        std::fabs(config.probe.nominal_probe.z) > SafetyLimits::kMaxNominalAbs)
+    {
+        return ConfigValidationError::SafeZInvalid;
     }
 
     return ConfigValidationError::Ok;

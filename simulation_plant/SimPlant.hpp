@@ -1,6 +1,9 @@
 #pragma once
 
 #include "HostInputs.hpp"
+#include "TestPoint.hpp"
+
+#include <cstdint>
 
 namespace simplant
 {
@@ -18,9 +21,19 @@ struct PlantLimits
     float z_max = 50.0f;
 };
 
+struct ProbeDisc
+{
+    TestPoint center{40.0f, 40.0f, 10.0f};
+    float diameter = 8.0f;
+    float thickness = 3.0f;
+    float tool_diameter = 2.5f;
+    float tool_cylindrical_height = 15.0f;
+};
+
 struct PlantState
 {
     PlantLimits limits;
+    ProbeDisc probe;
     bool limit_x_min = false;
     bool limit_x_max = false;
     bool limit_y_min = false;
@@ -30,6 +43,10 @@ struct PlantState
     bool probe_triggered = false;
     bool e_stop = false;
     float probe_pulse_seconds = kDefaultProbePulseSeconds;
+    float probe_trigger_x = 0.0f;
+    float probe_trigger_y = 0.0f;
+    float probe_trigger_z = 0.0f;
+    std::uint32_t probe_trigger_sequence = 0;
 };
 
 class SimPlant
@@ -37,6 +54,9 @@ class SimPlant
 public:
     void setLimits(const PlantLimits& limits);
     PlantLimits limits() const;
+
+    void setProbeDisc(const ProbeDisc& disc);
+    ProbeDisc probeDisc() const;
 
     void setProbePulseSeconds(float seconds);
     void triggerProbe();
@@ -50,10 +70,17 @@ public:
     PlantState state(float x, float y, float z) const;
 
 private:
+    bool geometryContact(float x, float y, float z) const;
+
     PlantLimits limits_{};
+    ProbeDisc probe_{};
     float probe_pulse_seconds_ = kDefaultProbePulseSeconds;
     float probe_remaining_ = 0.0f;
     bool e_stop_ = false;
+    mutable std::uint32_t force_sample_sequence_ = 0;
+    mutable bool prev_probe_contact_ = false;
+    mutable std::uint32_t probe_trigger_sequence_ = 0;
+    mutable TestPoint latched_trigger_pose_{};
 };
 
 } // namespace simplant

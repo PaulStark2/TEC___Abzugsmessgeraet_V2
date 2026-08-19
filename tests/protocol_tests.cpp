@@ -33,7 +33,8 @@ static bool statusEqual(const tecomm::StatusReportPayload& a, const tecomm::Stat
            a.fixture_extend == b.fixture_extend && a.fixture_extended == b.fixture_extended &&
            a.current_point_index == b.current_point_index && a.program_point_count == b.program_point_count &&
            a.homing_state == b.homing_state && a.blocked_directions == b.blocked_directions &&
-           a.flags == b.flags && a.procedure_phase == b.procedure_phase;
+           a.flags == b.flags && a.procedure_phase == b.procedure_phase &&
+           a.fault_reason == b.fault_reason && a.spreader_state == b.spreader_state;
 }
 
 static bool roundtripEmpty(uint8_t message_id)
@@ -160,6 +161,9 @@ int main()
         status.fixture_extended = 0;
         status.current_point_index = 2;
         status.program_point_count = 5;
+        status.procedure_phase = 9;
+        status.fault_reason = 6;
+        status.spreader_state = 4;
         if (!tecomm::encodeMessage(static_cast<uint8_t>(tecomm::MessageId::MsgStatusReport), status, frame,
                                    sizeof(frame))
                  .ok)
@@ -574,6 +578,24 @@ int main()
         cfg.tool_offset_x = 0.25f;
         cfg.tool_offset_y = -0.5f;
         cfg.tool_offset_z = 1.0f;
+        cfg.safe_z = 10.0f;
+        cfg.sample_timeout_s = 0.5f;
+        cfg.heartbeat_timeout_s = 0.3f;
+        cfg.xy_correct_timeout_s = 2.0f;
+        cfg.head_diameter = 0.0f;
+        cfg.measuring_head_diameter = 8.0f;
+        cfg.measuring_head_thickness = 3.0f;
+        cfg.tool_diameter = 2.5f;
+        cfg.search_depth = 5.0f;
+        cfg.approach_distance = 10.0f;
+        cfg.fine_search_speed = 1.0f;
+        cfg.nominal_probe_x = 0.0f;
+        cfg.nominal_probe_y = 0.0f;
+        cfg.nominal_probe_z = 5.0f;
+        cfg.tool_cylindrical_height = 15.0f;
+        cfg.probe_xy_search_margin = 2.0f;
+        cfg.insert_search_distance = 10.0f;
+        cfg.num_fine_searches = 3;
 
         uint8_t wire[tecomm::kMachineConfigPayloadWireSize];
         if (!tecomm::encodeMachineConfigPayload(cfg, wire, sizeof(wire)))
@@ -585,8 +607,14 @@ int main()
         {
             return 91;
         }
-        if (parsed.tool_offset_z != cfg.tool_offset_z ||
-            parsed.max_optimization_iterations != 10 || parsed.v_homing != cfg.v_homing)
+        if (parsed.tool_offset_z != cfg.tool_offset_z || parsed.safe_z != cfg.safe_z ||
+            parsed.heartbeat_timeout_s != cfg.heartbeat_timeout_s ||
+            parsed.max_optimization_iterations != 10 || parsed.v_homing != cfg.v_homing ||
+            parsed.measuring_head_diameter != cfg.measuring_head_diameter ||
+            parsed.num_fine_searches != 3 || parsed.nominal_probe_z != cfg.nominal_probe_z ||
+            parsed.tool_cylindrical_height != cfg.tool_cylindrical_height ||
+            parsed.probe_xy_search_margin != cfg.probe_xy_search_margin ||
+            parsed.insert_search_distance != cfg.insert_search_distance)
         {
             return 92;
         }
@@ -730,6 +758,8 @@ int main()
 
         tecomm::StatusReportPayload status{};
         status.procedure_phase = 11;
+        status.fault_reason = 4;
+        status.spreader_state = 4;
         uint8_t status_wire[tecomm::kStatusReportPayloadWireSize];
         if (!tecomm::encodeStatusReportPayload(status, status_wire, sizeof(status_wire)))
         {
@@ -737,9 +767,14 @@ int main()
         }
         tecomm::StatusReportPayload status_parsed{};
         if (!tecomm::decodeStatusReportPayload(status_wire, sizeof(status_wire), status_parsed) ||
-            status_parsed.procedure_phase != 11)
+            status_parsed.procedure_phase != 11 || status_parsed.fault_reason != 4 ||
+            status_parsed.spreader_state != 4)
         {
             return 116;
+        }
+        if (tecomm::decodeStatusReportPayload(status_wire, 39, status_parsed))
+        {
+            return 117;
         }
     }
 

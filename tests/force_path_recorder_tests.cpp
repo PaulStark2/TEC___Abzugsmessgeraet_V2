@@ -9,6 +9,7 @@ int main()
     }
 
     rec.push(1.0f, 2.0f);
+    rec.setIteration(1);
     rec.push(3.0f, 4.0f);
     if (rec.size() != 2)
     {
@@ -16,12 +17,12 @@ int main()
     }
 
     ForcePathRecorder::Sample out[4];
-    const std::size_t n = rec.pop(out, 1);
-    if (n != 1 || out[0].z != 1.0f || out[0].fz != 2.0f)
+    const std::size_t n = rec.pop(out, 2);
+    if (n != 2 || out[0].iteration != 0 || out[1].iteration != 1)
     {
         return 3;
     }
-    if (rec.size() != 1 || rec.sequence() != 1)
+    if (out[0].z != 1.0f || out[1].z != 3.0f)
     {
         return 4;
     }
@@ -48,6 +49,21 @@ int main()
     if (first.z != 10.0f)
     {
         return 8;
+    }
+
+    rec.reset();
+    rec.setIteration(0);
+    rec.push(0.0f, 1.0f);
+    rec.setIteration(1);
+    rec.push(2.0f, 3.0f);
+    ForcePathRecorder::Sample same[4];
+    if (rec.popSameIteration(same, 4) != 1 || same[0].iteration != 0)
+    {
+        return 9;
+    }
+    if (rec.popSameIteration(same, 4) != 1 || same[0].iteration != 1)
+    {
+        return 10;
     }
 
     return 0;

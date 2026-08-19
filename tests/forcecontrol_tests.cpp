@@ -1,4 +1,5 @@
 // Deterministic unit tests for M10 force control.
+#include "ForceSample.hpp"
 #include "Machine.hpp"
 #include "TestExecutor.hpp"
 
@@ -18,7 +19,7 @@ static void setForce(Machine& machine, float fx, float fy, float fz)
     HostInputs in{};
     in.force = ForceVector{fx, fy, fz};
     in.e_stop = false;
-    machine.setHostInputs(in);
+    machine.setHostInputs(withFreshForce(in));
 }
 
 static void runUntilNotRunning(TestExecutor& ex, int max_steps, float dt, Machine& machine,
@@ -93,6 +94,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f; // disabled
 
         Machine m(params);
+        m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
 
         const float x0 = m.x();
@@ -171,6 +173,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f;
 
         Machine m(params);
+        m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
 
         // Stage 1: only Fx active.
@@ -324,6 +327,10 @@ int main()
 
         Machine machine(params);
         machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(machine))
+        {
+            return 20;
+        }
         TestExecutor ex(machine);
 
         TestProgram program;
@@ -376,6 +383,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f;
 
         Machine m(params);
+        m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
 
         // +Fx drives target in -X; clamp at commanded_x - max_x_correction.

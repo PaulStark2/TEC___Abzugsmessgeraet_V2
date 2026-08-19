@@ -79,13 +79,24 @@ export function renderParameters(container) {
               data-key="${escapeHtml(field.key)}"
               type="number"
               step="${field.integer ? '1' : 'any'}"
+              ${field.min !== undefined ? `min="${field.min}"` : ''}
+              ${field.max !== undefined ? `max="${field.max}"` : ''}
               value="${escapeHtml(config[field.key] ?? '')}"
             />
             <span class="param-field__unit">${escapeHtml(field.unit || '')}</span>
+            ${field.future ? '<span class="param-field__future">zukünftig</span>' : ''}
             <details class="param-info">
               <summary>Info</summary>
               <p>${escapeHtml(field.info || '')}</p>
               <p>Einheit: ${escapeHtml(field.unit || '—')}</p>
+              <p>Zulässiger Bereich: ${escapeHtml(
+                field.minExclusive !== undefined
+                  ? `> ${field.minExclusive}${field.max !== undefined ? ` … ${field.max}` : ''}`
+                  : field.min !== undefined || field.max !== undefined
+                    ? `${field.min !== undefined ? field.min : '—'} … ${field.max !== undefined ? field.max : '—'}`
+                    : 'endlich (Core-Validierung)'
+              )}</p>
+              <p>Wirkung: ${field.future ? 'noch nicht im Core ausgewertet' : 'wirkt auf Core MachineConfig'}</p>
             </details>
           </label>`
           )

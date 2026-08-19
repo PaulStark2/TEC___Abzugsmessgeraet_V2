@@ -190,6 +190,12 @@ function createProtocolProcedureAdapter(machineClient) {
         percent: derived.percent,
         isComplete: derived.isComplete,
         procedurePhase: machineStatus.procedurePhase || null,
+        machineState: machineStatus.machineState || null,
+        faultReason: machineStatus.faultReason || null,
+        spreaderState: machineStatus.spreaderState || null,
+        isHomed: machineStatus.isHomed === true,
+        communicationWatchdogEnabled: machineStatus.communicationWatchdogEnabled === true,
+        forceSampleFresh: machineStatus.forceSampleFresh === true,
       },
       error: connected
         ? prev.error

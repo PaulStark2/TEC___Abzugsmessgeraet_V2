@@ -42,6 +42,21 @@ Machine::Machine()
     , collision_context_(CollisionContext::Approach)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
+    , xy_correction_steps_(0)
+    , last_fault_reason_(FaultReason::None)
+    , force_sample_age_s_(0.0f)
+    , last_force_sample_sequence_(0)
+    , have_force_sample_(false)
+    , force_sample_fresh_(false)
+    , comm_watchdog_enabled_(false)
+    , heartbeat_fresh_(false)
+    , heartbeat_age_s_(0.0f)
+    , last_heartbeat_sequence_(0)
+    , have_heartbeat_(false)
+    , runtime_config_locked_(false)
+    , probe_trigger_latched_(false)
+    , prev_probe_triggered_(false)
+    , last_probe_trigger_sequence_(0)
 {
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
 }
@@ -68,6 +83,21 @@ Machine::Machine(const ForceControlParams& params)
     , collision_context_(CollisionContext::Approach)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
+    , xy_correction_steps_(0)
+    , last_fault_reason_(FaultReason::None)
+    , force_sample_age_s_(0.0f)
+    , last_force_sample_sequence_(0)
+    , have_force_sample_(false)
+    , force_sample_fresh_(false)
+    , comm_watchdog_enabled_(false)
+    , heartbeat_fresh_(false)
+    , heartbeat_age_s_(0.0f)
+    , last_heartbeat_sequence_(0)
+    , have_heartbeat_(false)
+    , runtime_config_locked_(false)
+    , probe_trigger_latched_(false)
+    , prev_probe_triggered_(false)
+    , last_probe_trigger_sequence_(0)
 {
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
 }
@@ -105,6 +135,44 @@ bool Machine::limitWarningActive() const
 void Machine::setHostInputs(const HostInputs& inputs)
 {
     host_inputs_ = inputs;
+    if (inputs.forceSampleValid &&
+        (!have_force_sample_ || inputs.forceSampleSequence != last_force_sample_sequence_))
+    {
+        have_force_sample_ = true;
+        last_force_sample_sequence_ = inputs.forceSampleSequence;
+        force_sample_age_s_ = 0.0f;
+        force_sample_fresh_ = true;
+    }
+    if (inputs.hostHeartbeatValid &&
+        (!have_heartbeat_ || inputs.hostHeartbeatSequence != last_heartbeat_sequence_))
+    {
+        have_heartbeat_ = true;
+        last_heartbeat_sequence_ = inputs.hostHeartbeatSequence;
+        heartbeat_age_s_ = 0.0f;
+        heartbeat_fresh_ = true;
+    }
+    const bool rising = inputs.probeTriggered && !prev_probe_triggered_;
+    const bool new_seq = inputs.probeTriggerSequence != 0 &&
+                         inputs.probeTriggerSequence != last_probe_trigger_sequence_;
+    if (rising || new_seq)
+    {
+        if (inputs.probeTriggerSequence != 0)
+        {
+            last_probe_trigger_sequence_ = inputs.probeTriggerSequence;
+        }
+        if (!probe_trigger_latched_)
+        {
+            // Production hardening: Pose must be explicitly host-latched.
+            // If pose is missing/invalid, we do NOT fall back to the current TCP.
+            if (inputs.probeTriggerPoseValid && std::isfinite(inputs.probeTriggerX) &&
+                std::isfinite(inputs.probeTriggerY) && std::isfinite(inputs.probeTriggerZ))
+            {
+                probe_trigger_latched_ = true;
+                probe_trigger_pose_ = TestPoint{inputs.probeTriggerX, inputs.probeTriggerY, inputs.probeTriggerZ};
+            }
+        }
+    }
+    prev_probe_triggered_ = inputs.probeTriggered;
 }
 
 const HostInputs& Machine::hostInputs() const
@@ -260,15 +328,27 @@ void Machine::applyEffectiveTargets(float target_x, float target_y, float target
     motion_planner_.moveTo(effective_x, effective_y, effective_z);
 }
 
-void Machine::enterSafetyFault()
+void Machine::enterSafetyFault(FaultReason reason)
 {
     motion_planner_.stopMotion();
+    applySpreaderSafeState();
     machine_state_ = MachineState::Fault;
+    last_fault_reason_ = reason;
+    pre_clamp_xy_enabled_ = false;
+    x_force_correction_active_ = false;
+    y_force_correction_active_ = false;
     if (homing_state_ == HomingState::HomingZ || homing_state_ == HomingState::HomingX ||
         homing_state_ == HomingState::HomingY)
     {
         homing_state_ = HomingState::HomingError;
     }
+}
+
+void Machine::applySpreaderSafeState()
+{
+    spreader_timer_.enterSafeState();
+    host_outputs_.spreaderExtend = spreader_timer_.command();
+    host_outputs_.spreaderExtended = spreader_timer_.extended();
 }
 
 void Machine::clearFault()
@@ -288,6 +368,7 @@ void Machine::clearFault()
     }
 
     machine_state_ = MachineState::Idle;
+    last_fault_reason_ = FaultReason::None;
 }
 
 bool Machine::home()
@@ -301,7 +382,7 @@ bool Machine::home()
     homing_state_ = HomingState::HomingZ;
     machine_state_ = MachineState::Homing;
 
-    motion_planner_.setMotionParams(kHomingVelocity, default_acceleration_);
+    motion_planner_.setMotionParams(machine_config_.motion.v_homing, default_acceleration_);
     beginHomingPhase(HomingState::HomingZ);
     return true;
 }
@@ -342,7 +423,7 @@ void Machine::beginHomingPhase(HomingState phase)
     x_force_correction_active_ = false;
     y_force_correction_active_ = false;
 
-    motion_planner_.setMotionParams(kHomingVelocity, default_acceleration_);
+    motion_planner_.setMotionParams(machine_config_.motion.v_homing, default_acceleration_);
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
 }
 
@@ -389,14 +470,14 @@ void Machine::tickHoming(float dt)
 {
     if (host_inputs_.e_stop)
     {
-        enterSafetyFault();
+        enterSafetyFault(FaultReason::EStop);
         return;
     }
 
     const float fz = host_inputs_.force.fz;
     if (std::fabs(fz) >= force_params_.fz_safety_threshold_N)
     {
-        enterSafetyFault();
+        enterSafetyFault(FaultReason::ForceHardLimit);
         return;
     }
 
@@ -493,10 +574,6 @@ void Machine::tick(float dt)
         return;
     }
 
-    spreader_timer_.tick(dt);
-    host_outputs_.spreaderExtend = spreader_timer_.command();
-    host_outputs_.spreaderExtended = spreader_timer_.extended();
-
     if (machine_state_ == MachineState::Fault)
     {
         return;
@@ -504,17 +581,70 @@ void Machine::tick(float dt)
 
     if (host_inputs_.e_stop)
     {
-        enterSafetyFault();
+        enterSafetyFault(FaultReason::EStop);
+        return;
+    }
+
+    if (!host_inputs_.forceSampleValid)
+    {
+        enterSafetyFault(FaultReason::ForceInvalidSample);
         return;
     }
 
     last_force_watchdog_trip_ =
         evaluateForceWatchdog(host_inputs_.force, machine_config_, collision_context_);
-    if (last_force_watchdog_trip_ != ForceWatchdogTrip::None)
+    if (last_force_watchdog_trip_ == ForceWatchdogTrip::NonFinite)
     {
-        enterSafetyFault();
+        enterSafetyFault(FaultReason::ForceNonFinite);
         return;
     }
+    if (last_force_watchdog_trip_ == ForceWatchdogTrip::HardLimit)
+    {
+        enterSafetyFault(FaultReason::ForceHardLimit);
+        return;
+    }
+    if (last_force_watchdog_trip_ == ForceWatchdogTrip::CollisionContext)
+    {
+        enterSafetyFault(FaultReason::ForceCollision);
+        return;
+    }
+
+    if (force_sample_fresh_)
+    {
+        force_sample_age_s_ = 0.0f;
+        force_sample_fresh_ = false;
+    }
+    else
+    {
+        force_sample_age_s_ += dt;
+        if (force_sample_age_s_ >= machine_config_.force.sample_timeout_s)
+        {
+            enterSafetyFault(FaultReason::ForceStale);
+            return;
+        }
+    }
+
+    if (comm_watchdog_enabled_)
+    {
+        if (heartbeat_fresh_)
+        {
+            heartbeat_age_s_ = 0.0f;
+            heartbeat_fresh_ = false;
+        }
+        else
+        {
+            heartbeat_age_s_ += dt;
+            if (heartbeat_age_s_ >= machine_config_.communication.heartbeat_timeout_s)
+            {
+                enterSafetyFault(FaultReason::CommunicationTimeout);
+                return;
+            }
+        }
+    }
+
+    spreader_timer_.tick(dt);
+    host_outputs_.spreaderExtend = spreader_timer_.command();
+    host_outputs_.spreaderExtended = spreader_timer_.extended();
 
     if (machine_state_ == MachineState::Homing)
     {
@@ -538,14 +668,12 @@ void Machine::tickActiveMotion(float dt)
     const float fz = host_inputs_.force.fz;
     if (std::fabs(fz) >= force_params_.fz_safety_threshold_N)
     {
-        enterSafetyFault();
+        enterSafetyFault(FaultReason::ForceHardLimit);
         return;
     }
 
-    const float z_remaining = stored_target_z_ - motion_planner_.z();
-    const bool slow_z = pre_clamp_xy_enabled_ ||
-                        std::fabs(z_remaining) <= force_params_.slow_z_distance_threshold_units;
-    force_phase_ = slow_z ? ForceControlPhase::SlowZApproach : ForceControlPhase::NormalZApproach;
+    const bool apply_xy = pre_clamp_xy_enabled_;
+    force_phase_ = apply_xy ? ForceControlPhase::SlowZApproach : ForceControlPhase::NormalZApproach;
 
     if (force_phase_ != ForceControlPhase::SlowZApproach)
     {
@@ -569,6 +697,7 @@ void Machine::tickActiveMotion(float dt)
 
         if (x_force_correction_active_)
         {
+            ++xy_correction_steps_;
             if (fx > 0.0f)
             {
                 stored_target_x_ -= force_params_.dx_step_units;
@@ -607,6 +736,7 @@ void Machine::tickActiveMotion(float dt)
 
         if (y_force_correction_active_)
         {
+            ++xy_correction_steps_;
             if (fy > 0.0f)
             {
                 stored_target_y_ -= force_params_.dy_step_units;
@@ -675,6 +805,7 @@ void Machine::stop()
 
     motion_planner_.stopMotion();
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    applySpreaderSafeState();
 
     if (machine_state_ == MachineState::Homing)
     {
@@ -703,6 +834,11 @@ float Machine::z() const
 
 bool Machine::trySetMachineConfig(const MachineConfig& incoming, ConfigValidationError& error)
 {
+    if (runtime_config_locked_)
+    {
+        error = ConfigValidationError::RuntimeLocked;
+        return false;
+    }
     if (!::tryApplyMachineConfig(machine_config_, incoming, error))
     {
         return false;
@@ -721,6 +857,11 @@ const MachineConfig& Machine::machineConfig() const
 
 bool Machine::trySetTestConfiguration(const TestConfiguration& incoming, ConfigValidationError& error)
 {
+    if (runtime_config_locked_)
+    {
+        error = ConfigValidationError::RuntimeLocked;
+        return false;
+    }
     return ::tryApplyTestConfiguration(test_configuration_, incoming, error);
 }
 
@@ -731,12 +872,22 @@ const TestConfiguration& Machine::testConfiguration() const
 
 void Machine::setPlateOrigin(const TestPoint& machine_pose)
 {
+    if (runtime_config_locked_)
+    {
+        return;
+    }
     ::setPlateOrigin(calibration_set_, machine_pose);
 }
 
 void Machine::setProbeCenter(const TestPoint& machine_pose)
 {
     ::setProbeCenter(calibration_set_, machine_pose);
+}
+
+void Machine::setToolOffset(const TestPoint& offset)
+{
+    calibration_set_.tool_offset = offset;
+    machine_config_.calibration.tool_offset = offset;
 }
 
 const CalibrationSet& Machine::calibrationSet() const
@@ -757,20 +908,39 @@ void Machine::setPreClampXyEnabled(bool enabled)
     pre_clamp_xy_enabled_ = enabled;
     if (enabled)
     {
-        force_params_.fx_threshold_on_N = machine_config_.force.xy_tolerance_N;
-        force_params_.fx_threshold_off_N = machine_config_.force.xy_tolerance_N * 0.5f;
-        force_params_.fy_threshold_on_N = machine_config_.force.xy_tolerance_N;
-        force_params_.fy_threshold_off_N = machine_config_.force.xy_tolerance_N * 0.5f;
-        force_params_.dx_step_units = machine_config_.force.xy_correction_step;
-        force_params_.dy_step_units = machine_config_.force.xy_correction_step;
-        force_params_.max_x_correction_units = machine_config_.force.xy_max_correction;
-        force_params_.max_y_correction_units = machine_config_.force.xy_max_correction;
+        xy_correction_steps_ = 0;
     }
     else
     {
         x_force_correction_active_ = false;
         y_force_correction_active_ = false;
+        force_params_.fx_threshold_on_N = 100000.0f;
+        force_params_.fx_threshold_off_N = 50000.0f;
+        force_params_.fy_threshold_on_N = 100000.0f;
+        force_params_.fy_threshold_off_N = 50000.0f;
     }
+}
+
+bool Machine::preClampXyEnabled() const
+{
+    return pre_clamp_xy_enabled_;
+}
+
+void Machine::loadPreClampForceParams()
+{
+    force_params_.fx_threshold_on_N = machine_config_.force.xy_tolerance_N;
+    force_params_.fx_threshold_off_N = machine_config_.force.xy_tolerance_N * 0.5f;
+    force_params_.fy_threshold_on_N = machine_config_.force.xy_tolerance_N;
+    force_params_.fy_threshold_off_N = machine_config_.force.xy_tolerance_N * 0.5f;
+    force_params_.dx_step_units = machine_config_.force.xy_correction_step;
+    force_params_.dy_step_units = machine_config_.force.xy_correction_step;
+    force_params_.max_x_correction_units = machine_config_.force.xy_max_correction;
+    force_params_.max_y_correction_units = machine_config_.force.xy_max_correction;
+}
+
+unsigned Machine::xyCorrectionSteps() const
+{
+    return xy_correction_steps_;
 }
 
 void Machine::setCollisionContext(CollisionContext context)
@@ -788,7 +958,69 @@ ForceWatchdogTrip Machine::lastForceWatchdogTrip() const
     return last_force_watchdog_trip_;
 }
 
+FaultReason Machine::lastFaultReason() const
+{
+    return last_fault_reason_;
+}
+
+float Machine::forceSampleAge() const
+{
+    return force_sample_age_s_;
+}
+
 bool Machine::spreaderBusy() const
 {
     return spreader_timer_.isBusy();
+}
+
+SpreaderState Machine::spreaderState() const
+{
+    return spreader_timer_.state();
+}
+
+void Machine::setCommunicationWatchdogEnabled(bool enabled)
+{
+    comm_watchdog_enabled_ = enabled;
+    if (enabled)
+    {
+        heartbeat_age_s_ = 0.0f;
+        heartbeat_fresh_ = have_heartbeat_;
+    }
+}
+
+bool Machine::communicationWatchdogEnabled() const
+{
+    return comm_watchdog_enabled_;
+}
+
+float Machine::hostHeartbeatAge() const
+{
+    return heartbeat_age_s_;
+}
+
+void Machine::setRuntimeConfigLocked(bool locked)
+{
+    runtime_config_locked_ = locked;
+}
+
+bool Machine::runtimeConfigLocked() const
+{
+    return runtime_config_locked_;
+}
+
+bool Machine::consumeProbeTrigger()
+{
+    TestPoint unused{};
+    return consumeProbeTrigger(unused);
+}
+
+bool Machine::consumeProbeTrigger(TestPoint& pose_out)
+{
+    if (!probe_trigger_latched_)
+    {
+        return false;
+    }
+    probe_trigger_latched_ = false;
+    pose_out = probe_trigger_pose_;
+    return true;
 }

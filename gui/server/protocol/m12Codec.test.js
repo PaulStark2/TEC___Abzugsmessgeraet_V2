@@ -33,6 +33,7 @@ const {
   AckResultCode,
   NackErrorCode,
   STATUS_REPORT_PAYLOAD_WIRE_SIZE,
+  MACHINE_CONFIG_PAYLOAD_WIRE_SIZE,
   NO_CURRENT_POINT_INDEX,
 } = require('./protocolTypes');
 const { crc16CcittFalse } = require('./crc16');
@@ -116,6 +117,9 @@ function testStatusDecode() {
     homingState: 0,
     blockedDirections: 0,
     flags: 0,
+    procedurePhase: 0,
+    faultReason: 0,
+    spreaderState: 2,
   };
   const payload = encodeStatusReportPayload(status);
   assert.strictEqual(payload.length, STATUS_REPORT_PAYLOAD_WIRE_SIZE);
@@ -125,10 +129,12 @@ function testStatusDecode() {
   const report = decodeStatusReportPayload(decoded.frame.payload);
   assert.ok(nearEqual(report.x, 3));
   assert.ok(nearEqual(report.fx, 0.1));
+  assert.strictEqual(report.spreaderState, 2);
   const gui = statusReportToGuiStatus(report, true);
   assert.strictEqual(gui.machineState, 'Active');
   assert.strictEqual(gui.motionState, 'Moving');
   assert.strictEqual(gui.pneumaticExtended, true);
+  assert.strictEqual(gui.spreaderState, 'Extended');
   assert.strictEqual(gui.currentPointIndex, null);
   assert.strictEqual(gui.connected, true);
 }
@@ -227,15 +233,40 @@ function sampleMachineConfig() {
     tool_offset_x: 0.25,
     tool_offset_y: -0.5,
     tool_offset_z: 1,
+    safe_z: 10,
+    sample_timeout_s: 0.5,
+    heartbeat_timeout_s: 0.3,
+    xy_correct_timeout_s: 2,
+    head_diameter: 0,
+    measuring_head_diameter: 8,
+    measuring_head_thickness: 3,
+    tool_diameter: 2.5,
+    tool_cylindrical_height: 15,
+    probe_xy_search_margin: 2,
+    insert_search_distance: 10,
+    search_depth: 5,
+    approach_distance: 10,
+    fine_search_speed: 1,
+    nominal_probe_x: 0,
+    nominal_probe_y: 0,
+    nominal_probe_z: 5,
+    num_fine_searches: 3,
   };
 }
 
 function testMachineConfigRoundtrip() {
   const payload = encodeMachineConfigPayload(sampleMachineConfig());
   assert.ok(payload);
-  assert.strictEqual(payload.length, 126);
+  assert.strictEqual(payload.length, MACHINE_CONFIG_PAYLOAD_WIRE_SIZE);
   const decoded = decodeMachineConfigPayload(payload);
   assert.ok(nearEqual(decoded.tool_offset_z, 1));
+  assert.ok(nearEqual(decoded.safe_z, 10));
+  assert.ok(nearEqual(decoded.heartbeat_timeout_s, 0.3));
+  assert.ok(nearEqual(decoded.measuring_head_diameter, 8));
+  assert.ok(nearEqual(decoded.tool_cylindrical_height, 15));
+  assert.ok(nearEqual(decoded.probe_xy_search_margin, 2));
+  assert.ok(nearEqual(decoded.insert_search_distance, 10));
+  assert.strictEqual(decoded.num_fine_searches, 3);
   assert.strictEqual(decoded.max_optimization_iterations, 10);
   const frame = encodeFrame(MessageId.CmdSetMachineConfig, payload);
   assert.ok(frame.ok);
@@ -313,10 +344,18 @@ function testStatusReportProcedurePhase() {
     blockedDirections: 0,
     flags: 0,
     procedurePhase: 11,
+    faultReason: 7,
+    spreaderState: 4,
   });
   assert.strictEqual(payload.length, STATUS_REPORT_PAYLOAD_WIRE_SIZE);
   const decoded = decodeStatusReportPayload(payload);
   assert.strictEqual(decoded.procedurePhase, 11);
+  assert.strictEqual(decoded.faultReason, 7);
+  assert.strictEqual(decoded.spreaderState, 4);
+  const gui = statusReportToGuiStatus(decoded, true);
+  assert.strictEqual(gui.procedurePhase, 'TestOrAge');
+  assert.strictEqual(gui.faultReason, 'CommunicationTimeout');
+  assert.strictEqual(gui.spreaderState, 'SafeDeenergized');
 }
 
 testForcePathChunkRoundtrip();

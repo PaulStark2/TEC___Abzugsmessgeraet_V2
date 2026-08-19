@@ -197,12 +197,34 @@ async function run() {
     assert(origin.status === 200 && origin.body.ok, 'plate origin');
 
     await prepareSelection(gui.base);
+
+    const startWithoutHome = await request(gui.base, 'POST', '/api/procedure/start', {
+      mode: 'test',
+      insertionForce: 0.1,
+      iterations: 1,
+    });
+    assert(startWithoutHome.status === 400 && startWithoutHome.body.ok === false, 'start without homing rejected');
+
+    const home = await request(gui.base, 'POST', '/api/command', { command: 'home' });
+    assert(home.status === 200 && home.body.ok, 'CmdHome');
+    const homedAt = Date.now();
+    let isHomed = false;
+    while (Date.now() - homedAt < 90000) {
+      const machine = await request(gui.base, 'GET', '/api/machine', null);
+      if (machine.body.status && machine.body.status.isHomed === true) {
+        isHomed = true;
+        break;
+      }
+      await sleep(200);
+    }
+    assert(isHomed, 'machine isHomed after home sequence');
+
     const start = await request(gui.base, 'POST', '/api/procedure/start', {
       mode: 'test',
       insertionForce: 0.1,
       iterations: 1,
     });
-    assert(start.status === 200 && start.body.ok, 'G8 protocol start');
+    assert(start.status === 200 && start.body.ok, 'G8 protocol start after homing');
     assert(start.body.status.backend === 'protocol', 'backend protocol');
     assert(start.body.status.capabilities.iterationsSupported === true, 'iterations Core');
     assert(start.body.status.capabilities.modeSupported === true, 'mode Core');
@@ -214,7 +236,8 @@ async function run() {
       90000,
       'procedure terminal'
     );
-    assert(done.state === 'completed', `expected completed, got ${done.state}`);
+    // SimPlant force is 0 (M15). Phase 1 must not succeed without Sollkraft.
+    assert(done.state === 'stopped', `expected abort without force, got ${done.state}`);
 
     const results = await request(gui.base, 'GET', '/api/results/current', null);
     assert(results.status === 200, 'protocol results');

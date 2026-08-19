@@ -39,6 +39,10 @@ export function setPlantLimits(limits) {
   return post('/api/simulation/limits', limits);
 }
 
+export function setPlantProbeDisc(disc) {
+  return post('/api/simulation/probe-disc', disc);
+}
+
 export function triggerPlantProbe(pulseMs) {
   return post('/api/simulation/probe', { pulseMs });
 }

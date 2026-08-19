@@ -165,6 +165,20 @@ PlantCommand parsePlantCommand(const std::string& line)
         return command;
     }
 
+    if (name == "setProbeDisc")
+    {
+        command.type = PlantCommandType::SetProbeDisc;
+        command.has_probe_x = extractNumber(line, "x", command.probe_x);
+        command.has_probe_y = extractNumber(line, "y", command.probe_y);
+        command.has_probe_z = extractNumber(line, "z", command.probe_z);
+        command.has_probe_diameter = extractNumber(line, "diameter", command.probe_diameter);
+        command.has_probe_thickness = extractNumber(line, "thickness", command.probe_thickness);
+        command.has_tool_diameter = extractNumber(line, "toolDiameter", command.tool_diameter);
+        command.has_tool_cylindrical_height =
+            extractNumber(line, "toolCylindricalHeight", command.tool_cylindrical_height);
+        return command;
+    }
+
     return command;
 }
 
@@ -218,6 +232,41 @@ bool applyPlantCommand(SimPlant& plant, const PlantCommand& command)
         plant.setEStop(command.e_stop_active);
         return true;
 
+    case PlantCommandType::SetProbeDisc:
+    {
+        ProbeDisc disc = plant.probeDisc();
+        if (command.has_probe_x)
+        {
+            disc.center.x = command.probe_x;
+        }
+        if (command.has_probe_y)
+        {
+            disc.center.y = command.probe_y;
+        }
+        if (command.has_probe_z)
+        {
+            disc.center.z = command.probe_z;
+        }
+        if (command.has_probe_diameter)
+        {
+            disc.diameter = command.probe_diameter;
+        }
+        if (command.has_probe_thickness)
+        {
+            disc.thickness = command.probe_thickness;
+        }
+        if (command.has_tool_diameter)
+        {
+            disc.tool_diameter = command.tool_diameter;
+        }
+        if (command.has_tool_cylindrical_height)
+        {
+            disc.tool_cylindrical_height = command.tool_cylindrical_height;
+        }
+        plant.setProbeDisc(disc);
+        return true;
+    }
+
     case PlantCommandType::Unknown:
     default:
         return false;
@@ -248,6 +297,17 @@ std::string formatPlantStateResponse(const PlantState& state, float x, float y, 
     json += ",\"probeTriggered\":";
     json += boolLiteral(state.probe_triggered);
     json += ",\"probePulseSeconds\":" + formatFloat(state.probe_pulse_seconds);
+    json += ",\"probe\":{\"x\":" + formatFloat(state.probe.center.x);
+    json += ",\"y\":" + formatFloat(state.probe.center.y);
+    json += ",\"z\":" + formatFloat(state.probe.center.z);
+    json += ",\"diameter\":" + formatFloat(state.probe.diameter);
+    json += ",\"thickness\":" + formatFloat(state.probe.thickness);
+    json += ",\"toolDiameter\":" + formatFloat(state.probe.tool_diameter);
+    json += ",\"toolCylindricalHeight\":" + formatFloat(state.probe.tool_cylindrical_height);
+    json += ",\"triggerSequence\":" + std::to_string(state.probe_trigger_sequence);
+    json += ",\"triggerX\":" + formatFloat(state.probe_trigger_x);
+    json += ",\"triggerY\":" + formatFloat(state.probe_trigger_y);
+    json += ",\"triggerZ\":" + formatFloat(state.probe_trigger_z) + "}";
     json += ",\"eStop\":";
     json += boolLiteral(state.e_stop);
     json += "},\"pose\":{\"x\":" + formatFloat(x);

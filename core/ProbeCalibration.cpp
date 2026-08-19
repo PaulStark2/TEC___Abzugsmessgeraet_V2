@@ -1,24 +1,37 @@
 #include "ProbeCalibration.hpp"
 
+#include "ProbeGeometry.hpp"
+
+#include <cmath>
+
 bool ProbeCalibration::start(Machine& machine)
 {
     if (machine.machineState() == MachineState::Fault)
     {
-        state_ = State::Error;
+        enterError();
+        return false;
+    }
+
+    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    reference_ = probe.nominal_probe;
+    result_ = TestPoint{};
+    tool_offset_ = TestPoint{};
+    contact_z_ = TestPoint{};
+    contact_neg_y_ = TestPoint{};
+    contact_pos_y_ = TestPoint{};
+    contact_neg_x_ = TestPoint{};
+    contact_pos_x_ = TestPoint{};
+    machine.consumeProbeTrigger();
+    if (!startDirection(machine, ProbeSearchDir::NegZ, Step::MeasureZ))
+    {
         return false;
     }
     state_ = State::Running;
-    saw_trigger_ = false;
-    result_ = TestPoint{machine.x(), machine.y(), machine.z()};
-    const float search = machine.machineConfig().probe.search_distance;
-    // PLACEHOLDER: single +X search move. Replace with the historical multi-touch protocol.
-    machine.moveTo(machine.x() + search, machine.y(), machine.z());
     return true;
 }
 
 void ProbeCalibration::tick(float dt, Machine& machine)
 {
-    (void)dt;
     if (state_ != State::Running)
     {
         return;
@@ -26,23 +39,74 @@ void ProbeCalibration::tick(float dt, Machine& machine)
     if (machine.machineState() == MachineState::Fault ||
         machine.machineState() == MachineState::Stopped)
     {
-        state_ = State::Error;
+        search_.abort();
+        enterError();
         return;
     }
-    if (machine.hostInputs().probeTriggered && !saw_trigger_)
+
+    search_.tick(dt, machine);
+    if (search_.isError())
     {
-        saw_trigger_ = true;
-        result_ = TestPoint{machine.x(), machine.y(), machine.z()};
-        machine.setProbeCenter(result_);
-        state_ = State::Complete;
+        enterError();
         return;
     }
-    if (machine.motionState() == MotionState::AtTarget ||
-        machine.machineState() == MachineState::Idle)
+    if (!search_.isComplete())
     {
-        result_ = TestPoint{machine.x(), machine.y(), machine.z()};
-        machine.setProbeCenter(result_);
-        state_ = State::Complete;
+        return;
+    }
+
+    switch (step_)
+    {
+    case Step::MeasureZ:
+        contact_z_ = search_.result();
+        {
+            TestPoint z_center{};
+            if (!contactToProbeCenter(contact_z_, ProbeSearchDir::NegZ, machine.machineConfig().probe.measuring_head_diameter,
+                                      machine.machineConfig().probe.measuring_head_thickness,
+                                      machine.machineConfig().probe.tool_diameter, z_center))
+            {
+                enterError();
+                return;
+            }
+            reference_.z = z_center.z;
+        }
+        if (!startDirection(machine, ProbeSearchDir::NegY, Step::MeasureNegY))
+        {
+            return;
+        }
+        break;
+    case Step::MeasureNegY:
+        contact_neg_y_ = search_.result();
+        if (!startDirection(machine, ProbeSearchDir::PosY, Step::MeasurePosY))
+        {
+            return;
+        }
+        break;
+    case Step::MeasurePosY:
+        contact_pos_y_ = search_.result();
+        if (!startDirection(machine, ProbeSearchDir::NegX, Step::MeasureNegX))
+        {
+            return;
+        }
+        break;
+    case Step::MeasureNegX:
+        contact_neg_x_ = search_.result();
+        if (!startDirection(machine, ProbeSearchDir::PosX, Step::MeasurePosX))
+        {
+            return;
+        }
+        break;
+    case Step::MeasurePosX:
+        contact_pos_x_ = search_.result();
+        step_ = Step::FitCenter;
+        if (!finishAndStore(machine))
+        {
+            return;
+        }
+        break;
+    default:
+        enterError();
+        break;
     }
 }
 
@@ -50,7 +114,8 @@ void ProbeCalibration::abort()
 {
     if (state_ == State::Running)
     {
-        state_ = State::Error;
+        search_.abort();
+        enterError();
     }
 }
 
@@ -69,7 +134,92 @@ ProbeCalibration::State ProbeCalibration::state() const
     return state_;
 }
 
+ProbeCalibration::Step ProbeCalibration::step() const
+{
+    return step_;
+}
+
 TestPoint ProbeCalibration::result() const
 {
     return result_;
+}
+
+TestPoint ProbeCalibration::toolOffset() const
+{
+    return tool_offset_;
+}
+
+ProbeSearch::Request ProbeCalibration::makeRequest(const Machine& machine, ProbeSearchDir dir) const
+{
+    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    ProbeSearch::Request request{};
+    request.reference = reference_;
+    request.dir = dir;
+    request.approach_distance = probe.approach_distance;
+    request.search_distance = probe.search_distance;
+    request.search_depth = probe.search_depth;
+    request.lateral_offset =
+        xyStartOffset(probe.search_distance, probe.measuring_head_diameter, probe.tool_diameter);
+    request.xy_inner_radius = xySearchInnerRadius(probe.measuring_head_diameter, probe.xy_search_margin);
+    request.backoff = probe.backoff;
+    request.approach_speed = machine.machineConfig().motion.v_approach;
+    request.fast_speed = probe.search_speed;
+    request.fine_speed = probe.fine_search_speed;
+    request.num_fine_searches = probe.num_fine_searches;
+    return request;
+}
+
+bool ProbeCalibration::startDirection(Machine& machine, ProbeSearchDir dir, Step next_step)
+{
+    if (!search_.start(machine, makeRequest(machine, dir)))
+    {
+        enterError();
+        return false;
+    }
+    step_ = next_step;
+    return true;
+}
+
+bool ProbeCalibration::finishAndStore(Machine& machine)
+{
+    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    const float expected_r = expectedXyContactRadius(probe.measuring_head_diameter, probe.tool_diameter);
+    const float radius_tol = (expected_r * 0.25f > 1.0f) ? expected_r * 0.25f : 1.0f;
+    TestPoint xy_center{};
+    float radius = 0.0f;
+    if (!fitCircleCenterXY(contact_neg_x_, contact_pos_x_, contact_neg_y_, contact_pos_y_, expected_r,
+                           radius_tol, xy_center, radius))
+    {
+        enterError();
+        return false;
+    }
+
+    TestPoint z_center{};
+    if (!contactToProbeCenter(contact_z_, ProbeSearchDir::NegZ, probe.measuring_head_diameter,
+                              probe.measuring_head_thickness, probe.tool_diameter, z_center))
+    {
+        enterError();
+        return false;
+    }
+
+    result_.x = xy_center.x;
+    result_.y = xy_center.y;
+    result_.z = z_center.z;
+    if (!computeToolOffset(probe.nominal_probe, result_, tool_offset_))
+    {
+        enterError();
+        return false;
+    }
+
+    machine.setProbeCenter(result_);
+    machine.setToolOffset(tool_offset_);
+    step_ = Step::Complete;
+    state_ = State::Complete;
+    return true;
+}
+
+void ProbeCalibration::enterError()
+{
+    step_ = Step::Error;
+    state_ = State::Error;
 }

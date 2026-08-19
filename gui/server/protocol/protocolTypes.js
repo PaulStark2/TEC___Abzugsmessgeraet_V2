@@ -17,10 +17,10 @@ const MOVE_TO_PAYLOAD_WIRE_SIZE = 12;
 const BOOL_PAYLOAD_WIRE_SIZE = 1;
 const ACK_PAYLOAD_WIRE_SIZE = 2;
 const NACK_PAYLOAD_WIRE_SIZE = 3;
-const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 39;
+const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 41;
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
-const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 126;
+const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 196;
 const TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE = 8;
 const PLATE_ORIGIN_PAYLOAD_WIRE_SIZE = 12;
 const FORCE_PATH_CHUNK_MAX_SAMPLES = 32;
@@ -75,6 +75,10 @@ const HomingState = Object.freeze({
 const StatusFlag = Object.freeze({
   IsHomed: 0,
   LimitWarning: 1,
+  CommWatchdog: 2,
+  ForceFresh: 3,
+  PlateOriginValid: 4,
+  ProbeCenterValid: 5,
 });
 
 const MotionState = Object.freeze({
@@ -112,6 +116,26 @@ const PROCEDURE_PHASE_NAMES = Object.freeze([
   'MoveSafeEnd',
   'Completed',
   'Aborted',
+]);
+
+const FAULT_REASON_NAMES = Object.freeze([
+  'None',
+  'EStop',
+  'ForceHardLimit',
+  'ForceCollision',
+  'ForceNonFinite',
+  'ForceInvalidSample',
+  'ForceStale',
+  'CommunicationTimeout',
+  'ProcedureAbort',
+]);
+
+const SPREADER_STATE_NAMES = Object.freeze([
+  'Retracted',
+  'Extending',
+  'Extended',
+  'Retracting',
+  'SafeDeenergized',
 ]);
 
 const AckResultCode = Object.freeze({
@@ -175,6 +199,14 @@ function procedurePhaseName(ordinal) {
   return PROCEDURE_PHASE_NAMES[ordinal] || 'Unknown';
 }
 
+function faultReasonName(ordinal) {
+  return FAULT_REASON_NAMES[ordinal] || 'Unknown';
+}
+
+function spreaderStateName(ordinal) {
+  return SPREADER_STATE_NAMES[ordinal] || 'Unknown';
+}
+
 module.exports = {
   MAGIC0,
   MAGIC1,
@@ -206,6 +238,8 @@ module.exports = {
   MOTION_STATE_NAMES,
   PROCESS_STATE_NAMES,
   PROCEDURE_PHASE_NAMES,
+  FAULT_REASON_NAMES,
+  SPREADER_STATE_NAMES,
   AckResultCode,
   NackErrorCode,
   DecodeResult,
@@ -216,4 +250,6 @@ module.exports = {
   motionStateName,
   processStateName,
   procedurePhaseName,
+  faultReasonName,
+  spreaderStateName,
 };

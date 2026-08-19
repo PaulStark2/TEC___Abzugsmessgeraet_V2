@@ -32,4 +32,28 @@ struct SafetyLimits
 
     // Force-filter coefficient: 0 = passthrough, (0,1] = exponential smoothing.
     static constexpr float kMaxForceFilter = 1.0f;
+
+    // Safe-Z height [machine units]. Must sit above plate-point Z for XY travel.
+    static constexpr float kMaxAbsSafeZ = 500.0f;
+
+    // Force sample freshness window [s]. Stale HostInputs.force → Fault.
+    static constexpr float kMinForceSampleTimeout_s = 0.05f;
+    static constexpr float kMaxForceSampleTimeout_s = 5.0f;
+
+    // Host communication heartbeat timeout while an automatic process runs [s].
+    static constexpr float kMinHeartbeatTimeout_s = 0.05f;
+    static constexpr float kMaxHeartbeatTimeout_s = 2.0f;
+
+    static constexpr float kMinPreClampTimeout_s = 0.05f;
+    static constexpr float kMaxPreClampTimeout_s = 30.0f;
+    static constexpr unsigned kMaxPreClampAttempts = 10000u;
+
+    // Probe disc / tool geometry and search envelope [machine units].
+    static constexpr float kMaxProbeDiameter = 50.0f;
+    static constexpr float kMaxProbeThickness = 20.0f;
+    static constexpr float kMaxSearchDepth = 50.0f;
+    static constexpr float kMaxApproachDistance = 100.0f;
+    static constexpr float kMaxNominalAbs = 500.0f;
+    static constexpr float kMaxToolCylindricalHeight = 100.0f;
+    static constexpr float kMaxXySearchMargin = 50.0f;
 };

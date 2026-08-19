@@ -1,4 +1,5 @@
 // M16 Core homing sequence tests (Z+ → X+ → Y+).
+#include "ForceSample.hpp"
 #include "Machine.hpp"
 
 #include "HostInputs.hpp"
@@ -10,7 +11,7 @@ static HostInputs makeSafeInputs()
     HostInputs in{};
     in.force = ForceVector{0.0f, 0.0f, 0.0f};
     in.e_stop = false;
-    return in;
+    return withFreshForce(in);
 }
 
 int main()
@@ -21,6 +22,7 @@ int main()
     {
         Machine m;
         HostInputs in = makeSafeInputs();
+        in.forceSampleSequence++;
         m.setHostInputs(in);
 
         if (!m.home())
@@ -58,6 +60,7 @@ int main()
             {
                 in.limitYMax = false;
             }
+            in.forceSampleSequence++;
             m.setHostInputs(in);
             m.tick(kDt);
         }
@@ -76,11 +79,13 @@ int main()
     {
         Machine m;
         HostInputs in = makeSafeInputs();
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.home();
         m.tick(kDt);
 
         in.e_stop = true;
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.tick(kDt);
 
@@ -112,18 +117,22 @@ int main()
     {
         Machine m;
         HostInputs in = makeSafeInputs();
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.home();
 
         in.limitZMax = true;
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.tick(kDt);
         in.limitZMax = false;
         in.limitXMax = true;
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.tick(kDt);
         in.limitXMax = false;
         in.limitYMax = true;
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.tick(kDt);
 
@@ -132,6 +141,7 @@ int main()
             return 30;
         }
 
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         if (!m.home())
         {
@@ -151,6 +161,7 @@ int main()
 
         HostInputs in = makeSafeInputs();
         in.force = ForceVector{0.0f, 0.0f, 11.0f};
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.moveTo(10.0f, 0.0f, 0.0f);
         m.tick(kDt);
@@ -167,6 +178,7 @@ int main()
         }
 
         in.force = ForceVector{0.0f, 0.0f, 0.0f};
+        in.forceSampleSequence++;
         m.setHostInputs(in);
         m.clearFault();
         if (m.machineState() != MachineState::Idle)

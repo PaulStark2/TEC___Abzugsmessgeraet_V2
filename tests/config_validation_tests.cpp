@@ -28,6 +28,16 @@ int main()
         {
             return 3;
         }
+        if (!nearEqual(cfg.probe.measuring_head_diameter, 8.0f) ||
+            !nearEqual(cfg.probe.measuring_head_thickness, 3.0f) ||
+            !nearEqual(cfg.probe.tool_diameter, 2.5f) ||
+            !nearEqual(cfg.probe.tool_cylindrical_height, 15.0f) ||
+            !nearEqual(cfg.probe.xy_search_margin, 2.0f) ||
+            !nearEqual(cfg.force.insert_search_distance, 10.0f) ||
+            !nearEqual(cfg.probe.search_distance, 10.0f) || !nearEqual(cfg.probe.search_depth, 5.0f))
+        {
+            return 5;
+        }
         if (cfg.collisionThreshold(CollisionContext::Measure) != cfg.collision.measure_N)
         {
             return 4;
@@ -235,12 +245,55 @@ int main()
         }
     }
 
+    // Force sample timeout must stay inside SafetyLimits.
+    {
+        MachineConfig incoming{};
+        incoming.force.sample_timeout_s = 0.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::TimeNotPositive)
+        {
+            return 46;
+        }
+        incoming.force.sample_timeout_s = SafetyLimits::kMaxForceSampleTimeout_s + 0.1f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::TimeExceedsSafety)
+        {
+            return 47;
+        }
+    }
+
     // SafetyLimits are compile-time constants (sensor range).
     {
         if (SafetyLimits::kMaxFxAbs_N != 50.0f || SafetyLimits::kMaxFyAbs_N != 50.0f ||
             SafetyLimits::kMaxFzAbs_N != 50.0f)
         {
             return 50;
+        }
+    }
+
+    // Probe XY search margin must stay below the probe radius (inner stop > 0).
+    {
+        MachineConfig incoming{};
+        incoming.probe.xy_search_margin = 4.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::BufferNegative)
+        {
+            return 51;
+        }
+        incoming.probe.xy_search_margin = 2.0f;
+        incoming.probe.tool_cylindrical_height = 0.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::BufferNegative)
+        {
+            return 52;
+        }
+        incoming = MachineConfig{};
+        incoming.probe.tool_cylindrical_height = SafetyLimits::kMaxToolCylindricalHeight + 1.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::BufferExceedsSafety)
+        {
+            return 53;
+        }
+        incoming = MachineConfig{};
+        incoming.force.insert_search_distance = SafetyLimits::kMaxApproachDistance + 1.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::BufferExceedsSafety)
+        {
+            return 54;
         }
     }
 

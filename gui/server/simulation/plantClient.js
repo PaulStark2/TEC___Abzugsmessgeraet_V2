@@ -84,6 +84,7 @@ function createPlantClient(options = {}) {
     triggerProbe: (pulseMs) =>
       request(pulseMs === undefined ? { cmd: 'triggerProbe' } : { cmd: 'triggerProbe', pulseMs }),
     setEStop: (active) => request({ cmd: 'setEStop', active: Boolean(active) }),
+    setProbeDisc: (disc) => request({ cmd: 'setProbeDisc', ...disc }),
   };
 }
 

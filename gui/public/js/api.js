@@ -343,6 +343,15 @@ export async function startProbeCalibration() {
   return result;
 }
 
+export async function syncCalibrationFromController() {
+  const response = await fetch('/api/calibration/sync', { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
 /**
  * @param {(status: object) => void} onStatus
  * @param {(connected: boolean, message?: string) => void} [onConnection]

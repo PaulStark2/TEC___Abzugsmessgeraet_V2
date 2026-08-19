@@ -3,6 +3,7 @@
 /**
  * GUI parameter metadata. Values themselves live in machine-config.json / Core RAM.
  * SafetyLimits are not listed here and cannot be edited from the HMI.
+ * min/max mirror core/SafetyLimits.hpp and MachineConfig validation (reject, no clamp).
  */
 
 const GROUPS = [
@@ -14,31 +15,49 @@ const GROUPS = [
         key: 'v_approach',
         label: 'vApproach',
         unit: 'mm/s',
-        info: 'Geschwindigkeit der Anfahrbewegungen zur Safe-Pose und zum Prüfpunkt.',
+        minExclusive: 0,
+        max: 50,
+        info: 'Geschwindigkeit der Anfahrbewegungen zur Safe-Z-Höhe und zum Prüfpunkt (Core MotionPlanner).',
       },
       {
         key: 'v_slow',
         label: 'vSlow',
         unit: 'mm/s',
-        info: 'Geschwindigkeit der langsamen Anfahr- und Messbewegungen. Eine niedrigere Geschwindigkeit erhöht die zeitliche Auflösung der Kraftmessung und reduziert das Risiko eines Überschwingens.',
+        minExclusive: 0,
+        max: 50,
+        info: 'Geschwindigkeit langsamer Anfahr- und Messbewegungen. Wirkt auf PreClamp-XY und langsame Z-Absenkung.',
       },
       {
         key: 'v_measure',
         label: 'vMeasure',
         unit: 'mm/s',
-        info: 'Geschwindigkeit beim langsamen Eingliedern (Phase 1) und beim Ausgliedern.',
+        minExclusive: 0,
+        max: 50,
+        info: 'Konstante Geschwindigkeit beim langsamen Eingliedern (Phase 1) und beim Ausgliedern. Keine PID-Regelung.',
       },
       {
         key: 'v_homing',
         label: 'vHoming',
         unit: 'mm/s',
-        info: 'Homing-Geschwindigkeit (Core-Referenzfahrt Z+ → X+ → Y+).',
+        minExclusive: 0,
+        max: 50,
+        info: 'Homing-Geschwindigkeit der Core-Referenzfahrt Z+ → X+ → Y+.',
       },
       {
         key: 'acceleration',
         label: 'acceleration',
         unit: 'mm/s²',
+        min: 0,
+        max: 500,
         info: 'Achsbeschleunigung. 0 = konstante Geschwindigkeit (bestehendes Core-Verhalten).',
+      },
+      {
+        key: 'safe_z',
+        label: 'safeZ',
+        unit: 'mm',
+        min: -500,
+        max: 500,
+        info: 'Sichere XY-Überfahrthöhe in Maschinenkoordinaten. Muss strikt über allen Prüfpunkt-Z liegen. Nicht gleich home_offset.z.',
       },
     ],
   },
@@ -50,31 +69,79 @@ const GROUPS = [
         key: 'force_filter',
         label: 'forceFilter',
         unit: '—',
-        info: '0 = ungefiltert. Werte (0,1] sind für eine spätere Filterstufe vorgesehen.',
+        min: 0,
+        max: 1,
+        future: true,
+        info: 'Zukünftiger Parameter. 0 = ungefiltert. Werte (0,1] sind für eine spätere Filterstufe vorgesehen und wirken aktuell nicht auf den Core-Tick.',
       },
       {
         key: 'xy_tolerance_N',
         label: 'xyTolerance',
         unit: 'N',
-        info: 'Totzone für |Fx| und |Fy| in PreClampXyCorrect.',
+        minExclusive: 0,
+        max: 50,
+        info: 'Totzone für |Fx| und |Fy| ausschließlich in PreClampXyCorrect.',
       },
       {
         key: 'xy_correction_step',
         label: 'xyCorrectionStep',
         unit: 'mm',
+        minExclusive: 0,
         info: 'Schrittweite der XY-Korrektur vor dem Einspannen.',
       },
       {
         key: 'xy_max_correction',
         label: 'xyMaxCorrection',
         unit: 'mm',
-        info: 'Maximale XY-Abweichung vom angefahrenen Prüfpunkt.',
+        minExclusive: 0,
+        max: 50,
+        info: 'Maximale XY-Abweichung vom angefahrenen Prüfpunkt während PreClamp.',
       },
       {
         key: 'insertion_buffer',
         label: 'insertionBuffer',
         unit: 'mm',
-        info: 'Abstand in +Z vom InsertionPoint zum ExtractionPoint.',
+        min: 0,
+        max: 50,
+        info: 'Abstand in +Z (Ausgliedern) vom InsertionPoint zum ExtractionPoint nach erfolgreicher Phase 1.',
+      },
+      {
+        key: 'insert_search_distance',
+        label: 'insertSearchDistance',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 100,
+        info: 'Phase-1-Z-Tauchtiefe und untere Begrenzung der Einfügepunkt-Korrektur. Unabhängig von der XY-Kalibrier-Startweite (probe_search_distance).',
+      },
+      {
+        key: 'sample_timeout_s',
+        label: 'forceSampleTimeout',
+        unit: 's',
+        min: 0.05,
+        max: 5,
+        info: 'Maximalalter eines Kraftsamples. Stehende oder ausbleibende Host-Werte lösen einen Safety-Fault aus.',
+      },
+      {
+        key: 'xy_correct_timeout_s',
+        label: 'preClampTimeout',
+        unit: 's',
+        min: 0.05,
+        max: 30,
+        info: 'Timeout der PreClamp-XY-Korrektur. Danach Abort/Fault statt endloser Korrektur.',
+      },
+    ],
+  },
+  {
+    id: 'communication',
+    title: 'Host communication',
+    fields: [
+      {
+        key: 'heartbeat_timeout_s',
+        label: 'heartbeatTimeout',
+        unit: 's',
+        min: 0.05,
+        max: 2,
+        info: 'Watchdog-Timeout seit dem letzten Host-Heartbeat während eines automatischen Prozesses. Der Pi ist nicht Teil des Echtzeit-Sicherheitskreises; Timeout → STOP/Safe State. GUI-Wert, später Safety-seitig getrennt dokumentieren.',
       },
     ],
   },
@@ -82,12 +149,12 @@ const GROUPS = [
     id: 'collision',
     title: 'Collision',
     fields: [
-      { key: 'collision_approach_N', label: 'Approach', unit: 'N', info: 'Phasengrenze Approach (unterhalb der festen SafetyLimits).' },
-      { key: 'collision_retract_N', label: 'Retract', unit: 'N', info: 'Phasengrenze Retract.' },
-      { key: 'collision_clamp_N', label: 'Clamp', unit: 'N', info: 'Phasengrenze Clamp.' },
-      { key: 'collision_unclamp_N', label: 'Unclamp', unit: 'N', info: 'Phasengrenze Unclamp.' },
-      { key: 'collision_contact_N', label: 'Contact', unit: 'N', info: 'Phasengrenze Contact / Eingliedern.' },
-      { key: 'collision_measure_N', label: 'Measure', unit: 'N', info: 'Phasengrenze Measure / Prüfung.' },
+      { key: 'collision_approach_N', label: 'Approach', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Approach (unterhalb der festen SafetyLimits ±50 N).' },
+      { key: 'collision_retract_N', label: 'Retract', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Retract.' },
+      { key: 'collision_clamp_N', label: 'Clamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Clamp.' },
+      { key: 'collision_unclamp_N', label: 'Unclamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Unclamp.' },
+      { key: 'collision_contact_N', label: 'Contact', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Contact / Eingliedern (Phase 1).' },
+      { key: 'collision_measure_N', label: 'Measure', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Measure / Prüfung (Phase 3).' },
     ],
   },
   {
@@ -98,13 +165,17 @@ const GROUPS = [
         key: 'spreader_extend_time_s',
         label: 'spreaderExtendTime',
         unit: 's',
-        info: 'Wartezeit nach Ventil „ausfahren“, bis spreaderExtended gesetzt wird (keine Endlagerrückmeldung).',
+        min: 0.01,
+        max: 10,
+        info: 'Ventil „ausfahren“ für diese Zeit. Keine Endlagerrückmeldung; spreaderExtended ist ein Timer-Latch, kein mechanischer Beweis.',
       },
       {
         key: 'spreader_retract_time_s',
         label: 'spreaderRetractTime',
         unit: 's',
-        info: 'Wartezeit nach Ventil „einfahren“.',
+        min: 0.01,
+        max: 10,
+        info: 'Ventil „einfahren“ für diese Zeit. STOP/Fault schaltet das Ventil stromlos (SafeDeenergized).',
       },
     ],
   },
@@ -112,32 +183,163 @@ const GROUPS = [
     id: 'phase2',
     title: 'Phase 2',
     fields: [
-      { key: 'force_tolerance_N', label: 'forceTolerance', unit: 'N', info: 'Totzone |Fz − Sollkraft| für die iterative Einfügepunkt-Korrektur.' },
-      { key: 'z_correction_gain', label: 'zCorrectionGain', unit: 'mm/N', info: 'ΔZ = K · ΔF zwischen den Versuchen. Keine kontinuierliche PID-Regelung.' },
-      { key: 'z_correction_max', label: 'zCorrectionMax', unit: 'mm', info: 'Betragsgrenze der Z-Korrektur pro Versuch.' },
-      { key: 'minimum_correction', label: 'minimumCorrection', unit: 'mm', info: 'Kleinere Korrekturen werden ignoriert.' },
-      { key: 'max_optimization_iterations', label: 'maxOptimizationIterations', unit: '—', integer: true, info: 'Abbruch, wenn die Sollkraft nach dieser Anzahl Versuche nicht in der Totzone liegt.' },
+      { key: 'force_tolerance_N', label: 'forceTolerance', unit: 'N', minExclusive: 0, max: 50, info: 'Totzone |Fz − Sollkraft| für die iterative Einfügepunkt-Korrektur.' },
+      { key: 'z_correction_gain', label: 'zCorrectionGain', unit: 'mm/N', minExclusive: 0, info: 'ΔZ = K · (Fz − Sollkraft). Zu große Kraft → +Z weg vom Prüfkörper. Keine PID-Regelung.' },
+      { key: 'z_correction_max', label: 'zCorrectionMax', unit: 'mm', minExclusive: 0, max: 20, info: 'Betragsgrenze der Z-Korrektur pro Versuch.' },
+      { key: 'minimum_correction', label: 'minimumCorrection', unit: 'mm', minExclusive: 0, info: 'Kleinere Korrekturen werden ignoriert.' },
+      { key: 'max_optimization_iterations', label: 'maxOptimizationIterations', unit: '—', integer: true, min: 1, max: 10000, info: 'Abbruch, wenn die Sollkraft nach dieser Anzahl Versuche nicht in der Totzone liegt.' },
     ],
   },
   {
     id: 'probe',
     title: 'Probe Calibration',
     fields: [
-      { key: 'probe_search_speed', label: 'searchSpeed', unit: 'mm/s', info: 'Platzhalter für das spätere historische Einmessprotokoll.' },
-      { key: 'probe_search_distance', label: 'searchDistance', unit: 'mm', info: 'Suchweg des aktuellen ProbeCalibration-Platzhalters.' },
-      { key: 'probe_backoff', label: 'backoff', unit: 'mm', info: 'Vorgesehen für das echte Einmessprotokoll (aktuell ungenutzt).' },
+      {
+        key: 'probe_search_speed',
+        label: 'searchSpeed',
+        unit: 'mm/s',
+        minExclusive: 0,
+        max: 50,
+        info: 'Schnelle Suchgeschwindigkeit bis zum Messtaster-Trigger.',
+      },
+      {
+        key: 'probe_search_distance',
+        label: 'searchDistance',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 100,
+        info: 'Zusätzlicher seitlicher Freiraum der XY-Kalibriersuche (ABB-Startoffset). Nicht die Phase-1-Tauchtiefe.',
+      },
+      {
+        key: 'probe_backoff',
+        label: 'backoff',
+        unit: 'mm',
+        min: 0,
+        max: 100,
+        info: 'Rückzug nach einem Trigger vor der Feinmessung.',
+      },
+      {
+        key: 'search_depth',
+        label: 'searchDepth',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 50,
+        info: 'XY-Arbeitshöhe = gemessenes Probe-Zentrum Z minus diesen Wert. Bewusst unterhalb der Scheibenmittelebene (Default 5 mm).',
+      },
+      {
+        key: 'approach_distance',
+        label: 'approachDistance',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 100,
+        info: 'Anfahrhöhe über dem nominalen Messtaster-Mittelpunkt.',
+      },
+      {
+        key: 'fine_search_speed',
+        label: 'fineSearchSpeed',
+        unit: 'mm/s',
+        minExclusive: 0,
+        max: 50,
+        info: 'Langsame Suchgeschwindigkeit der Feinmessungen.',
+      },
+      {
+        key: 'num_fine_searches',
+        label: 'numFineSearches',
+        unit: '—',
+        integer: true,
+        min: 0,
+        max: 10000,
+        info: 'Anzahl langsamer Feinmessungen nach der Schnellsuche. 0 = nur Schnellsuche.',
+      },
+      {
+        key: 'head_diameter',
+        label: 'headDiameter',
+        unit: 'mm',
+        min: 0,
+        max: 50,
+        info: 'Reserviert (historisch ABB). Im aktuellen Einmessalgorithmus ungenutzt. Default 0.',
+      },
+      {
+        key: 'measuring_head_diameter',
+        label: 'measuringHeadDiameter',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 50,
+        info: 'Durchmesser der fest eingebauten Messscheibe.',
+      },
+      {
+        key: 'measuring_head_thickness',
+        label: 'measuringHeadThickness',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 20,
+        info: 'Dicke der Messscheibe. probe_center liegt in der Mittelebene.',
+      },
+      {
+        key: 'tool_diameter',
+        label: 'toolDiameter',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 50,
+        info: 'Durchmesser des Spreizers. TCP ist die untere Stirnfläche. Der zylindrische Bereich hat konstanten Durchmesser.',
+      },
+      {
+        key: 'tool_cylindrical_height',
+        label: 'toolCylindricalHeight',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 100,
+        info: 'Höhe des Spreizerzylinders ab TCP in +Z. XY-Kontakt darf über diesen Schaft erfolgen (Default 15 mm).',
+      },
+      {
+        key: 'probe_xy_search_margin',
+        label: 'probeXySearchMargin',
+        unit: 'mm',
+        min: 0,
+        max: 50,
+        info: 'Zusätzlicher inward-Suchweg über den Probe-Radius hinaus. Hartes XY-Limit: innerer TCP-Abstand zur Probe-Achse = R_probe − margin (Werkzeugradius wird nicht addiert). Muss kleiner als der Probe-Radius bleiben.',
+      },
+      {
+        key: 'nominal_probe_x',
+        label: 'nominalProbe.x',
+        unit: 'mm',
+        min: -500,
+        max: 500,
+        info: 'Erwarteter Messtaster-Mittelpunkt X (Maschinen-KS).',
+      },
+      {
+        key: 'nominal_probe_y',
+        label: 'nominalProbe.y',
+        unit: 'mm',
+        min: -500,
+        max: 500,
+        info: 'Erwarteter Messtaster-Mittelpunkt Y (Maschinen-KS).',
+      },
+      {
+        key: 'nominal_probe_z',
+        label: 'nominalProbe.z',
+        unit: 'mm',
+        min: -500,
+        max: 500,
+        info: 'Erwarteter Messtaster-Mittelpunkt Z (Maschinen-KS).',
+      },
     ],
   },
   {
     id: 'calibration',
     title: 'Calibration offsets',
     fields: [
-      { key: 'home_offset_x', label: 'homeOffset.x', unit: 'mm', info: 'Pose nach erfolgreichem Homing.' },
-      { key: 'home_offset_y', label: 'homeOffset.y', unit: 'mm', info: 'Pose nach erfolgreichem Homing.' },
-      { key: 'home_offset_z', label: 'homeOffset.z', unit: 'mm', info: 'Pose nach erfolgreichem Homing.' },
-      { key: 'tool_offset_x', label: 'toolOffset.x', unit: 'mm', info: 'Fester Offset Messtasterspitze → Spreizer-TCP.' },
-      { key: 'tool_offset_y', label: 'toolOffset.y', unit: 'mm', info: 'Fester Offset Messtasterspitze → Spreizer-TCP.' },
-      { key: 'tool_offset_z', label: 'toolOffset.z', unit: 'mm', info: 'Fester Offset Messtasterspitze → Spreizer-TCP.' },
+      { key: 'home_offset_x', label: 'homeOffset.x', unit: 'mm', info: 'Pose nach erfolgreichem Homing (nicht Safe-Z).' },
+      { key: 'home_offset_y', label: 'homeOffset.y', unit: 'mm', info: 'Pose nach erfolgreichem Homing (nicht Safe-Z).' },
+      { key: 'home_offset_z', label: 'homeOffset.z', unit: 'mm', info: 'Pose nach erfolgreichem Homing. Safe-Z ist ein eigener Parameter.' },
+      {
+        key: 'tool_offset_x',
+        label: 'toolOffset.x',
+        unit: 'mm',
+        info: 'TCP-Korrektur: machine = plateOrigin + platePoint + toolOffset. Wird bei erfolgreicher Einmessung durch (nominal_probe - measured_probe) ersetzt, nicht kumuliert.',
+      },
+      { key: 'tool_offset_y', label: 'toolOffset.y', unit: 'mm', info: 'Optionaler TCP-Offset in Y.' },
+      { key: 'tool_offset_z', label: 'toolOffset.z', unit: 'mm', info: 'Optionaler TCP-Offset in Z.' },
     ],
   },
 ];
@@ -154,6 +356,7 @@ function defaultMachineConfigPayload() {
     xy_correction_step: 0.05,
     xy_max_correction: 2,
     insertion_buffer: 1,
+    insert_search_distance: 10,
     collision_approach_N: 20,
     collision_retract_N: 20,
     collision_clamp_N: 20,
@@ -170,16 +373,65 @@ function defaultMachineConfigPayload() {
     probe_search_speed: 2,
     probe_search_distance: 10,
     probe_backoff: 1,
+    search_depth: 5,
+    approach_distance: 10,
+    fine_search_speed: 1,
+    num_fine_searches: 3,
+    head_diameter: 0,
+    measuring_head_diameter: 8,
+    measuring_head_thickness: 3,
+    tool_diameter: 2.5,
+    tool_cylindrical_height: 15,
+    probe_xy_search_margin: 2,
+    nominal_probe_x: 40,
+    nominal_probe_y: 40,
+    nominal_probe_z: 10,
     home_offset_x: 0,
     home_offset_y: 0,
     home_offset_z: 0,
     tool_offset_x: 0,
     tool_offset_y: 0,
     tool_offset_z: 0,
+    safe_z: 10,
+    sample_timeout_s: 0.5,
+    heartbeat_timeout_s: 0.3,
+    xy_correct_timeout_s: 2,
   };
+}
+
+function validateMachineConfigPayload(cfg) {
+  if (!cfg || typeof cfg !== 'object') {
+    return { ok: false, error: 'MachineConfig fehlt' };
+  }
+  const defaults = defaultMachineConfigPayload();
+  for (const key of Object.keys(defaults)) {
+    const value = cfg[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return { ok: false, error: `${key} muss eine endliche Zahl sein` };
+    }
+  }
+  for (const group of GROUPS) {
+    for (const field of group.fields) {
+      const value = cfg[field.key];
+      if (field.integer && !Number.isInteger(value)) {
+        return { ok: false, error: `${field.key} muss ganzzahlig sein` };
+      }
+      if (field.minExclusive !== undefined && !(value > field.minExclusive)) {
+        return { ok: false, error: `${field.key} muss > ${field.minExclusive} sein` };
+      }
+      if (field.min !== undefined && value < field.min) {
+        return { ok: false, error: `${field.key} muss ≥ ${field.min} sein` };
+      }
+      if (field.max !== undefined && value > field.max) {
+        return { ok: false, error: `${field.key} muss ≤ ${field.max} sein (SafetyLimits)` };
+      }
+    }
+  }
+  return { ok: true };
 }
 
 module.exports = {
   GROUPS,
   defaultMachineConfigPayload,
+  validateMachineConfigPayload,
 };

@@ -338,7 +338,7 @@ HMI-Nacharbeit vor der nächsten größeren Prüfprozedur-Arbeit. Keine Controll
 
 ### G12 — Kalibrieren (offen)
 
-- UI `#calibrate`: Platzhalter; Wizard-Gerüst folgt später
+- UI `#calibrate`: PlateOrigin teach + manuelle Messtaster-Einmessung (M19.0)
 
 ### M15 — Simulations-UI und virtuelle Portalmaschine
 
@@ -348,7 +348,7 @@ HMI-Nacharbeit vor der nächsten größeren Prüfprozedur-Arbeit. Keine Controll
 - Virtuelle Außenwelt in C++ (`simulation_plant/SimPlant`): positionsabhängige Max-Endschalter, `probeTriggered`-Impuls, E-Stop-Eingang, `fx = fy = fz = 0`
 - Reaktion auf Endschalter/E-Stop entscheidet allein die Core-Safety-Logik (latched `Fault`)
 - Separater Plant-Kanal auf Port 8767 (TCP/JSON-Zeilen), **keine** M12-Erweiterung
-- APIs: `GET /api/simulation/state`, `POST /api/simulation/limits|probe|estop`
+- APIs: `GET /api/simulation/state`, `POST /api/simulation/limits|probe|probe-disc|estop`
 - Tests: `simplant_tests`, `plantchannel_tests` (CTest), `smoke:m15`
 
 ## Simulations-API (M15)
@@ -359,6 +359,7 @@ Nur virtuelle Sensorik der PC-Simulation — Maschinenbefehle laufen weiter übe
 GET  /api/simulation/state
 POST /api/simulation/limits   { "xMax": 190, "yMax": 140, "zMax": 110 }
 POST /api/simulation/probe    { "pulseMs": 100 }
+POST /api/simulation/probe-disc { "x": 40, "y": 40, "z": 10, "diameter": 8, "thickness": 3, "toolDiameter": 2.5, "toolCylindricalHeight": 15 }
 POST /api/simulation/estop    { "active": true }
 ```
 
