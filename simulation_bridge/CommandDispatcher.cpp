@@ -141,6 +141,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
+        if (!machine_.calibrationSet().probe_center_valid)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
         if (executor_.processState() == ProcessState::Running)
         {
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
@@ -152,7 +157,10 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         }
         else
         {
-            appendAck(message_id, tecomm::AckResultCode::ProgramEmpty, out);
+            // Preserve diagnostic correctness: lack of probe calibration (or
+            // other guard failures in ProcedureController) must not be
+            // misreported as "program empty".
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
         }
         break;
     }
@@ -356,6 +364,24 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
             break;
         }
         machine_.setPlateOrigin(TestPoint{pose.x, pose.y, pose.z});
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdSetProbeCenter:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        tecomm::MoveToPayload pose{};
+        if (!tecomm::decodeMoveToPayload(frame.payload, frame.payload_length, pose))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        machine_.setProbeCenter(TestPoint{pose.x, pose.y, pose.z});
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
     }

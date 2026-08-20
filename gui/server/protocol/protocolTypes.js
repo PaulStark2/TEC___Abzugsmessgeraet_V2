@@ -45,6 +45,7 @@ const MessageId = Object.freeze({
   CmdSetTestConfiguration: 0x52,
   CmdSetPlateOrigin: 0x53,
   CmdStartProbeCalib: 0x54,
+  CmdSetProbeCenter: 0x55,
   CmdRequestStatus: 0x7f,
   RspAck: 0x80,
   RspNack: 0x81,

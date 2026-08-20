@@ -503,6 +503,8 @@ function validatePayloadForMessage(messageId, payload) {
       return length === TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE && decodeTestConfigurationPayload(payload) !== null;
     case MessageId.CmdSetPlateOrigin:
       return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
+    case MessageId.CmdSetProbeCenter:
+      return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
     case MessageId.MsgForcePathChunk:
       return decodeForcePathChunkPayload(payload) !== null;
     default:
@@ -611,6 +613,14 @@ function encodePlateOriginMessage(x, y, z) {
     return { ok: false, error: 'InvalidPayload' };
   }
   return encodeFrame(MessageId.CmdSetPlateOrigin, payload);
+}
+
+function encodeProbeCenterMessage(x, y, z) {
+  const payload = encodeMoveToPayload({ x, y, z });
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdSetProbeCenter, payload);
 }
 
 function encodeForcePathChunkPayload(chunk) {
@@ -735,6 +745,7 @@ module.exports = {
   encodeMachineConfigMessage,
   encodeTestConfigurationMessage,
   encodePlateOriginMessage,
+  encodeProbeCenterMessage,
   encodeMoveToPayload,
   decodeMoveToPayload,
   encodeBoolPayload,

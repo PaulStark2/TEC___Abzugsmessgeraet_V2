@@ -18,6 +18,7 @@ const {
   encodeMachineConfigMessage,
   encodeTestConfigurationMessage,
   encodePlateOriginMessage,
+  encodeProbeCenterMessage,
   decodeAckPayload,
   decodeNackPayload,
   decodeStatusReportPayload,
@@ -600,6 +601,17 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdSetPlateOrigin, encoded.frame);
   }
 
+  async function setProbeCenter(x, y, z) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeProbeCenterMessage(x, y, z);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_PROBE_CENTER' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetProbeCenter, encoded.frame);
+  }
+
   async function fixtureOpen() {
     if (!isLiveSession()) {
       return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
@@ -679,6 +691,7 @@ function createProtocolMachineClient(options = {}) {
     getMachineConfig,
     setTestConfiguration,
     setPlateOrigin,
+    setProbeCenter,
     fixtureOpen,
     fixtureClose,
     startProbeCalibration,

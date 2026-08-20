@@ -25,6 +25,7 @@ enum class MessageId : uint8_t
     CmdSetTestConfiguration = 0x52,
     CmdSetPlateOrigin = 0x53,
     CmdStartProbeCalib = 0x54,
+    CmdSetProbeCenter = 0x55,
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.

@@ -261,6 +261,220 @@ int main()
         }
     }
 
+    // CmdStart with program but probe_center_valid == false -> InvalidState (not ProgramEmpty)
+    {
+        Machine m;
+        m.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(m))
+        {
+            return 270;
+        }
+        if (m.calibrationSet().probe_center_valid)
+        {
+            return 271;
+        }
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+
+        tecomm::LoadProgramPayload load{};
+        load.point_count = 1;
+        load.points[0] = tecomm::Point3f{1.0f, 0.0f, 0.0f};
+
+        uint8_t payload[tecomm::kLoadProgramMaxPayloadWireSize];
+        std::size_t bytes_written = 0;
+        tecomm::encodeLoadProgramPayload(load, payload, sizeof(payload), bytes_written);
+
+        std::vector<simbridge::OutboundFrame> out;
+        tecomm::DecodedFrame frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdLoadProgram),
+                                                 payload, bytes_written);
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        if (out.empty())
+        {
+            return 272;
+        }
+        tecomm::AckPayload ack{};
+        if (!decodeOutboundAck(out[0], ack) || ack.result_code != static_cast<uint8_t>(tecomm::AckResultCode::Ok))
+        {
+            return 273;
+        }
+
+        out.clear();
+        if (!dispatchEmpty(d, tecomm::MessageId::CmdStart, tecomm::AckResultCode::InvalidState, out))
+        {
+            return 274;
+        }
+    }
+
+    // CmdStart with valid probe_center -> Ok
+    {
+        Machine m;
+        m.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(m))
+        {
+            return 280;
+        }
+        (void)calibrateProbeCenter(m);
+        if (!m.calibrationSet().probe_center_valid)
+        {
+            return 281;
+        }
+
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+
+        tecomm::LoadProgramPayload load{};
+        load.point_count = 1;
+        load.points[0] = tecomm::Point3f{1.0f, 0.0f, 0.0f};
+
+        uint8_t payload[tecomm::kLoadProgramMaxPayloadWireSize];
+        std::size_t bytes_written = 0;
+        tecomm::encodeLoadProgramPayload(load, payload, sizeof(payload), bytes_written);
+
+        std::vector<simbridge::OutboundFrame> out;
+        tecomm::DecodedFrame frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdLoadProgram),
+                                                 payload, bytes_written);
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        if (out.empty())
+        {
+            return 282;
+        }
+        tecomm::AckPayload ack{};
+        if (!decodeOutboundAck(out[0], ack) || ack.result_code != static_cast<uint8_t>(tecomm::AckResultCode::Ok))
+        {
+            return 283;
+        }
+
+        out.clear();
+        if (!dispatchEmpty(d, tecomm::MessageId::CmdStart, tecomm::AckResultCode::Ok, out))
+        {
+            return 284;
+        }
+    }
+
+    // CmdSetProbeCenter rehydrates Core: probe_center_valid must be true afterwards.
+    {
+        Machine m;
+        m.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(m))
+        {
+            return 290;
+        }
+        if (m.calibrationSet().probe_center_valid)
+        {
+            return 291;
+        }
+
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+
+        const TestPoint stored_center{73.0f, 31.0f, 14.0f};
+        tecomm::MoveToPayload pose{stored_center.x, stored_center.y, stored_center.z};
+        uint8_t pose_payload[tecomm::kMoveToPayloadWireSize];
+        tecomm::encodeMoveToPayload(pose, pose_payload, sizeof(pose_payload));
+
+        std::vector<simbridge::OutboundFrame> out;
+        tecomm::DecodedFrame frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdSetProbeCenter),
+                                                 pose_payload, sizeof(pose_payload));
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+
+        if (out.empty())
+        {
+            return 292;
+        }
+        tecomm::AckPayload ack{};
+        if (!decodeOutboundAck(out[0], ack) || ack.result_code != static_cast<uint8_t>(tecomm::AckResultCode::Ok))
+        {
+            return 293;
+        }
+
+        if (!m.calibrationSet().probe_center_valid)
+        {
+            return 294;
+        }
+        if (m.calibrationSet().probe_center.x != stored_center.x ||
+            m.calibrationSet().probe_center.y != stored_center.y ||
+            m.calibrationSet().probe_center.z != stored_center.z)
+        {
+            return 295;
+        }
+    }
+
+    // Reconnect auto-start: persisted probe_center via CmdSetProbeCenter (no M19), then CmdStart.
+    {
+        Machine m;
+        m.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(m))
+        {
+            return 296;
+        }
+        if (m.calibrationSet().probe_center_valid)
+        {
+            return 297;
+        }
+
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+
+        const TestPoint stored_center{73.0f, 31.0f, 14.0f};
+        tecomm::MoveToPayload pose{stored_center.x, stored_center.y, stored_center.z};
+        uint8_t pose_payload[tecomm::kMoveToPayloadWireSize];
+        tecomm::encodeMoveToPayload(pose, pose_payload, sizeof(pose_payload));
+
+        std::vector<simbridge::OutboundFrame> out;
+        tecomm::DecodedFrame frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdSetProbeCenter),
+                                                 pose_payload, sizeof(pose_payload));
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        tecomm::AckPayload ack{};
+        if (out.empty() || !decodeOutboundAck(out[0], ack) ||
+            ack.result_code != static_cast<uint8_t>(tecomm::AckResultCode::Ok))
+        {
+            return 298;
+        }
+        if (!m.calibrationSet().probe_center_valid)
+        {
+            return 299;
+        }
+
+        // Automatic start requires the TCP at safe_z (same as after a completed M19).
+        const float safe_z = m.machineConfig().motion.safe_z;
+        m.moveTo(m.x(), m.y(), safe_z);
+        for (int i = 0; i < 600 && m.motionState() != MotionState::AtTarget; ++i)
+        {
+            m.setHostInputs(withFreshForce(HostInputs{}));
+            m.tick(0.05f);
+        }
+
+        tecomm::LoadProgramPayload load{};
+        load.point_count = 1;
+        load.points[0] = tecomm::Point3f{1.0f, 0.0f, 0.0f};
+        uint8_t payload[tecomm::kLoadProgramMaxPayloadWireSize];
+        std::size_t bytes_written = 0;
+        tecomm::encodeLoadProgramPayload(load, payload, sizeof(payload), bytes_written);
+        out.clear();
+        frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdLoadProgram), payload, bytes_written);
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+
+        out.clear();
+        if (!dispatchEmpty(d, tecomm::MessageId::CmdStart, tecomm::AckResultCode::Ok, out))
+        {
+            return 300;
+        }
+        if (ex.processState() != ProcessState::Running)
+        {
+            return 301;
+        }
+        if (!m.calibrationSet().probe_center_valid)
+        {
+            return 302;
+        }
+        if (m.calibrationSet().probe_center.x != stored_center.x ||
+            m.calibrationSet().probe_center.y != stored_center.y ||
+            m.calibrationSet().probe_center.z != stored_center.z)
+        {
+            return 303;
+        }
+    }
+
     // SET_SPREADER / SET_FIXTURE
     {
         tecomm::BoolPayload value{};

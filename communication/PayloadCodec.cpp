@@ -58,6 +58,8 @@ std::size_t encodedPayloadSize(uint8_t message_id, const LoadProgramPayload* loa
         return kTestConfigurationPayloadWireSize;
     case MessageId::CmdSetPlateOrigin:
         return kPlateOriginPayloadWireSize;
+    case MessageId::CmdSetProbeCenter:
+        return kPlateOriginPayloadWireSize;
     default:
         return 0;
     }

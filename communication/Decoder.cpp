@@ -56,6 +56,7 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdGetMachineConfig:
     case MessageId::CmdSetTestConfiguration:
     case MessageId::CmdSetPlateOrigin:
+    case MessageId::CmdSetProbeCenter:
     case MessageId::CmdStartProbeCalib:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
@@ -220,6 +221,16 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
         }
 
     case MessageId::CmdSetPlateOrigin:
+        if (payload_length != kPlateOriginPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            MoveToPayload parsed{};
+            return decodeMoveToPayload(payload, payload_length, parsed);
+        }
+
+    case MessageId::CmdSetProbeCenter:
         if (payload_length != kPlateOriginPayloadWireSize)
         {
             return false;

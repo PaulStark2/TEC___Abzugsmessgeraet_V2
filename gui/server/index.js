@@ -251,6 +251,12 @@ if (typeof machineClient.onSessionReady === 'function') {
     if (calib.plateOriginValid && calib.plateOrigin && typeof machineClient.setPlateOrigin === 'function') {
       await machineClient.setPlateOrigin(calib.plateOrigin.x, calib.plateOrigin.y, calib.plateOrigin.z);
     }
+    if (calib.probeCenterValid && calib.probeCenter && typeof machineClient.setProbeCenter === 'function') {
+      const pushed = await machineClient.setProbeCenter(calib.probeCenter.x, calib.probeCenter.y, calib.probeCenter.z);
+      if (!pushed.ok) {
+        console.error(`[CALIB] probe_center push on connect failed: ${pushed.error || 'unknown'}`);
+      }
+    }
   });
 }
 
