@@ -33,7 +33,7 @@ constexpr std::size_t kLoadProgramMaxPointCount = 32;
 constexpr std::size_t kLoadProgramMaxPayloadWireSize =
     1 + kLoadProgramMaxPointCount * kMoveToPayloadWireSize; // 385
 // 48 x float32 + uint16 max_optimization_iterations + uint16 num_fine_searches.
-constexpr std::size_t kMachineConfigPayloadWireSize = 196;
+constexpr std::size_t kMachineConfigPayloadWireSize = 220;
 constexpr std::size_t kTestConfigurationPayloadWireSize = 8; // mode u8 + force f32 + iterations u16 + index u8
 constexpr std::size_t kPlateOriginPayloadWireSize = kMoveToPayloadWireSize;
 constexpr std::size_t kForcePathChunkMaxSamples = 32;

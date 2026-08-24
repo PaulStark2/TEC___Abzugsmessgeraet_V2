@@ -12,10 +12,19 @@ struct MachineConfig
     {
         float v_approach = 10.0f; // approach speed [units/s]
         float v_slow = 2.0f; // slow approach / XY-correct [units/s]
-        float v_measure = 1.0f; // measure / insert speed [units/s]
+        float v_measure = 1.0f; // legacy measure speed (Unclamp / fallback)
         float v_homing = 5.0f; // homing speed [units/s]
         float acceleration = 0.0f; // 0 = constant velocity (existing Core default)
-        float safe_z = 10.0f; // XY traverse height; must be above plate-point machine Z
+        // Clearance above the highest plate-frame program point (mm).
+        // safe_z_plate = max(point.z) + safe_z_buffer; machine Z via plate_origin + tool_offset.
+        float safe_z_buffer = 30.0f;
+        // Procedure phase extract (+Z) / insert (−Z) speeds [units/s].
+        float phase1_v_extract = 1.0f;
+        float phase1_v_insert = 1.0f;
+        float phase2_v_extract = 2.0f;
+        float phase2_v_insert = 3.0f; // intentionally faster than Phase 1
+        float phase3_v_extract = 2.0f;
+        float phase3_v_insert = 2.0f;
     };
 
     struct Force
@@ -34,11 +43,11 @@ struct MachineConfig
     struct Collision
     {
         float approach_N = 20.0f;
-        float retract_N = 20.0f;
+        float retract_N = 50.0f;
         float clamp_N = 20.0f;
         float unclamp_N = 20.0f;
-        float contact_N = 40.0f;
-        float measure_N = 40.0f;
+        float contact_N = 50.0f;
+        float measure_N = 50.0f;
     };
 
     struct Spreader
@@ -63,7 +72,9 @@ struct MachineConfig
         float search_distance = 10.0f; // ABB-style extra XY start clearance (not insert depth)
         float backoff = 1.0f; // backoff after trigger [units]
         float search_depth = 5.0f; // XY work height = measured center Z − search_depth; Z search end
-        float approach_distance = 10.0f; // start height above nominal Z
+        // Coarse approach stand-off above probe_center.z / program-point Z [mm].
+        // Used by ProcedureController ProbeApproach/PointApproach and by ProbeSearch raise.
+        float approach_distance = 15.0f;
         float fine_search_speed = 1.0f;
         float head_diameter = 0.0f; // reserved; unused by the current protocol
         float measuring_head_diameter = 8.0f;
@@ -85,7 +96,10 @@ struct MachineConfig
 
     struct Calibration
     {
-        TestPoint home_offset{0.0f, 0.0f, 0.0f}; // pose written after homing
+        TestPoint home_offset{0.0f, 0.0f, 0.0f}; // retract distance from +max switch [mm] per axis;
+                                                 // 0 → Machine uses kDefaultHomingRetract (2 mm).
+                                                 // At switch: software axis := +R; after retract: axis := 0.
+                                                 // Not the measured home pose (see CalibrationSet.home_offset).
         TestPoint tool_offset{0.0f, 0.0f, 0.0f}; // TCP correction in machine coordinates
     };
 

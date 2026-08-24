@@ -54,7 +54,7 @@ int main()
         {
             return 2;
         }
-        for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
         {
             machine.setHostInputs(withPlantInputs(machine));
             ex.tick(0.05f);
@@ -100,25 +100,20 @@ int main()
             {
                 return 11;
             }
-            for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
+            for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
             {
                 machine.setHostInputs(withPlantInputs(machine));
                 ex.tick(0.05f);
             }
+            machine.setRuntimeConfigLocked(false);
+            machine.setCommunicationWatchdogEnabled(false);
             if (!machine.calibrationSet().probe_center_valid)
             {
                 return 12;
             }
         }
 
-        // Now start the automatic procedure.
-        // Automatic ProbeApproach requires Safe-Z (ProcedureController::atSafeZ is strict).
-        machine.moveTo(machine.x(), machine.y(), machine.machineConfig().motion.safe_z);
-        for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
-        {
-            machine.setHostInputs(withFreshForce(HostInputs{}));
-            machine.tick(0.05f);
-        }
+        // Now start the automatic procedure (raises to dynamic Safe-Z on approach).
         TestExecutor ex(machine);
         TestProgram program;
         program.add(TestPoint{8.0f, 0.0f, 0.0f});
@@ -134,7 +129,7 @@ int main()
         }
         bool saw_approach = ex.procedurePhase() == ProcedurePhase::ProbeApproach;
         bool saw_calib = ex.procedurePhase() == ProcedurePhase::ProbeCalibrate;
-        for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
         {
             if (ex.procedurePhase() == ProcedurePhase::ProbeApproach)
             {

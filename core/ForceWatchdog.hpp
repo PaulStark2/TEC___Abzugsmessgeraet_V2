@@ -25,16 +25,16 @@ inline ForceWatchdogTrip evaluateForceWatchdog(const ForceVector& force, const M
         return ForceWatchdogTrip::NonFinite;
     }
 
-    if (std::fabs(force.fx) >= SafetyLimits::kMaxFxAbs_N ||
-        std::fabs(force.fy) >= SafetyLimits::kMaxFyAbs_N ||
-        std::fabs(force.fz) >= SafetyLimits::kMaxFzAbs_N)
+    if (std::fabs(force.fx) > SafetyLimits::kMaxFxAbs_N ||
+        std::fabs(force.fy) > SafetyLimits::kMaxFyAbs_N ||
+        std::fabs(force.fz) > SafetyLimits::kMaxFzAbs_N)
     {
         return ForceWatchdogTrip::HardLimit;
     }
 
     const float threshold_N = config.collisionThreshold(context);
-    if (std::fabs(force.fx) >= threshold_N || std::fabs(force.fy) >= threshold_N ||
-        std::fabs(force.fz) >= threshold_N)
+    if (std::fabs(force.fx) > threshold_N || std::fabs(force.fy) > threshold_N ||
+        std::fabs(force.fz) > threshold_N)
     {
         return ForceWatchdogTrip::CollisionContext;
     }

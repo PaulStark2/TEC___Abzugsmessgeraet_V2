@@ -20,6 +20,8 @@ const DEFAULT_GEOMETRY = {
   sizeY: 150,
   sizeZ: 120,
   profile: 12,
+  toolDiameter: 2.5,
+  toolCylindricalHeight: 15,
 };
 
 const COLORS = {
@@ -85,17 +87,21 @@ export function createGantryView(canvas, geometry = {}) {
   const columnGroup = new THREE.Group();
   const limitGroup = new THREE.Group();
   const testPointGroup = new THREE.Group();
+  const referenceMarkerGroup = new THREE.Group();
   const plannedTrajectoryGroup = new THREE.Group();
   const traveledTrajectoryGroup = new THREE.Group();
   const probeGroup = new THREE.Group();
+  const overlayLabelGroup = new THREE.Group();
 
   scene.add(staticGroup);
   scene.add(bridgeGroup);
   scene.add(limitGroup);
   scene.add(testPointGroup);
+  scene.add(referenceMarkerGroup);
   scene.add(plannedTrajectoryGroup);
   scene.add(traveledTrajectoryGroup);
   scene.add(probeGroup);
+  scene.add(overlayLabelGroup);
   bridgeGroup.add(carriageGroup);
   carriageGroup.add(columnGroup);
 
@@ -116,6 +122,50 @@ export function createGantryView(canvas, geometry = {}) {
         child.material.dispose();
       }
     }
+  }
+
+  function clearOverlay(group) {
+    for (const child of [...group.children]) {
+      group.remove(child);
+      child.material?.map?.dispose();
+      child.material?.dispose();
+      child.geometry?.dispose();
+    }
+  }
+
+  function makeTextSprite(text, tint) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const font = '600 22px Consolas, "Courier New", monospace';
+    ctx.font = font;
+    const lines = String(text).split('\n');
+    const textWidth = Math.max(...lines.map((line) => ctx.measureText(line).width), 8);
+    const padX = 10;
+    const lineH = 26;
+    const padY = 8;
+    canvas.width = Math.ceil(textWidth + padX * 2);
+    canvas.height = Math.ceil(lines.length * lineH + padY * 2);
+    ctx.font = font;
+    ctx.fillStyle = 'rgba(18, 21, 26, 0.78)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(90, 159, 212, 0.35)';
+    ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+    ctx.fillStyle = tint || '#e8eef5';
+    lines.forEach((line, i) => {
+      ctx.fillText(line, padX, padY + (i + 1) * lineH - 6);
+    });
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      sizeAttenuation: true,
+    });
+    const sprite = new THREE.Sprite(material);
+    const worldW = Math.min(28, Math.max(12, canvas.width * 0.08));
+    sprite.scale.set(worldW, worldW * (canvas.height / canvas.width), 1);
+    sprite.renderOrder = 10;
+    return sprite;
   }
 
   // Remove meshes but keep the hierarchy groups (they carry the pose).
@@ -176,15 +226,24 @@ export function createGantryView(canvas, geometry = {}) {
     column.position.set(0, 0, columnLength / 2 + p);
     columnGroup.add(column);
 
-    // TCP at the lower end of the Z column; its tip sits exactly on the pose.
-    const tcp = new THREE.Mesh(
-      new THREE.ConeGeometry(0.55 * p, 2 * p, 20),
-      new THREE.MeshStandardMaterial({ color: COLORS.tcp, metalness: 0.3, roughness: 0.4 })
+    // Spreader: vertical cylinder (TCP = lower face) + small TCP sphere Ø≈2 mm.
+    const toolDia = Number.isFinite(config.toolDiameter) ? config.toolDiameter : 2.5;
+    const toolH = Number.isFinite(config.toolCylindricalHeight) ? config.toolCylindricalHeight : 15;
+    const toolRadius = Math.max(0.2, toolDia / 2);
+    const tool = new THREE.Mesh(
+      new THREE.CylinderGeometry(toolRadius, toolRadius, toolH, 20),
+      new THREE.MeshStandardMaterial({ color: COLORS.tcp, metalness: 0.35, roughness: 0.45 })
     );
-    // Rotate the cone so it points along -Z: the tip lands on the pose (local z = 0).
-    tcp.rotation.x = -Math.PI / 2;
-    tcp.position.set(0, 0, p);
-    columnGroup.add(tcp);
+    tool.rotation.x = Math.PI / 2;
+    tool.position.set(0, 0, toolH / 2);
+    columnGroup.add(tool);
+
+    const tcpBall = new THREE.Mesh(
+      new THREE.SphereGeometry(1.0, 14, 14),
+      new THREE.MeshStandardMaterial({ color: 0xffeb3b, emissive: 0x554400, metalness: 0.2, roughness: 0.4 })
+    );
+    tcpBall.position.set(0, 0, 0);
+    columnGroup.add(tcpBall);
 
     const grid = new THREE.GridHelper(
       Math.max(sizeX, sizeY) * 1.6,
@@ -266,6 +325,21 @@ export function createGantryView(canvas, geometry = {}) {
       resetCamera();
     },
 
+    /** Update spreader size from MachineConfig without resetting the camera. */
+    setToolGeometry(next) {
+      const dia = Number(next && next.toolDiameter);
+      const height = Number(next && next.toolCylindricalHeight);
+      if (!Number.isFinite(dia) || !Number.isFinite(height)) {
+        return;
+      }
+      if (config.toolDiameter === dia && config.toolCylindricalHeight === height) {
+        return;
+      }
+      config.toolDiameter = dia;
+      config.toolCylindricalHeight = height;
+      buildGeometry();
+    },
+
     /** Show the configured limit switch trip planes (6 positions). */
     setLimits(limits) {
       storedLimits = limits;
@@ -283,6 +357,10 @@ export function createGantryView(canvas, geometry = {}) {
       traveledTrajectoryGroup.visible = showTrajectory;
     },
 
+    setTestPointsVisible(visible) {
+      testPointGroup.visible = Boolean(visible);
+    },
+
     setTestPoints(points) {
       clearGroup(testPointGroup);
       if (!Array.isArray(points)) {
@@ -292,12 +370,51 @@ export function createGantryView(canvas, geometry = {}) {
         if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
           continue;
         }
+        // Ø ≈ 2 mm (radius 1 mm), independent of gantry profile.
         const sphere = new THREE.Mesh(
-          new THREE.SphereGeometry(config.profile * 0.35, 12, 12),
+          new THREE.SphereGeometry(1.0, 12, 12),
           new THREE.MeshStandardMaterial({ color: 0x66bb6a, emissive: 0x224422 })
         );
         sphere.position.set(point.x, point.y, point.z);
         testPointGroup.add(sphere);
+      }
+    },
+
+    /**
+     * Core-state reference markers (never SimPlant::ProbeDisc.center as probe_center).
+     * @param {{
+     *   home?: {x:number,y:number,z:number}|null,
+     *   plateOrigin?: {x:number,y:number,z:number}|null,
+     *   probeCenter?: {x:number,y:number,z:number}|null,
+     *   showHome?: boolean,
+     *   showPlate?: boolean,
+     *   showProbe?: boolean,
+     * }} markers
+     */
+    setReferenceMarkers(markers = {}) {
+      clearGroup(referenceMarkerGroup);
+      const addMarker = (pose, color, axisLen = 8) => {
+        if (!pose || ![pose.x, pose.y, pose.z].every(Number.isFinite)) {
+          return;
+        }
+        const ball = new THREE.Mesh(
+          new THREE.SphereGeometry(1.2, 12, 12),
+          new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.25 })
+        );
+        ball.position.set(pose.x, pose.y, pose.z);
+        referenceMarkerGroup.add(ball);
+        const axes = new THREE.AxesHelper(axisLen);
+        axes.position.set(pose.x, pose.y, pose.z);
+        referenceMarkerGroup.add(axes);
+      };
+      if (markers.showHome !== false) {
+        addMarker(markers.home, 0x42a5f5);
+      }
+      if (markers.showPlate !== false) {
+        addMarker(markers.plateOrigin, 0xab47bc);
+      }
+      if (markers.showProbe !== false) {
+        addMarker(markers.probeCenter, 0xef5350);
       }
     },
 
@@ -318,6 +435,38 @@ export function createGantryView(canvas, geometry = {}) {
       );
       line.computeLineDistances();
       plannedTrajectoryGroup.add(line);
+    },
+
+    /**
+     * Draw Core Safe-Z approach segments (raise / XY / lower) as separate polylines.
+     * @param {Array<{type:string, from:{x,y,z}, to:{x,y,z}}>} segments
+     */
+    setPlannedSegments(segments) {
+      clearGroup(plannedTrajectoryGroup);
+      if (!showTrajectory || !Array.isArray(segments) || segments.length === 0) {
+        return;
+      }
+      const colorFor = (type) => {
+        if (type === 'SafeZ') return 0xffb74d;
+        if (type === 'XY') return 0x90caf9;
+        if (type === 'Z' || type === 'ZCoarse') return 0xce93d8;
+        if (type === 'ZFine') return 0xab47bc;
+        if (type === 'ZMeasure') return 0x7e57c2;
+        return 0xb0bec5;
+      };
+      for (const seg of segments) {
+        if (!seg?.from || !seg?.to) {
+          continue;
+        }
+        const verts = [seg.from.x, seg.from.y, seg.from.z, seg.to.x, seg.to.y, seg.to.z];
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+        const line = new THREE.Line(
+          geometry,
+          new THREE.LineBasicMaterial({ color: colorFor(seg.type) })
+        );
+        plannedTrajectoryGroup.add(line);
+      }
     },
 
     setTraveledTrajectory(completedPoints, currentPose) {
@@ -341,6 +490,49 @@ export function createGantryView(canvas, geometry = {}) {
       traveledTrajectoryGroup.add(
         new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x43a047 }))
       );
+    },
+
+    /** Append-only TCP samples for traveled path (machine frame). */
+    setTraveledSamples(samples) {
+      clearGroup(traveledTrajectoryGroup);
+      if (!showTrajectory || !Array.isArray(samples) || samples.length < 2) {
+        return;
+      }
+      const verts = [];
+      for (const p of samples) {
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) {
+          continue;
+        }
+        verts.push(p.x, p.y, p.z);
+      }
+      if (verts.length < 6) {
+        return;
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+      traveledTrajectoryGroup.add(
+        new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x43a047 }))
+      );
+    },
+
+    /**
+     * Sprite labels for the same points/segments already drawn.
+     * @param {Array<{x:number,y:number,z:number,text:string,kind?:string}>} labels
+     */
+    setOverlayLabels(labels) {
+      clearOverlay(overlayLabelGroup);
+      if (!Array.isArray(labels)) {
+        return;
+      }
+      for (const item of labels) {
+        if (!item || !Number.isFinite(item.x) || !Number.isFinite(item.y) || !Number.isFinite(item.z)) {
+          continue;
+        }
+        const tint = item.kind === 'segment' ? '#ffcc80' : '#c5e1a5';
+        const sprite = makeTextSprite(item.text || '', tint);
+        sprite.position.set(item.x, item.y, item.z + (item.kind === 'segment' ? 2.5 : 3.5));
+        overlayLabelGroup.add(sprite);
+      }
     },
 
     /**

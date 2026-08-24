@@ -5,6 +5,7 @@ import { connectStatus, sendCommand } from './api.js';
 import { applyStatus, setConnectionStatus, wireGlobalStop } from './statusBar.js';
 import { wireFaultPanel } from './components/faultPanel.js';
 import { startRouter } from './router.js';
+import { createStartupHomingController } from './homingGate.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   setConnectionStatus('GUI läuft — verbinde Live-Status…', false);
@@ -13,8 +14,17 @@ document.addEventListener('DOMContentLoaded', () => {
   wireFaultPanel();
   startRouter();
 
+  const startupHoming = createStartupHomingController({
+    startHoming: () => sendCommand({ command: 'home' }),
+  });
+
   connectStatus(
-    (status) => applyStatus(status),
+    (status) => {
+      applyStatus(status);
+      startupHoming.onStatus(status).catch((err) => {
+        setConnectionStatus(err.message || String(err), true);
+      });
+    },
     (connected, message) => {
       setConnectionStatus(message || '', !connected);
     }

@@ -578,7 +578,7 @@ int main()
         cfg.tool_offset_x = 0.25f;
         cfg.tool_offset_y = -0.5f;
         cfg.tool_offset_z = 1.0f;
-        cfg.safe_z = 10.0f;
+        cfg.safe_z_buffer = 30.0f;
         cfg.sample_timeout_s = 0.5f;
         cfg.heartbeat_timeout_s = 0.3f;
         cfg.xy_correct_timeout_s = 2.0f;
@@ -596,6 +596,12 @@ int main()
         cfg.probe_xy_search_margin = 2.0f;
         cfg.insert_search_distance = 10.0f;
         cfg.num_fine_searches = 3;
+        cfg.phase1_v_extract = 1.0f;
+        cfg.phase1_v_insert = 1.0f;
+        cfg.phase2_v_extract = 2.0f;
+        cfg.phase2_v_insert = 3.0f;
+        cfg.phase3_v_extract = 2.0f;
+        cfg.phase3_v_insert = 2.0f;
 
         uint8_t wire[tecomm::kMachineConfigPayloadWireSize];
         if (!tecomm::encodeMachineConfigPayload(cfg, wire, sizeof(wire)))
@@ -607,14 +613,15 @@ int main()
         {
             return 91;
         }
-        if (parsed.tool_offset_z != cfg.tool_offset_z || parsed.safe_z != cfg.safe_z ||
+        if (parsed.tool_offset_z != cfg.tool_offset_z || parsed.safe_z_buffer != cfg.safe_z_buffer ||
             parsed.heartbeat_timeout_s != cfg.heartbeat_timeout_s ||
             parsed.max_optimization_iterations != 10 || parsed.v_homing != cfg.v_homing ||
             parsed.measuring_head_diameter != cfg.measuring_head_diameter ||
             parsed.num_fine_searches != 3 || parsed.probe_offset_reference_z != cfg.probe_offset_reference_z ||
             parsed.tool_cylindrical_height != cfg.tool_cylindrical_height ||
             parsed.probe_xy_search_margin != cfg.probe_xy_search_margin ||
-            parsed.insert_search_distance != cfg.insert_search_distance)
+            parsed.insert_search_distance != cfg.insert_search_distance ||
+            parsed.phase2_v_insert != cfg.phase2_v_insert)
         {
             return 92;
         }

@@ -4,6 +4,11 @@ import { sendCommand } from './api.js';
 import { setTcpPose } from './tcpView.js';
 import { deriveDisplayState, formatHomingStatus } from './machineGuiState.js';
 import { applyFaultPanel } from './components/faultPanel.js';
+import {
+  describeRunningCoreProcess,
+  formatProcedurePhaseLabel,
+  isCoreProcessRunning,
+} from './coreProcessStatus.js';
 
 function $(id) {
   return document.getElementById(id);
@@ -63,6 +68,7 @@ export function applyStatus(status) {
   const pneumaticEl = $('pneumatic-state');
   const homingEl = $('homing-state');
   const phaseEl = $('procedure-phase');
+  const processLabelEl = $('core-process-label');
   const faultEl = $('fault-reason');
   const commWdEl = $('comm-watchdog');
   const forceFreshEl = $('force-fresh');
@@ -107,8 +113,21 @@ export function applyStatus(status) {
   if (homingEl) {
     homingEl.textContent = formatHomingStatus(status);
   }
+  if (processLabelEl) {
+    if (isCoreProcessRunning(status.processState)) {
+      processLabelEl.textContent = describeRunningCoreProcess(status.procedurePhase).processLabel;
+    } else if (status.processState === 'Completed') {
+      processLabelEl.textContent = 'Abgeschlossen';
+    } else if (status.processState === 'Aborted') {
+      processLabelEl.textContent = 'Abgebrochen';
+    } else if (status.processState === 'Paused') {
+      processLabelEl.textContent = 'Pausiert';
+    } else {
+      processLabelEl.textContent = 'Bereit';
+    }
+  }
   if (phaseEl) {
-    phaseEl.textContent = status.procedurePhase || '—';
+    phaseEl.textContent = formatProcedurePhaseLabel(status.procedurePhase);
   }
   if (faultEl) {
     faultEl.textContent = status.faultReason && status.faultReason !== 'None' ? status.faultReason : '—';

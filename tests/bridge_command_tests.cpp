@@ -351,6 +351,52 @@ int main()
         }
     }
 
+    // CmdStart with plate_origin.z high still succeeds: Safe-Z is program-relative.
+    {
+        Machine m;
+        m.setPlateOrigin(TestPoint{0.0f, 0.0f, 17.0f});
+        if (!homeMachine(m))
+        {
+            return 285;
+        }
+        (void)calibrateProbeCenter(m);
+        if (!m.calibrationSet().probe_center_valid)
+        {
+            return 286;
+        }
+
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+
+        tecomm::LoadProgramPayload load{};
+        load.point_count = 1;
+        load.points[0] = tecomm::Point3f{1.0f, 0.0f, 0.0f};
+
+        uint8_t payload[tecomm::kLoadProgramMaxPayloadWireSize];
+        std::size_t bytes_written = 0;
+        tecomm::encodeLoadProgramPayload(load, payload, sizeof(payload), bytes_written);
+
+        std::vector<simbridge::OutboundFrame> out;
+        tecomm::DecodedFrame frame = makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdLoadProgram),
+                                                 payload, bytes_written);
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        if (out.empty())
+        {
+            return 288;
+        }
+        tecomm::AckPayload ack{};
+        if (!decodeOutboundAck(out[0], ack) || ack.result_code != static_cast<uint8_t>(tecomm::AckResultCode::Ok))
+        {
+            return 289;
+        }
+
+        out.clear();
+        if (!dispatchEmpty(d, tecomm::MessageId::CmdStart, tecomm::AckResultCode::Ok, out))
+        {
+            return 2891;
+        }
+    }
+
     // CmdSetProbeCenter rehydrates Core: probe_center_valid must be true afterwards.
     {
         Machine m;
@@ -435,15 +481,7 @@ int main()
             return 299;
         }
 
-        // Automatic start requires the TCP at safe_z (same as after a completed M19).
-        const float safe_z = m.machineConfig().motion.safe_z;
-        m.moveTo(m.x(), m.y(), safe_z);
-        for (int i = 0; i < 600 && m.motionState() != MotionState::AtTarget; ++i)
-        {
-            m.setHostInputs(withFreshForce(HostInputs{}));
-            m.tick(0.05f);
-        }
-
+        // ProcedureController raises to dynamic Safe-Z during approach legs.
         tecomm::LoadProgramPayload load{};
         load.point_count = 1;
         load.points[0] = tecomm::Point3f{1.0f, 0.0f, 0.0f};

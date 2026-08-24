@@ -14,7 +14,8 @@ enum class PlantCommandType
     SetLimits,
     TriggerProbe,
     SetEStop,
-    SetProbeDisc
+    SetProbeDisc,
+    SetForceStiffness
 };
 
 struct PlantCommand
@@ -53,6 +54,9 @@ struct PlantCommand
     float probe_thickness = 0.0f;
     float tool_diameter = 0.0f;
     float tool_cylindrical_height = 0.0f;
+
+    bool has_force_stiffness = false;
+    float force_stiffness_n_per_mm = 5.0f;
 };
 
 PlantCommand parsePlantCommand(const std::string& line);

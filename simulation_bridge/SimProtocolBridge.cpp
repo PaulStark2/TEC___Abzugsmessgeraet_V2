@@ -1,10 +1,22 @@
 #include "SimProtocolBridge.hpp"
 
+#include "ForcePathRecorder.hpp"
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
+#include "ProcessForceModel.hpp"
 #include "StatusSnapshot.hpp"
+#include "Types.hpp"
 
-#include "ForcePathRecorder.hpp"
+namespace
+{
+
+bool phaseNeedsProcessForce(ProcedurePhase phase)
+{
+    return phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::OptimizeInsert ||
+           phase == ProcedurePhase::TestOrAge;
+}
+
+} // namespace
 
 namespace simbridge
 {
@@ -13,6 +25,12 @@ SimProtocolBridge::SimProtocolBridge()
     : executor_(machine_)
     , dispatcher_(machine_, executor_)
 {
+    // Simulation contract:
+    // ProcedureController reads hostInputs after advancing motion for this tick.
+    // Therefore we refresh hostInputs here via a hook, so forces/trigger events
+    // match the machine pose at the time the procedure logic evaluates them.
+    machine_.setHostInputUpdateCallback(
+        [this](Machine&) { this->applyHostInputs(); });
 }
 
 Machine& SimProtocolBridge::machine()
@@ -114,8 +132,46 @@ void SimProtocolBridge::applyHostInputs()
     disc.tool_cylindrical_height = probe.tool_cylindrical_height;
     plant_.setProbeDisc(disc);
 
-    // Sensors are derived from the Core-reported pose; no safety decision here.
-    machine_.setHostInputs(plant_.sample(machine_.x(), machine_.y(), machine_.z()));
+    HostInputs inputs = plant_.sample(machine_.rawX(), machine_.rawY(), machine_.rawZ());
+
+    const ProcedurePhase phase = executor_.procedurePhase();
+    const bool coupled = machine_.hostOutputs().spreaderExtended;
+    if (executor_.processState() == ProcessState::Running && phaseNeedsProcessForce(phase) && coupled)
+    {
+        if (!process_force_latched_)
+        {
+            process_z_test_ = machine_.z();
+            process_force_latched_ = true;
+            process_force_unloaded_ = false;
+        }
+
+        const float target = machine_.testConfiguration().target_force_N;
+        const float k = plant_.forceStiffnessNPerMm();
+        inputs.force.fx = 0.0f;
+        inputs.force.fy = 0.0f;
+        inputs.force.fz =
+            simplant::processFzZ(machine_.z(), process_z_test_, target, k, true, process_force_unloaded_);
+
+        const float tol = machine_.machineConfig().phase2.force_tolerance_N;
+        if (!process_force_unloaded_ &&
+            simplant::processForceShouldMarkUnloaded(machine_.z(), process_z_test_, target, k, tol))
+        {
+            process_force_unloaded_ = true;
+        }
+    }
+    else
+    {
+        if (!coupled || executor_.processState() != ProcessState::Running || !phaseNeedsProcessForce(phase))
+        {
+            process_force_latched_ = false;
+            process_force_unloaded_ = false;
+        }
+        inputs.force.fx = 0.0f;
+        inputs.force.fy = 0.0f;
+        inputs.force.fz = 0.0f;
+    }
+
+    machine_.setHostInputs(inputs);
 }
 
 void SimProtocolBridge::tick(float dt)
@@ -126,6 +182,10 @@ void SimProtocolBridge::tick(float dt)
     }
     else
     {
+        // Manual moves / idle ticks: refresh hostInputs explicitly here.
+        // During automatic procedures, ProcedureController invokes
+        // Machine::invokeHostInputUpdateCallback() which calls applyHostInputs().
+        applyHostInputs();
         machine_.tick(dt);
     }
 

@@ -11,12 +11,48 @@
   color: var(--accent);
 }
 
+.sim-program-note {
+  margin: 0.5rem 0 0;
+  max-width: 70rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sim-program-note--warn {
+  color: #c9a227;
+}
+
 .sim-layout {
   display: grid;
-  grid-template-columns: minmax(18rem, 24rem) 1fr;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
   gap: 1rem;
   padding: 1rem 1.5rem 2rem;
-  align-items: start;
+  align-items: stretch;
+  height: calc(100vh - 7rem);
+  max-height: calc(100vh - 7rem);
+  box-sizing: border-box;
+}
+
+.sim-panel {
+  overflow-y: auto;
+  max-height: 100%;
+  min-width: 0;
+}
+
+.sim-viewport {
+  position: sticky;
+  top: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sim-viewport #gantry-canvas {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 20rem;
 }
 
 @media (max-width: 60rem) {
@@ -75,6 +111,12 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
+}
+
+.sim-field input[readonly] {
+  background: #16191e;
+  color: var(--muted);
+  cursor: default;
 }
 
 .sim-panel button {

@@ -290,6 +290,23 @@ export async function fetchMachineConfig() {
   return response.json();
 }
 
+/**
+ * Latest controller status snapshot (M12 StatusReport via GUI server).
+ */
+export async function fetchMachineStatus() {
+  const response = await fetch('/api/machine', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result.status || {};
+}
+
 export async function unlockParameters(password) {
   const response = await fetch('/api/parameters/unlock', {
     method: 'POST',

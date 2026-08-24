@@ -40,10 +40,7 @@ export function deriveDisplayState(status) {
   }
 
   if (
-    status.isHomed === true ||
-    status.homingState === 'Homed' ||
-    status.homed === true ||
-    status.homingPhase === 'complete'
+    status.isHomed === true
   ) {
     return { label: 'HOMED', warnings };
   }
@@ -68,15 +65,6 @@ export function deriveDisplayState(status) {
  * @returns {string}
  */
 export function formatHomingStatus(status) {
-  if (
-    status.isHomed === true ||
-    status.homingState === 'Homed' ||
-    status.homed === true ||
-    status.homingPhase === 'complete'
-  ) {
-    return 'Homing abgeschlossen';
-  }
-
   if (status.homingState === 'HomingError') {
     return 'Homing-Fehler';
   }
@@ -95,13 +83,10 @@ export function formatHomingStatus(status) {
     return 'Homing läuft…';
   }
 
-  if (status.homingState === 'None' && status.machineState === 'Idle' && status.motionState === 'AtTarget') {
-    return status.isHomed === true ? 'Homing abgeschlossen' : 'Bereit';
-  }
+  const referenced = status.isHomed === true;
 
-  if (status.machineState === 'Idle' && status.motionState === 'AtTarget') {
-    return 'Bereit';
+  if (!referenced) {
+    return 'Nicht referenziert';
   }
-
-  return '—';
+  return 'Homed';
 }

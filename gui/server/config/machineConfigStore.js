@@ -31,6 +31,10 @@ function load() {
       parsed.probe_offset_reference_z = parsed.probe_offset_reference_z ?? parsed.nominal_probe_z;
       delete parsed.nominal_probe_z;
     }
+    // Legacy absolute machine-frame safe_z is replaced by safe_z_buffer (plate-relative).
+    if (Object.prototype.hasOwnProperty.call(parsed, 'safe_z')) {
+      delete parsed.safe_z;
+    }
 
     return { ...defaultMachineConfigPayload(), ...parsed };
   } catch {

@@ -235,6 +235,12 @@ add_executable(procedure_abort_tests
 target_link_libraries(procedure_abort_tests PRIVATE core)
 add_test(NAME procedure_abort_tests COMMAND procedure_abort_tests)
 
+add_executable(procedure_runtime_e2e_tests
+    procedure_runtime_e2e_tests.cpp
+)
+target_link_libraries(procedure_runtime_e2e_tests PRIVATE core)
+add_test(NAME procedure_runtime_e2e_tests COMMAND procedure_runtime_e2e_tests)
+
 # CMake definition for M12 communication protocol tests.
 add_executable(protocol_tests
     protocol_tests.cpp
@@ -266,11 +272,44 @@ add_executable(bridge_command_tests
 target_link_libraries(bridge_command_tests PRIVATE simulation_bridge)
 add_test(NAME bridge_command_tests COMMAND bridge_command_tests)
 
+add_executable(mcs_rehome_verify
+    mcs_rehome_verify.cpp
+)
+target_link_libraries(mcs_rehome_verify PRIVATE simulation_bridge)
+
+add_executable(coord_frame_diagnose
+    coord_frame_diagnose.cpp
+)
+target_link_libraries(coord_frame_diagnose PRIVATE simulation_bridge)
+
+add_executable(m19_frame_diagnose
+    m19_frame_diagnose.cpp
+)
+target_link_libraries(m19_frame_diagnose PRIVATE simulation_bridge)
+
+add_executable(procedure_start_homing_regression_tests
+    procedure_start_homing_regression_tests.cpp
+)
+target_link_libraries(procedure_start_homing_regression_tests PRIVATE simulation_bridge)
+add_test(NAME procedure_start_homing_regression_tests COMMAND procedure_start_homing_regression_tests)
+
 add_executable(bridge_integration_tests
     bridge_integration_tests.cpp
 )
 target_link_libraries(bridge_integration_tests PRIVATE simulation_bridge)
 add_test(NAME bridge_integration_tests COMMAND bridge_integration_tests)
+
+add_executable(process_force_model_tests
+    process_force_model_tests.cpp
+)
+target_link_libraries(process_force_model_tests PRIVATE simulation_plant)
+add_test(NAME process_force_model_tests COMMAND process_force_model_tests)
+
+add_executable(procedure_sim_phases_force_e2e_tests
+    procedure_sim_phases_force_e2e_tests.cpp
+)
+target_link_libraries(procedure_sim_phases_force_e2e_tests PRIVATE simulation_bridge)
+add_test(NAME procedure_sim_phases_force_e2e_tests COMMAND procedure_sim_phases_force_e2e_tests)
 
 # M15 virtual outside world (sensor plant) tests.
 add_executable(simplant_tests

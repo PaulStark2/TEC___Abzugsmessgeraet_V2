@@ -48,6 +48,19 @@ bool SimPlant::eStop() const
     return e_stop_;
 }
 
+void SimPlant::setForceStiffnessNPerMm(float k)
+{
+    if (k >= 0.0f)
+    {
+        force_stiffness_n_per_mm_ = k;
+    }
+}
+
+float SimPlant::forceStiffnessNPerMm() const
+{
+    return force_stiffness_n_per_mm_;
+}
+
 void SimPlant::advance(float dt)
 {
     if (dt <= 0.0f || probe_remaining_ <= 0.0f)
@@ -127,6 +140,10 @@ PlantState SimPlant::state(float x, float y, float z) const
     snapshot.probe_trigger_y = inputs.probeTriggerY;
     snapshot.probe_trigger_z = inputs.probeTriggerZ;
     snapshot.probe_trigger_sequence = inputs.probeTriggerSequence;
+    snapshot.force_stiffness_n_per_mm = force_stiffness_n_per_mm_;
+    snapshot.tcp_x = x;
+    snapshot.tcp_y = y;
+    snapshot.tcp_z = z;
     return snapshot;
 }
 

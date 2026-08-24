@@ -2,6 +2,7 @@
 #include "HostInputs.hpp"
 #include "Machine.hpp"
 #include "MachineConfig.hpp"
+#include "SafeZ.hpp"
 #include "TestExecutor.hpp"
 #include "TestPoint.hpp"
 #include "TestProgram.hpp"
@@ -202,13 +203,20 @@ int main()
         return 3;
     }
 
-    // Safe-End: XY at home_offset, Z remains at configured Safe-Z.
-    const float safe_z = machine.machineConfig().motion.safe_z;
-    if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f) || !nearEqual(machine.z(), safe_z))
+    // Safe-End: XY at home_offset, Z remains at dynamic program Safe-Z.
+    float safe_z_machine = 0.0f;
+    if (!resolveProgramSafeZMachine(program, machine.machineConfig().motion.safe_z_buffer,
+                                    machine.calibrationSet(), safe_z_machine))
+    {
+        std::cout << "ERROR: could not resolve dynamic Safe-Z" << std::endl;
+        return 4;
+    }
+    if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f) ||
+        !nearEqual(machine.z(), safe_z_machine))
     {
         std::cout << "ERROR: end pose mismatch. got=("
                   << machine.x() << "," << machine.y() << "," << machine.z()
-                  << ") expected=(0,0," << safe_z << ")" << std::endl;
+                  << ") expected=(0,0," << safe_z_machine << ")" << std::endl;
         return 4;
     }
 

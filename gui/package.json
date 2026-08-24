@@ -14,7 +14,7 @@
     "dev:stop-gui": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-stop-gui.ps1",
     "dev:start-simulation": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-start-simulation.ps1",
     "dev:stop-simulation": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-stop-simulation.ps1",
-    "test:protocol": "node server/protocol/crc16.test.js && node server/protocol/m12Codec.test.js && node server/protocol/frameStreamBuffer.test.js && node server/protocol/protocolMachineClient.test.js && node scripts/m17_config_tests.js",
+    "test:protocol": "node server/protocol/crc16.test.js && node server/protocol/m12Codec.test.js && node server/protocol/frameStreamBuffer.test.js && node server/protocol/protocolMachineClient.test.js && node server/procedure/protocolProcedureAdapter.test.js && node server/procedure/startPreconditions.test.js && node server/procedure/coreProcessGuard.test.js && node server/coord/safeZ.test.js && node server/coord/coordinateTransform.test.js && node server/coord/safeZPath.test.js && node server/coord/physicalGeometry.test.js && node server/coord/overlayLabels.test.js && node server/coord/homeMarker.test.js && node scripts/homing_gate_tests.js && node scripts/m17_config_tests.js && node scripts/core_process_status_tests.js",
     "smoke:g14": "node scripts/g14_protocol_smoke.js",
     "smoke:m15": "node scripts/m15_simulation_smoke.js",
     "diagnose:g14": "node scripts/g14_diagnose_runtime.js",

@@ -50,3 +50,7 @@ export function triggerPlantProbe(pulseMs) {
 export function setPlantEStop(active) {
   return post('/api/simulation/estop', { active });
 }
+
+export function setPlantForceStiffness(nPerMm) {
+  return post('/api/simulation/force-stiffness', { nPerMm });
+}

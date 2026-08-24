@@ -6,16 +6,17 @@
 
 int main()
 {
-    // Hard limit trips at ±50 N regardless of context threshold.
+    // Hard limit trips above ±50 N regardless of context threshold.
     {
         MachineConfig cfg{};
         cfg.collision.approach_N = 20.0f;
-        ForceVector force{0.0f, 0.0f, SafetyLimits::kMaxFzAbs_N};
+        ForceVector force{0.0f, 0.0f, SafetyLimits::kMaxFzAbs_N + 0.1f};
         if (evaluateForceWatchdog(force, cfg, CollisionContext::Approach) != ForceWatchdogTrip::HardLimit)
         {
             return 1;
         }
-        force.fz = 49.9f;
+        // Exactly 50 N is allowed (insertionForce max); phase threshold still applies.
+        force.fz = SafetyLimits::kMaxFzAbs_N;
         if (evaluateForceWatchdog(force, cfg, CollisionContext::Approach) != ForceWatchdogTrip::CollisionContext)
         {
             return 2;
@@ -71,7 +72,7 @@ int main()
     {
         Machine m;
         HostInputs in{};
-        in.force.fx = 50.0f;
+        in.force.fx = 50.1f;
         m.setHostInputs(in);
         m.tick(0.05f);
         if (m.machineState() != MachineState::Fault)

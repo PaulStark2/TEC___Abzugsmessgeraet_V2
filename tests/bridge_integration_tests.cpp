@@ -6,6 +6,7 @@
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
 #include "Payloads.hpp"
+#include "SafeZ.hpp"
 #include "SimPlant.hpp"
 
 #include "Types.hpp"
@@ -92,19 +93,10 @@ int main()
         }
 
         constexpr float kDt = 0.05f;
-        constexpr int kMaxTicks = 5000;
+        constexpr int kMaxTicks = 30000;
         int ticks = 0;
         while (bridge.executor().processState() == ProcessState::Running && ticks < kMaxTicks)
         {
-            bridge.applyHostInputs();
-            HostInputs in = bridge.machine().hostInputs();
-            if (phaseNeedsProcessForce(bridge.executor().procedurePhase()))
-            {
-                in.force.fz = bridge.machine().testConfiguration().target_force_N;
-                in.forceSampleSequence += 1u;
-                in.hostHeartbeatSequence += 1u;
-                bridge.machine().setHostInputs(in);
-            }
             bridge.tick(kDt);
             ++ticks;
         }
@@ -113,8 +105,18 @@ int main()
         {
             return 3;
         }
-        if (!nearEqual(bridge.machine().x(), 0.0f) || !nearEqual(bridge.machine().y(), 0.0f) ||
-            !nearEqual(bridge.machine().z(), bridge.machine().machineConfig().motion.safe_z))
+        TestProgram ended;
+        ended.add(TestPoint{10.0f, 0.0f, 0.0f});
+        ended.add(TestPoint{20.0f, 5.0f, 0.0f});
+        ended.add(TestPoint{30.0f, 5.0f, -5.0f});
+        (void)ended;
+        if (!bridge.machine().isHomed() || bridge.machine().homingState() != HomingState::Homed)
+        {
+            return 31;
+        }
+        const TestPoint home = bridge.machine().calibrationSet().home_offset;
+        if (!nearEqual(bridge.machine().x(), home.x) || !nearEqual(bridge.machine().y(), home.y) ||
+            !nearEqual(bridge.machine().z(), home.z))
         {
             return 4;
         }

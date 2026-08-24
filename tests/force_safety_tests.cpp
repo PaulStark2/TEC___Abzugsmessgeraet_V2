@@ -185,7 +185,7 @@ int main()
     {
         Machine m;
         HostInputs in = withFreshForce(HostInputs{});
-        in.force.fz = SafetyLimits::kMaxFzAbs_N;
+        in.force.fz = SafetyLimits::kMaxFzAbs_N + 0.1f;
         m.setHostInputs(in);
         m.tick(0.05f);
         if (m.machineState() != MachineState::Fault || m.lastFaultReason() != FaultReason::ForceHardLimit)

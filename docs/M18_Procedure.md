@@ -87,14 +87,24 @@ Pause remains forbidden during the actual test phases (M17 rule retained).
 
 ## Safe-Z
 
-`MachineConfig.motion.safe_z` (default 10). Not `home_offset`.
+Dynamic height from the loaded test program (plate frame):
 
-- Static: `start()` rejects a program unless every transformed machine-Z is **strictly `< safe_z`**.
-- Runtime: XY traverse commands only while `atSafeZ()`.
+```text
+safe_z_plate = max(program.point.z) + safe_z_buffer
+safe_z_machine = plate_origin.z + safe_z_plate + tool_offset.z
+```
+
+- `MachineConfig.motion.safe_z_buffer` (default **30 mm**) is the only configurable clearance.
+- There is **no** absolute machine-frame `safe_z` parameter.
+- Without a loaded program, Safe-Z cannot be computed and automatic start is refused.
+- Static: `start()` rejects unless every transformed machine-Z is **strictly `< safe_z_machine`** (true by construction when `safe_z_buffer > 0`).
+- Runtime: XY traverse commands only while `atSafeZ()` (at `safe_z_machine`).
 - Reusable legs: `MoveToSafeZ` → `MoveXY` (at Safe-Z) → `MoveToTargetZ`.
-- Safe-End: XY to `home_offset.x/y`, **remain at Safe-Z** (do not dive to `home_offset.z`).
+- Safe-End: XY to measured `home_offset.x/y`, **remain at Safe-Z** (do not dive to `home_offset.z`).
 
-Range: `|safe_z| ≤ SafetyLimits::kMaxAbsSafeZ` (500).
+Buffer range: `0 < safe_z_buffer ≤ SafetyLimits::kMaxAbsSafeZ` (500).
+
+See also `core/SafeZ.hpp` and `docs/Safe_Z.md`.
 
 ---
 

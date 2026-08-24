@@ -10,7 +10,7 @@ function run() {
   const cfg = defaultMachineConfigPayload();
   assert.strictEqual(cfg.v_slow, 2);
   assert.strictEqual(cfg.tool_offset_z, 0);
-  assert.strictEqual(cfg.safe_z, 10);
+  assert.strictEqual(cfg.safe_z_buffer, 30);
   assert.strictEqual(cfg.heartbeat_timeout_s, 0.3);
   assert.strictEqual(cfg.measuring_head_diameter, 8);
   assert.strictEqual(cfg.tool_cylindrical_height, 15);
@@ -29,7 +29,7 @@ function run() {
   assert.strictEqual(validateMachineConfigPayload(cfg).ok, true);
   const tooFast = { ...cfg, v_approach: 80 };
   assert.strictEqual(validateMachineConfigPayload(tooFast).ok, false);
-  const nanCfg = { ...cfg, safe_z: Number.NaN };
+  const nanCfg = { ...cfg, safe_z_buffer: Number.NaN };
   assert.strictEqual(validateMachineConfigPayload(nanCfg).ok, false);
   const future = GROUPS.flatMap((g) => g.fields).filter((f) => f.future).map((f) => f.key);
   assert.ok(future.includes('force_filter'));

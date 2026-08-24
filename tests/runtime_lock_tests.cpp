@@ -73,14 +73,14 @@ int main()
         }
 
         MachineConfig cfg = machine.machineConfig();
-        const float original_safe_z = cfg.motion.safe_z;
-        cfg.motion.safe_z = 20.0f;
+        const float original_safe_z_buffer = cfg.motion.safe_z_buffer;
+        cfg.motion.safe_z_buffer = 20.0f;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (machine.trySetMachineConfig(cfg, err) || err != ConfigValidationError::RuntimeLocked)
         {
             return 3;
         }
-        if (machine.machineConfig().motion.safe_z != original_safe_z)
+        if (machine.machineConfig().motion.safe_z_buffer != original_safe_z_buffer)
         {
             return 4;
         }
@@ -103,12 +103,12 @@ int main()
         }
 
         ex.stop();
-        cfg.motion.safe_z = 20.0f;
+        cfg.motion.safe_z_buffer = 20.0f;
         if (!machine.trySetMachineConfig(cfg, err))
         {
             return 8;
         }
-        if (machine.machineConfig().motion.safe_z != 20.0f)
+        if (machine.machineConfig().motion.safe_z_buffer != 20.0f)
         {
             return 9;
         }

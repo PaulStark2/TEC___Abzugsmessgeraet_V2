@@ -56,7 +56,9 @@ active `CollisionContext`. Trip → latched `Fault`.
 
 `machine = plateOrigin + platePoint + toolOffset` (`core/CoordinateTransform.hpp`).
 `TestExecutor::start()` and `CmdStart` require a valid `plateOrigin`.
-Successful homing snaps the pose to `CalibrationSet.homeOffset` (from MachineConfig).
+Successful homing re-references each axis at the +max switch (`setCurrentPose` to
++retract R) then retracts to the machine home (axis = 0). See
+[`docs/Homing.md`](Homing.md).
 
 ## M17.5 — ProbeCalibration
 
@@ -80,14 +82,21 @@ TestOrAge / Unclamp. STOP always aborts to `Aborted`.
 ## M17.7–M17.9 — Insert, optimize, test/aging
 
 - PreClamp: Fx/Fy hysteresis only (`Machine::setPreClampXyEnabled`).
-- Phase 1: constant-velocity Z− until `Fz >= targetForce` (or search end / Z-min).
-  `ExtractionPoint = InsertionPoint + insertionBuffer` (Z+).
+- Phase 1 (`InsertInitial`):
+  1. If `|Fz| > force_tolerance_N`, first extract (Z+) until force-free
+     (`|Fz| <= phase2.force_tolerance_N`), using `insert_search_distance` as search
+     stroke.
+  2. Then constant-velocity Z− until `Fz >= targetForce` (or search end / Z-min).
+  3. `ExtractionPoint = InsertionPoint + insertionBuffer` (Z+, computed).
 - Phase 2: discrete `ΔZ = gain * (Fz - target)` between attempts. No PID. Abort after
   `maxOptimizationIterations`.
 - Phase 3 Aging: extract ↔ insert, `iterations` times, no force control.
 - Phase 3 Test: same motion; `ForcePathRecorder` ring (256) of `(z, fz)`. Overflow drops
   oldest and increments `dropped`. Never blocks `tick()`.
 
+Coarse approach stand-off for ProbeApproach and PointApproach uses
+`probe.approach_distance` (default 15 mm) above the target Z; fine PointApproach uses
+`v_slow`.
 ## M17.10 — Force-path stream and StatusReport
 
 | ID | Name | Payload |

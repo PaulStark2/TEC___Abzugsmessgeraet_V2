@@ -162,6 +162,8 @@ ProbeSearch::Request ProbeCalibration::makeRequest(const Machine& machine, Probe
         xyStartOffset(probe.search_distance, probe.measuring_head_diameter, probe.tool_diameter);
     request.xy_inner_radius = xySearchInnerRadius(probe.measuring_head_diameter, probe.xy_search_margin);
     request.backoff = probe.backoff;
+    // Raise/traverse may use approach speed; Z descend into search uses fine_speed
+    // (ProbeSearch::commandDescend) so post-standoff M19 is not a rapid dive.
     request.approach_speed = machine.machineConfig().motion.v_approach;
     request.fast_speed = probe.search_speed;
     request.fine_speed = probe.fine_search_speed;

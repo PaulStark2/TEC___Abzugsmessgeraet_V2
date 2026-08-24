@@ -129,6 +129,10 @@ int main(int argc, char** argv)
     }
 #endif
 
+    // Unique banner so GUI/dev scripts can prove which binary is running.
+    // Bump the tag whenever procedure/force semantics change in SimProtocolBridge/Core.
+    std::cout << "[SIM_BUILD] mcs-define-vs-home-reference 2026-08-24" << std::endl;
+    std::cerr << "[SIM_BUILD] mcs-define-vs-home-reference 2026-08-24" << std::endl;
     std::cout << "simulation_protocol (M13 M12 binary TCP host)" << std::endl;
     std::cout << "Listening on 127.0.0.1:" << port << std::endl;
 
@@ -251,8 +255,8 @@ int main(int argc, char** argv)
         }
 
         // Sensor configuration/injection from the simulation UI (no motion here).
-        plant_channel.poll(bridge.plant(), bridge.machine().x(), bridge.machine().y(),
-                           bridge.machine().z());
+        plant_channel.poll(bridge.plant(), bridge.machine().rawX(), bridge.machine().rawY(),
+                           bridge.machine().rawZ());
 
         const auto now = clock::now();
         if (now >= next_tick)

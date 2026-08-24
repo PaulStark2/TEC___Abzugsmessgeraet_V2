@@ -19,6 +19,8 @@
     <header class="app-header">
       <h1>Simulation — virtuelle Außenwelt</h1>
       <p id="sim-status" class="gui-status">Simulations-UI startet…</p>
+      <p id="sim-program-frame-note" class="sim-program-note" hidden></p>
+      <p id="sim-safe-z-note" class="sim-program-note" hidden></p>
       <p class="sim-header-note">
         Diese UI stellt die Außenwelt dar und liefert Sensorsignale. Sie steuert die Maschine
         nicht — Bewegungsentscheidungen trifft ausschließlich der Controller/Core.
@@ -115,20 +117,24 @@
         <section class="sim-group">
           <h3>Messtaster</h3>
           <p class="placeholder-note">
+            Scheiben-<b>Position</b> (x/y/z) ist SimPlant-Ground-Truth und gelangt nicht in den Core.
+            Ø, Dicke und Spreizergeometrie kommen ausschließlich aus der zentralen
+            MachineConfig (Seite Parameter) — hier nur Anzeige, nicht editierbar.
+          </p>
+          <p class="placeholder-note">
             Automatischer geometrischer Trigger bei Kontakt des Spreizerzylinders mit der Messscheibe
             (TCP muss nicht auf Scheibenmitte liegen). Der manuelle Impuls bleibt für Debugging.
-            Die Scheibenmitte ist unabhängig positionierbar. Ø/Dicke/Spreizergeometrie folgen der MachineConfig.
           </p>
           <div class="sim-limit-grid">
             <div class="sim-field"><label for="input-probe-x">Mitte X [mm]</label><input type="number" id="input-probe-x" step="0.1" value="40" /></div>
             <div class="sim-field"><label for="input-probe-y">Mitte Y [mm]</label><input type="number" id="input-probe-y" step="0.1" value="40" /></div>
             <div class="sim-field"><label for="input-probe-z">Mitte Z [mm]</label><input type="number" id="input-probe-z" step="0.1" value="10" /></div>
-            <div class="sim-field"><label for="input-probe-diameter">Scheibe Ø [mm]</label><input type="number" id="input-probe-diameter" step="0.1" value="8" /></div>
-            <div class="sim-field"><label for="input-probe-thickness">Dicke [mm]</label><input type="number" id="input-probe-thickness" step="0.1" value="3" /></div>
-            <div class="sim-field"><label for="input-probe-tool">Spreizer Ø [mm]</label><input type="number" id="input-probe-tool" step="0.1" value="2.5" /></div>
-            <div class="sim-field"><label for="input-probe-tool-height">Spreizerhöhe [mm]</label><input type="number" id="input-probe-tool-height" step="0.1" value="15" /></div>
+            <div class="sim-field"><label for="input-probe-diameter">Scheibe Ø [mm]</label><input type="number" id="input-probe-diameter" step="0.1" value="8" readonly /></div>
+            <div class="sim-field"><label for="input-probe-thickness">Dicke [mm]</label><input type="number" id="input-probe-thickness" step="0.1" value="3" readonly /></div>
+            <div class="sim-field"><label for="input-probe-tool">Spreizer Ø [mm]</label><input type="number" id="input-probe-tool" step="0.1" value="2.5" readonly /></div>
+            <div class="sim-field"><label for="input-probe-tool-height">Spreizerhöhe [mm]</label><input type="number" id="input-probe-tool-height" step="0.1" value="15" readonly /></div>
           </div>
-          <button type="button" id="btn-apply-probe-disc">Messtaster-Geometrie übernehmen</button>
+          <button type="button" id="btn-apply-probe-disc">Scheibenposition übernehmen</button>
           <button type="button" id="btn-probe-trigger">Manuell auslösen</button>
           <p class="sim-readout">
             probeTriggered: <span id="sim-probe-state">—</span>
@@ -159,6 +165,20 @@
         </section>
 
         <section class="sim-group">
+          <h3>Kraftsimulation (nur Prüfphasen)</h3>
+          <p class="placeholder-note">
+            Lineare Z-Feder <code>Fz = k · (z<sub>contact</sub> − z)</code> nur in
+            InsertInitial / OptimizeInsert / TestOrAge. Fx/Fy bleiben 0. Kein MachineConfig-Parameter.
+          </p>
+          <div class="sim-field">
+            <label for="input-force-stiffness">Steifigkeit k [N/mm]</label>
+            <input type="number" id="input-force-stiffness" min="0" step="0.1" value="5" />
+          </div>
+          <button type="button" id="btn-apply-force-stiffness">Kraftparameter übernehmen</button>
+          <p class="sim-readout">aktiv: <span id="sim-force-stiffness">—</span> N/mm</p>
+        </section>
+
+        <section class="sim-group">
           <h3>Visualisierung</h3>
           <div class="sim-field sim-field--inline">
             <input type="checkbox" id="toggle-trajectory" checked />
@@ -168,6 +188,33 @@
             <input type="checkbox" id="toggle-limit-markers" checked />
             <label for="toggle-limit-markers">Endanschläge anzeigen</label>
           </div>
+          <div class="sim-field sim-field--inline">
+            <input type="checkbox" id="toggle-ref-home" checked />
+            <label for="toggle-ref-home">Homing-Punkt</label>
+          </div>
+          <div class="sim-field sim-field--inline">
+            <input type="checkbox" id="toggle-ref-plate" checked />
+            <label for="toggle-ref-plate">Bauplatten-Kalibrierpunkt</label>
+          </div>
+          <div class="sim-field sim-field--inline">
+            <input type="checkbox" id="toggle-ref-probe" checked />
+            <label for="toggle-ref-probe">Messtaster-Zentrum (Core)</label>
+          </div>
+          <div class="sim-field sim-field--inline">
+            <input type="checkbox" id="toggle-ref-points" checked />
+            <label for="toggle-ref-points">Prüfpunkte</label>
+          </div>
+          <div class="sim-field sim-field--inline">
+            <input type="checkbox" id="toggle-point-labels" checked />
+            <label for="toggle-point-labels">Prüfpunktbeschriftungen (Nr. + Koordinaten)</label>
+          </div>
+          <div class="sim-field sim-field--inline">
+            <input type="checkbox" id="toggle-segment-labels" />
+            <label for="toggle-segment-labels">Trajektorienbeschriftungen (v + Richtung)</label>
+          </div>
+          <p class="placeholder-note">
+            Marker: blau=Home (gemessene Retract-Pose nach Homing), violett=plate_origin, rot=probe_center (nur wenn Core-gültig).
+          </p>
         </section>
 
         <section class="sim-group">

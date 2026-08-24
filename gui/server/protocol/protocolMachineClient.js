@@ -27,6 +27,7 @@ const {
   statusReportToGuiStatus,
 } = require('./m12Codec');
 const { MessageId, AckResultCode, NackErrorCode, DecodeResult } = require('./protocolTypes');
+const { latchMeasuredHome } = require('../coord/homeMarker');
 
 const DEFAULT_JOG_STEP = 1;
 const RECONNECT_DELAY_MS = 2000;
@@ -59,6 +60,7 @@ function createDefaultStatus(connected = false) {
     forceSampleFresh: false,
     plateOriginValid: false,
     probeCenterValid: false,
+    measuredHome: null,
     connected,
   };
 }
@@ -112,6 +114,8 @@ function createProtocolMachineClient(options = {}) {
   let lastMachineConfig = null;
   let sessionReadyHandler = null;
   let forcePathHandler = null;
+  let measuredHome = null;
+  let lastHomingState = null;
   /** @type {Map<number, { resolve: Function, timer: NodeJS.Timeout }>} */
   const pendingByMessageId = new Map();
 
@@ -131,7 +135,9 @@ function createProtocolMachineClient(options = {}) {
     const wasLive = connected || sessionReady;
     connected = false;
     sessionReady = false;
-    status = { ...status, connected: false };
+    measuredHome = null;
+    lastHomingState = null;
+    status = { ...status, connected: false, measuredHome: null };
     streamBuffer.clear();
     rejectPending(reason || MACHINE_UNAVAILABLE);
     return wasLive;
@@ -158,6 +164,14 @@ function createProtocolMachineClient(options = {}) {
       sessionReady = true;
     }
     status = statusReportToGuiStatus(decoded, connected && sessionReady);
+    measuredHome = latchMeasuredHome({
+      previousHomingState: lastHomingState,
+      homingState: status.homingState,
+      pose: { x: status.x, y: status.y, z: status.z },
+      previousMeasuredHome: measuredHome,
+    });
+    lastHomingState = status.homingState;
+    status = { ...status, measuredHome: measuredHome ? { ...measuredHome } : null };
     if (becameReady && typeof sessionReadyHandler === 'function') {
       Promise.resolve()
         .then(() => sessionReadyHandler())
@@ -201,9 +215,14 @@ function createProtocolMachineClient(options = {}) {
       pendingByMessageId.delete(ack.refMessageId);
       const error = ackErrorMessage(ack.resultCode);
       if (error) {
-        pending.resolve({ ok: false, error, status: getStatus() });
+        pending.resolve({
+          ok: false,
+          error,
+          resultCode: ack.resultCode,
+          status: getStatus(),
+        });
       } else {
-        pending.resolve({ ok: true, status: getStatus() });
+        pending.resolve({ ok: true, resultCode: ack.resultCode, status: getStatus() });
       }
       return;
     }

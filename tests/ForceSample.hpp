@@ -51,6 +51,17 @@ inline HostInputs withVirtualProbe(const Machine& machine, HostInputs in = HostI
 
 inline HostInputs withPlantInputs(const Machine& machine, HostInputs in = HostInputs{})
 {
+    // Soft +max switches for end-of-procedure Machine::home() in unit tests
+    // (SimProtocolBridge gets these from SimPlant; bare Machine tests do not).
+    if (machine.machineState() == MachineState::Homing)
+    {
+        constexpr float kXMax = 100.0f;
+        constexpr float kYMax = 100.0f;
+        constexpr float kZMax = 50.0f;
+        in.limitXMax = machine.x() >= kXMax;
+        in.limitYMax = machine.y() >= kYMax;
+        in.limitZMax = machine.z() >= kZMax;
+    }
     return withFreshForce(withVirtualProbe(machine, in));
 }
 
@@ -79,7 +90,7 @@ inline HostInputs withProcessForce(const TestExecutor& ex, const Machine& machin
     return withPlantInputs(machine, in);
 }
 
-// Drive the Core homing sequence Z+ → X+ → Y+ to a Homed state for automatic-start tests.
+// Drive the Core homing sequence Z+ → X+ → Y+ (seek + retract) to Homed.
 inline bool homeMachine(Machine& machine)
 {
     MachineConfig cfg = machine.machineConfig();
@@ -96,23 +107,43 @@ inline bool homeMachine(Machine& machine)
     {
         return false;
     }
-    in.limitZMax = true;
-    machine.setHostInputs(withFreshForce(in));
-    machine.tick(0.05f);
-    in.limitZMax = false;
-    in.limitXMax = true;
-    machine.setHostInputs(withFreshForce(in));
-    machine.tick(0.05f);
-    in.limitXMax = false;
-    in.limitYMax = true;
-    machine.setHostInputs(withFreshForce(in));
-    machine.tick(0.05f);
+
+    auto advanceAxis = [&](HomingState seek_phase, bool& limit_flag) {
+        // Seek toward +max briefly so the limit is not asserted at the start pose.
+        for (int i = 0; i < 80 && machine.homingState() == seek_phase; ++i)
+        {
+            limit_flag = false;
+            machine.setHostInputs(withFreshForce(in));
+            machine.tick(0.05f);
+        }
+        limit_flag = true;
+        machine.setHostInputs(withFreshForce(in));
+        machine.tick(0.05f);
+        limit_flag = false;
+        for (int i = 0; i < 400 && machine.homingState() == seek_phase; ++i)
+        {
+            machine.setHostInputs(withFreshForce(in));
+            machine.tick(0.05f);
+        }
+    };
+
+    advanceAxis(HomingState::HomingZ, in.limitZMax);
+    if (machine.homingState() != HomingState::HomingX && machine.homingState() != HomingState::Homed)
+    {
+        return false;
+    }
+    advanceAxis(HomingState::HomingX, in.limitXMax);
+    if (machine.homingState() != HomingState::HomingY && machine.homingState() != HomingState::Homed)
+    {
+        return false;
+    }
+    advanceAxis(HomingState::HomingY, in.limitYMax);
     return machine.isHomed();
 }
 
 // For tests that require the automatic procedure to start,
 // we must calibrate probe_center via a standalone M19 run first.
-inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 2500)
+inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
 {
     // Preserve the test's intended machine pose. Some unit tests assume that
     // after homing the TCP is at/near (0,0,...) when they start an automatic process.
@@ -142,15 +173,26 @@ inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 2500)
     }
     const bool ok = machine.calibrationSet().probe_center_valid;
 
-    // Restore pose for tests. Automatic procedures assume the machine starts at Safe-Z,
-    // and `atSafeZ()` is intentionally strict.
-    const float safe_z = machine.machineConfig().motion.safe_z;
-    machine.moveTo(start_pose.x, start_pose.y, safe_z);
+    // Ensure config lock from the standalone process is released even if the
+    // tick budget ended before ProcessState::Completed (slower fine-speed M19).
+    machine.setRuntimeConfigLocked(false);
+    machine.setCommunicationWatchdogEnabled(false);
+
+    // Restore pre-calib pose. ProcedureController raises to dynamic Safe-Z on start.
+    // Note: moveTo clears isHomed (at-home flag) but keeps HomingState::Homed
+    // (coordinate reference) so a subsequent homeMachine can restore at-home.
+    machine.moveTo(start_pose.x, start_pose.y, start_pose.z);
     for (int i = 0; i < 600 && machine.motionState() != MotionState::AtTarget; ++i)
     {
         machine.setHostInputs(withFreshForce(HostInputs{}));
         machine.tick(0.05f);
     }
 
-    return ok;
+    if (!ok)
+    {
+        return false;
+    }
+
+    // Procedure start requires isHomed (at home pose) — re-home after M19 motion.
+    return homeMachine(machine);
 }

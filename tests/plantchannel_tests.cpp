@@ -145,6 +145,7 @@ static int testSetProbeDisc()
     SimPlant plant;
     const float previous_z = plant.probeDisc().center.z;
     const float previous_thickness = plant.probeDisc().thickness;
+    const float previous_diameter = plant.probeDisc().diameter;
     if (!simplant::applyPlantCommand(plant, command))
     {
         return 26;
@@ -153,7 +154,8 @@ static int testSetProbeDisc()
     {
         return 27;
     }
-    if (!nearEqual(plant.probeDisc().diameter, 9.0f))
+    // Physical sizes are MachineConfig-owned; plant command must not overwrite them.
+    if (!nearEqual(plant.probeDisc().diameter, previous_diameter))
     {
         return 28;
     }
@@ -205,11 +207,45 @@ static int testResponseFormat()
     return 0;
 }
 
+static int testSetForceStiffness()
+{
+    SimPlant plant;
+    if (!nearEqual(plant.forceStiffnessNPerMm(), 5.0f))
+    {
+        return 30;
+    }
+    const PlantCommand cmd =
+        simplant::parsePlantCommand("{\"cmd\":\"setForceStiffness\",\"nPerMm\":2.5}");
+    if (cmd.type != PlantCommandType::SetForceStiffness || !cmd.has_force_stiffness)
+    {
+        return 31;
+    }
+    if (!simplant::applyPlantCommand(plant, cmd))
+    {
+        return 32;
+    }
+    if (!nearEqual(plant.forceStiffnessNPerMm(), 2.5f))
+    {
+        return 33;
+    }
+    const auto state = plant.state(0.0f, 0.0f, 0.0f);
+    if (!nearEqual(state.force_stiffness_n_per_mm, 2.5f))
+    {
+        return 34;
+    }
+    const std::string json = simplant::formatPlantStateResponse(state, 0.0f, 0.0f, 0.0f);
+    if (!contains(json, "forceStiffnessNPerMm"))
+    {
+        return 35;
+    }
+    return 0;
+}
+
 int main()
 {
     const int results[] = {
         testParseUnknown(), testSetLimits(), testTriggerProbe(), testSetEStop(), testSetProbeDisc(),
-        testResponseFormat(),
+        testSetForceStiffness(), testResponseFormat(),
     };
 
     for (const int result : results)

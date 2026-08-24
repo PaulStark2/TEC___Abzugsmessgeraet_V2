@@ -232,6 +232,8 @@ void ProbeSearch::commandDescend(Machine& machine)
 {
     const TestPoint start = startPose();
     const TestPoint target = searchTarget();
+    // Prep Z into the search plane is still outside contact risk along the search
+    // axis — use approach speed. Slow speeds apply only in FastSearch/FineSearch.
     machine.setActiveVelocity(request_.approach_speed);
     machine.setCollisionContext(CollisionContext::Contact);
     machine.moveTo(start.x, start.y, target.z);
@@ -254,10 +256,12 @@ void ProbeSearch::commandBackoff(Machine& machine, const TestPoint& trigger_pose
 
 void ProbeSearch::commandRetreat(Machine& machine)
 {
-    const float approach_z = request_.reference.z + request_.approach_distance;
+    // Clear laterally to this direction's start pose (outer offset @ approach_z)
+    // before Complete, so the next direction does not skim past the disc.
+    const TestPoint clear = startPose();
     machine.setCollisionContext(CollisionContext::Approach);
     machine.setActiveVelocity(request_.approach_speed);
-    machine.moveTo(machine.x(), machine.y(), approach_z);
+    machine.moveTo(clear.x, clear.y, clear.z);
 }
 
 void ProbeSearch::enterError()

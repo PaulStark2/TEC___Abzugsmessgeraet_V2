@@ -47,12 +47,16 @@ function renderProgramSummary(summary) {
         Punkte: <b>${escapeHtml(count)}</b>
       </p>
       <p class="placeholder-note">
+        Koordinaten sind <b>Bauplatten-Koordinaten</b> (nicht Maschinenkoordinaten).
+        Zur Bestimmung der Maschinenpositionen muss die Bauplatte kalibriert sein.
+      </p>
+      <p class="placeholder-note">
         X-Bereich: ${escapeHtml(summary.xRange.min)} … ${escapeHtml(summary.xRange.max)}<br/>
         Y-Bereich: ${escapeHtml(summary.yRange.min)} … ${escapeHtml(summary.yRange.max)}<br/>
         Z-Bereich: ${escapeHtml(summary.zRange.min)} … ${escapeHtml(summary.zRange.max)}
       </p>
 
-      <h4>Geladene Prüfstellen (${count})</h4>
+      <h4>Geladene Prüfstellen (${count}) — Bauplatten-Koordinaten [mm]</h4>
       ${
         points.length
           ? `
@@ -60,7 +64,7 @@ function renderProgramSummary(summary) {
           <table class="program-table">
             <thead>
               <tr>
-                <th>#</th><th>Name</th><th>Seq</th><th>X</th><th>Y</th><th>Z</th>
+                <th>#</th><th>Name</th><th>Seq</th><th>X (Plate)</th><th>Y (Plate)</th><th>Z (Plate)</th>
               </tr>
             </thead>
             <tbody>

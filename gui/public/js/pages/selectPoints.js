@@ -43,7 +43,7 @@ function renderConfirmedSummary(selection) {
         <table class="program-table">
           <thead>
             <tr>
-              <th>Seq</th><th>Name</th><th>X</th><th>Y</th><th>Z</th>
+              <th>Seq</th><th>Name</th><th>X (Plate)</th><th>Y (Plate)</th><th>Z (Plate)</th>
             </tr>
           </thead>
           <tbody>
@@ -180,6 +180,12 @@ export function renderSelectPoints(container) {
       </p>
 
       <div class="placeholder-note selection-3d-hint">
+        Koordinaten sind <strong>Bauplatten-Koordinaten</strong> (nicht Maschinenkoordinaten).
+        Maschinenpositionen entstehen erst nach gültiger Bauplatten-Kalibrierung
+        (<code>plate_origin</code>).
+      </div>
+
+      <div class="placeholder-note selection-3d-hint">
         <strong>3D-Auswahl (Platzhalter):</strong> Interaktive Punktauswahl in der 3D-Ansicht ist
         für einen späteren Meilenstein vorgesehen (nicht G6). Aktuell nur Listen-Auswahl.
       </div>
@@ -196,9 +202,9 @@ export function renderSelectPoints(container) {
             <th>Auswahl</th>
             <th>Seq</th>
             <th>Name</th>
-            <th>X</th>
-            <th>Y</th>
-            <th>Z</th>
+            <th>X (Plate)</th>
+            <th>Y (Plate)</th>
+            <th>Z (Plate)</th>
           </tr>
         </thead>
         <tbody>

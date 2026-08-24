@@ -24,6 +24,8 @@ const {
   NackErrorCode,
   DecodeResult,
   NO_CURRENT_POINT_INDEX,
+  HomingState,
+  StatusFlag,
 } = require('./protocolTypes');
 const { FrameStreamBuffer } = require('./frameStreamBuffer');
 
@@ -62,7 +64,7 @@ function replyAck(socket, messageId, resultCode = AckResultCode.Ok) {
   socket.write(ack.frame);
 }
 
-function startMockHost(handler) {
+function startMockHost(handler, helloOverrides = {}) {
   return new Promise((resolve, reject) => {
     /** @type {import('net').Socket[]} */
     const sockets = [];
@@ -70,7 +72,10 @@ function startMockHost(handler) {
       sockets.push(socket);
       const stream = new FrameStreamBuffer();
 
-      const hello = encodeFrame(MessageId.MsgStatusReport, makeStatusPayload({ x: 1, y: 2, z: 3 }));
+      const hello = encodeFrame(
+        MessageId.MsgStatusReport,
+        makeStatusPayload({ x: 1, y: 2, z: 3, ...helloOverrides })
+      );
       socket.write(hello.frame);
 
       socket.on('data', (chunk) => {
@@ -99,6 +104,7 @@ function startMockHost(handler) {
       resolve({
         server,
         port,
+        sockets,
         dropClients() {
           for (const s of [...sockets]) {
             s.destroy();
@@ -407,6 +413,87 @@ async function testJogMapsToMoveTo() {
   }
 }
 
+async function testMeasuredHomeLatchFromHomingComplete() {
+  const { server, port, sockets } = await startMockHost(() => {});
+  try {
+    await withClient(port, async (client) => {
+      assert.strictEqual(client.getStatus().measuredHome, null);
+      const socket = sockets[0];
+      socket.write(
+        encodeFrame(
+          MessageId.MsgStatusReport,
+          makeStatusPayload({
+            homingState: HomingState.HomingY,
+            x: 5,
+            y: 5,
+            z: 5,
+          })
+        ).frame
+      );
+      await sleep(50);
+      socket.write(
+        encodeFrame(
+          MessageId.MsgStatusReport,
+          makeStatusPayload({
+            homingState: HomingState.Homed,
+            flags: 1 << StatusFlag.IsHomed,
+            x: 2.25,
+            y: 2.5,
+            z: 2.75,
+          })
+        ).frame
+      );
+      await sleep(50);
+      const home = client.getStatus().measuredHome;
+      assert.ok(home);
+      assert.ok(Math.abs(home.x - 2.25) < 1e-4);
+      assert.ok(Math.abs(home.y - 2.5) < 1e-4);
+      assert.ok(Math.abs(home.z - 2.75) < 1e-4);
+
+      socket.write(
+        encodeFrame(
+          MessageId.MsgStatusReport,
+          makeStatusPayload({
+            homingState: HomingState.Homed,
+            flags: 1 << StatusFlag.IsHomed,
+            x: 40,
+            y: 1,
+            z: 8,
+          })
+        ).frame
+      );
+      await sleep(50);
+      const later = client.getStatus();
+      assert.ok(Math.abs(later.x - 40) < 1e-4);
+      assert.ok(Math.abs(later.measuredHome.x - 2.25) < 1e-4);
+      assert.ok(Math.abs(later.measuredHome.y - 2.5) < 1e-4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+async function testAlreadyHomedDoesNotLatchLivePose() {
+  const { server, port } = await startMockHost(
+    () => {},
+    {
+      homingState: HomingState.Homed,
+      flags: 1 << StatusFlag.IsHomed,
+      x: 40,
+      y: 0,
+      z: 8,
+    }
+  );
+  try {
+    await withClient(port, async (client) => {
+      assert.strictEqual(client.getStatus().measuredHome, null);
+      assert.ok(Math.abs(client.getStatus().x - 40) < 1e-4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
 async function testCloseStopsReconnect() {
   const { server, port } = await startMockHost(() => {});
   const client = createProtocolMachineClient({ host: '127.0.0.1', port, ackTimeoutMs: 500 });
@@ -429,6 +516,8 @@ async function main() {
   await testReconnectAllowsCommandsAgain();
   await testPneumaticAndSetSpeed();
   await testJogMapsToMoveTo();
+  await testMeasuredHomeLatchFromHomingComplete();
+  await testAlreadyHomedDoesNotLatchLivePose();
   await testCloseStopsReconnect();
   console.log('protocolMachineClient.test.js: PASS');
 }

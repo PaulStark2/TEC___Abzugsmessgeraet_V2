@@ -13,6 +13,12 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.motion.v_measure = p.v_measure;
     cfg.motion.v_homing = p.v_homing;
     cfg.motion.acceleration = p.acceleration;
+    cfg.motion.phase1_v_extract = p.phase1_v_extract;
+    cfg.motion.phase1_v_insert = p.phase1_v_insert;
+    cfg.motion.phase2_v_extract = p.phase2_v_extract;
+    cfg.motion.phase2_v_insert = p.phase2_v_insert;
+    cfg.motion.phase3_v_extract = p.phase3_v_extract;
+    cfg.motion.phase3_v_insert = p.phase3_v_insert;
     cfg.force.force_filter = p.force_filter;
     cfg.force.xy_tolerance_N = p.xy_tolerance_N;
     cfg.force.xy_correction_step = p.xy_correction_step;
@@ -49,7 +55,7 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.probe.num_fine_searches = p.num_fine_searches;
     cfg.calibration.home_offset = TestPoint{p.home_offset_x, p.home_offset_y, p.home_offset_z};
     cfg.calibration.tool_offset = TestPoint{p.tool_offset_x, p.tool_offset_y, p.tool_offset_z};
-    cfg.motion.safe_z = p.safe_z;
+    cfg.motion.safe_z_buffer = p.safe_z_buffer;
     cfg.force.sample_timeout_s = p.sample_timeout_s;
     cfg.communication.heartbeat_timeout_s = p.heartbeat_timeout_s;
     cfg.force.xy_correct_timeout_s = p.xy_correct_timeout_s;
@@ -64,6 +70,12 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.v_measure = cfg.motion.v_measure;
     p.v_homing = cfg.motion.v_homing;
     p.acceleration = cfg.motion.acceleration;
+    p.phase1_v_extract = cfg.motion.phase1_v_extract;
+    p.phase1_v_insert = cfg.motion.phase1_v_insert;
+    p.phase2_v_extract = cfg.motion.phase2_v_extract;
+    p.phase2_v_insert = cfg.motion.phase2_v_insert;
+    p.phase3_v_extract = cfg.motion.phase3_v_extract;
+    p.phase3_v_insert = cfg.motion.phase3_v_insert;
     p.force_filter = cfg.force.force_filter;
     p.xy_tolerance_N = cfg.force.xy_tolerance_N;
     p.xy_correction_step = cfg.force.xy_correction_step;
@@ -92,7 +104,7 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.tool_offset_x = cfg.calibration.tool_offset.x;
     p.tool_offset_y = cfg.calibration.tool_offset.y;
     p.tool_offset_z = cfg.calibration.tool_offset.z;
-    p.safe_z = cfg.motion.safe_z;
+    p.safe_z_buffer = cfg.motion.safe_z_buffer;
     p.sample_timeout_s = cfg.force.sample_timeout_s;
     p.heartbeat_timeout_s = cfg.communication.heartbeat_timeout_s;
     p.xy_correct_timeout_s = cfg.force.xy_correct_timeout_s;

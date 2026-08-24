@@ -70,6 +70,8 @@ plant channel on port 8767, and the hierarchical gantry visualization.
 ## Soft limits and homing (M16)
 
 End stops block only the affected axis direction. Homing is Z+ → X+ → Y+.
+At each +max switch the software axis pose is re-referenced (open-loop); after
+retract the axis is at machine home (0). See [`docs/Homing.md`](Homing.md).
 The M12 StatusReport is 41 bytes (`homingState`, `blockedDirections`, `flags`,
 `procedurePhase`, `faultReason`, `spreaderState`); `CmdHome` is `0x15`. See
 [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md),

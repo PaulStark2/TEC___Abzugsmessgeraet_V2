@@ -550,15 +550,45 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin: 0.75rem 0;
-  padding: 0.75rem 1rem;
+  padding: 0.85rem 1.1rem 1rem;
 }
 
 .param-field {
   display: grid;
-  grid-template-columns: minmax(8rem, 14rem) 8rem auto auto 1fr;
-  gap: 0.5rem 0.75rem;
+  grid-template-columns: minmax(10rem, 18rem) minmax(7rem, 10rem) auto auto 1fr;
+  gap: 0.55rem 1rem;
   align-items: center;
-  margin: 0.4rem 0;
+  margin: 0.55rem 0;
+}
+
+.param-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.param-tab {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+.param-tab--active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.param-editor-layout {
+  max-width: none;
+  width: 100%;
+}
+
+.page-panel {
+  max-width: none;
 }
 
 .param-field__future {
@@ -583,4 +613,39 @@ button:disabled {
   background: #1a1d21;
   border: 1px solid var(--border);
   border-radius: 4px;
+}
+
+.homing-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.homing-gate-dialog {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  max-width: 28rem;
+  width: calc(100% - 2rem);
+}
+
+.homing-gate-dialog h3 {
+  margin: 0 0 0.75rem;
+}
+
+.homing-gate-dialog p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.homing-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }

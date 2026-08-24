@@ -10,6 +10,8 @@
 #include "TestConfiguration.hpp"
 #include "Types.hpp" // MachineState and MotionState
 
+#include <functional>
+
 #include <cstdint>
 
 // Machine provides the overgeordneten Betriebszustandsautomaten über MotionPlanner. // state machine
@@ -59,6 +61,10 @@ public:
     HomingState homingState() const;
     bool isHomed() const;
 
+    // After Soft-STOP of an automatic process: reference is no longer trusted for a
+    // new procedure start (operator must Home again). Does not clear measuredHome.
+    void invalidateHoming();
+
     // Bitmask of directions currently blocked by soft limits (6 bits, kLimitDir*).
     uint8_t blockedDirections() const;
 
@@ -71,6 +77,14 @@ public:
     // Return the last host inputs snapshot (M9: read force without evaluation). // get inputs
     const HostInputs& hostInputs() const; // getter
 
+    // Optional simulation hook:
+    // A caller may register a callback that recomputes/refreshes hostInputs
+    // after the machine advanced motion for this tick.
+    // Core logic calls this at a deterministic point in ProcedureController::tick.
+    using HostInputUpdateCallback = std::function<void(Machine&)>;
+    void setHostInputUpdateCallback(HostInputUpdateCallback cb);
+    void invokeHostInputUpdateCallback();
+
     // Provide current host outputs snapshot (placeholders in M5). // query outputs
     HostOutputs hostOutputs() const; // getter
 
@@ -78,10 +92,28 @@ public:
     void moveTo(float x, float y, float z); // delegate
 
     // Start Core homing sequence Z+ → X+ → Y+ (M16).
+    // If MCS is not yet defined, this performs defineMachineCoordinateSystem() once.
+    // If MCS is defined, re-applies the stored frame at the switches (step-loss correction)
+    // without redefining the origin or touching probe/plate/tool_offset.
     bool home();
+
+    // Explicit one-shot MCS definition (same motion SM as home). Sets
+    // machine_coordinate_system_valid and latches CalibrationSet.home_offset.
+    // Intentional re-definition clears plate/probe validity (geometry must be re-taught).
+    bool defineMachineCoordinateSystem();
+
+    bool machineCoordinateSystemValid() const;
+
+    // Test helper: open-loop step loss without clearing MCS offsets.
+    void shiftRawPose(float dx, float dy, float dz);
 
     // Non-blocking progress update. // step
     void tick(float dt); // no blocking
+
+    // Split tick used by ProcedureController so Pose(t) and Force(t) share a sample:
+    //   advanceKinematics → host-input refresh → evaluateHostSafety → phase handler
+    void advanceKinematics(float dt);
+    void evaluateHostSafety(float dt);
 
     // Pause motion if Active, resume only from Paused. // pause
     void pause(); // command
@@ -98,9 +130,25 @@ public:
     void setFixtureExtend(bool extend); // Bauplattenhalter offen/geschlossen
 
     // Pose getters (delegated from MotionPlanner). // read pose
-    float x() const; // getter
-    float y() const; // getter
-    float z() const; // getter
+    float x() const; // machine-frame
+    float y() const;
+    float z() const;
+    float zVelocity() const;
+
+    // Continuous commanded/raw pose (unchanged by machine re-reference).
+    float rawX() const;
+    float rawY() const;
+    float rawZ() const;
+
+    // machine = raw - referenceOffset
+    float referenceOffsetX() const;
+    float referenceOffsetY() const;
+    float referenceOffsetZ() const;
+
+    // Snap MotionPlanner/Axis pose (open-loop re-reference or test injection).
+    // Does not run Homing. Clears isHomed when leaving the latched home pose.
+    // Keeps HomingState::Homed (coordinate reference still established).
+    void setCurrentPose(float x, float y, float z);
 
     // M17 RAM copies of writable config / taught calibration (not SafetyLimits).
     bool trySetMachineConfig(const MachineConfig& incoming, ConfigValidationError& error);
@@ -173,8 +221,10 @@ private:
     // M16 homing.
     HomingState homing_state_;
     bool is_homed_;
+    bool homing_retracting_;
     static constexpr float kHomingVelocity = 5.0f;
     static constexpr float kHomingOvershoot = 1000.0f;
+    static constexpr float kDefaultHomingRetract = 2.0f; // mm from +max when config retract is 0
 
     MachineConfig machine_config_;
     TestConfiguration test_configuration_;
@@ -204,6 +254,8 @@ private:
     HostInputs host_inputs_; // last inputs
     HostOutputs host_outputs_; // produced outputs
 
+    HostInputUpdateCallback host_input_update_callback_{};
+
     // M11 safety helpers.
     void enterSafetyFault(FaultReason reason); // stopMotion + latched Fault
     void applySpreaderSafeState(); // valve off; do not invent a retracted pose
@@ -216,11 +268,22 @@ private:
     uint8_t activeLimitSwitchMask() const;
 
     // M16 homing tick and phase transitions.
+    enum class HomingMode : uint8_t
+    {
+        DefineMcs = 0, // establish MCS at switches (identity snap); latch home_offset
+        Reference = 1  // re-apply stored MCS (switch = home + R); keep probe/plate
+    };
+
     void tickHoming(float dt);
+    bool startHomingSequence(HomingMode mode);
     void beginHomingPhase(HomingState phase);
+    void beginHomingRetract(HomingState phase);
+    float homingRetractDistance(float configured) const;
     bool homingPhaseLimitReached(HomingState phase) const;
     void finishHomingSuccess();
     void finishHomingError();
+
+    HomingMode homing_mode_;
 
     void tickActiveMotion(float dt);
 };

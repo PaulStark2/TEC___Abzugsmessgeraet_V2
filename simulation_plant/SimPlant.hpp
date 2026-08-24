@@ -34,6 +34,10 @@ struct PlantState
 {
     PlantLimits limits;
     ProbeDisc probe;
+    // Continuous plant/TCP pose used for visualization and limit sampling (raw).
+    float tcp_x = 0.0f;
+    float tcp_y = 0.0f;
+    float tcp_z = 0.0f;
     bool limit_x_min = false;
     bool limit_x_max = false;
     bool limit_y_min = false;
@@ -47,6 +51,7 @@ struct PlantState
     float probe_trigger_y = 0.0f;
     float probe_trigger_z = 0.0f;
     std::uint32_t probe_trigger_sequence = 0;
+    float force_stiffness_n_per_mm = 5.0f;
 };
 
 class SimPlant
@@ -64,6 +69,11 @@ public:
     void setEStop(bool active);
     bool eStop() const;
 
+    // Simulation-only tensile stiffness [N/mm]. Applied by SimProtocolBridge during
+    // InsertInitial / OptimizeInsert / TestOrAge (not by sample() itself).
+    void setForceStiffnessNPerMm(float k);
+    float forceStiffnessNPerMm() const;
+
     void advance(float dt);
 
     HostInputs sample(float x, float y, float z) const;
@@ -77,6 +87,7 @@ private:
     float probe_pulse_seconds_ = kDefaultProbePulseSeconds;
     float probe_remaining_ = 0.0f;
     bool e_stop_ = false;
+    float force_stiffness_n_per_mm_ = 5.0f; // default: 50 N within 10 mm insert search
     mutable std::uint32_t force_sample_sequence_ = 0;
     mutable bool prev_probe_contact_ = false;
     mutable std::uint32_t probe_trigger_sequence_ = 0;

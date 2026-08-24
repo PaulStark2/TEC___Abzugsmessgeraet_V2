@@ -65,10 +65,21 @@ export function renderParameters(container) {
   }
 
   function renderEditor(groups, config) {
+    const tabs = groups
+      .map(
+        (group, idx) => `
+      <button type="button" class="param-tab ${idx === 0 ? 'param-tab--active' : ''}" data-group="${escapeHtml(
+          group.id || group.title
+        )}">${escapeHtml(group.title)}</button>`
+      )
+      .join('');
+
     const sections = groups
       .map(
-        (group) => `
-      <fieldset class="param-group">
+        (group, idx) => `
+      <fieldset class="param-group" data-group-panel="${escapeHtml(group.id || group.title)}" ${
+          idx === 0 ? '' : 'hidden'
+        }>
         <legend>${escapeHtml(group.title)}</legend>
         ${group.fields
           .map(
@@ -106,14 +117,30 @@ export function renderParameters(container) {
       .join('');
 
     contentEl.innerHTML = `
-      <form id="param-form" class="control-form">
-        ${sections}
-        <div class="control-actions page-actions">
-          <button type="submit">Speichern und an Controller senden</button>
-          <button type="button" class="btn-back" data-route="menu">Zurück</button>
-        </div>
-      </form>
+      <div class="param-editor-layout">
+        <div class="param-tabs" role="tablist">${tabs}</div>
+        <form id="param-form" class="control-form">
+          ${sections}
+          <div class="control-actions page-actions">
+            <button type="submit">Speichern und an Controller senden</button>
+            <button type="button" class="btn-back" data-route="menu">Zurück</button>
+          </div>
+        </form>
+      </div>
     `;
+
+    contentEl.querySelectorAll('.param-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const activeId = btn.getAttribute('data-group');
+        contentEl.querySelectorAll('.param-tab').forEach((b) => {
+          b.classList.toggle('param-tab--active', b === btn);
+        });
+        contentEl.querySelectorAll('[data-group-panel]').forEach((panel) => {
+          panel.hidden = panel.getAttribute('data-group-panel') !== activeId;
+        });
+      });
+    });
+
     contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
     contentEl.querySelector('#param-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();

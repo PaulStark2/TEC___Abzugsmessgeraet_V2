@@ -46,10 +46,16 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
 {
     if (!velocityOk(config.motion.v_approach) || !velocityOk(config.motion.v_slow) ||
         !velocityOk(config.motion.v_measure) || !velocityOk(config.motion.v_homing) ||
+        !velocityOk(config.motion.phase1_v_extract) || !velocityOk(config.motion.phase1_v_insert) ||
+        !velocityOk(config.motion.phase2_v_extract) || !velocityOk(config.motion.phase2_v_insert) ||
+        !velocityOk(config.motion.phase3_v_extract) || !velocityOk(config.motion.phase3_v_insert) ||
         !velocityOk(config.probe.search_speed) || !velocityOk(config.probe.fine_search_speed))
     {
         if (config.motion.v_approach <= 0.0f || config.motion.v_slow <= 0.0f ||
             config.motion.v_measure <= 0.0f || config.motion.v_homing <= 0.0f ||
+            config.motion.phase1_v_extract <= 0.0f || config.motion.phase1_v_insert <= 0.0f ||
+            config.motion.phase2_v_extract <= 0.0f || config.motion.phase2_v_insert <= 0.0f ||
+            config.motion.phase3_v_extract <= 0.0f || config.motion.phase3_v_insert <= 0.0f ||
             config.probe.search_speed <= 0.0f || config.probe.fine_search_speed <= 0.0f)
         {
             return ConfigValidationError::VelocityNotPositive;
@@ -66,8 +72,9 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
         return ConfigValidationError::AccelerationExceedsSafety;
     }
 
-    if (!std::isfinite(config.motion.safe_z) ||
-        std::fabs(config.motion.safe_z) > SafetyLimits::kMaxAbsSafeZ)
+    // Buffer must be strictly positive so every plate point stays below safe_z_plate.
+    if (!std::isfinite(config.motion.safe_z_buffer) || !(config.motion.safe_z_buffer > 0.0f) ||
+        config.motion.safe_z_buffer > SafetyLimits::kMaxAbsSafeZ)
     {
         return ConfigValidationError::SafeZInvalid;
     }

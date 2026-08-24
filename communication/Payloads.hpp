@@ -121,7 +121,7 @@ struct MachineConfigPayload
     float tool_offset_x;
     float tool_offset_y;
     float tool_offset_z;
-    float safe_z;
+    float safe_z_buffer;
     float sample_timeout_s;
     float heartbeat_timeout_s;
     float xy_correct_timeout_s;
@@ -142,6 +142,13 @@ struct MachineConfigPayload
     float probe_xy_search_margin;
     float insert_search_distance;
     uint16_t num_fine_searches;
+    // Phase-specific extract/insert speeds (independent of approach/probe speeds).
+    float phase1_v_extract;
+    float phase1_v_insert;
+    float phase2_v_extract;
+    float phase2_v_insert;
+    float phase3_v_extract;
+    float phase3_v_insert;
 };
 
 struct TestConfigurationPayload

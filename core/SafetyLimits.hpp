@@ -33,7 +33,7 @@ struct SafetyLimits
     // Force-filter coefficient: 0 = passthrough, (0,1] = exponential smoothing.
     static constexpr float kMaxForceFilter = 1.0f;
 
-    // Safe-Z height [machine units]. Must sit above plate-point Z for XY travel.
+    // Max allowed safe_z_buffer [mm] (clearance above highest plate-frame program Z).
     static constexpr float kMaxAbsSafeZ = 500.0f;
 
     // Force sample freshness window [s]. Stale HostInputs.force → Fault.

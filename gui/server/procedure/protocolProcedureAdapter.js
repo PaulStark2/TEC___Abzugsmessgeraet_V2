@@ -20,6 +20,9 @@ const resultsStore = require('../results/resultsStore');
 const forcePathStore = require('../results/forcePathStore');
 const procedureStore = require('./procedureStore');
 const calibrationStore = require('../config/calibrationStore');
+const machineConfigStore = require('../config/machineConfigStore');
+const { validateProcedureStartPreconditions } = require('./startPreconditions');
+const { validateCoreNotRunningForProcedureStart } = require('./coreProcessGuard');
 const { derivePointProgress } = require('./procedureProgress');
 
 const POLL_MS = 200;
@@ -30,13 +33,16 @@ function createProtocolProcedureAdapter(machineClient) {
   let points = [];
   let observedRows = [];
   let lastPointIndex = null;
+  // After CmdStart, ignore residual Completed/Aborted/Idle from a prior run
+  // (e.g. manual M19 calib) until StatusReport shows Running for this process.
+  let seenRunningSinceStart = false;
 
   function capabilities() {
     return {
       iterationsSupported: true,
       modeSupported: true,
       insertionForceSupported: true,
-      simulatedForces: false,
+      simulatedForces: true,
       procedurePhaseSupported: true,
       forcePathSupported: true,
     };
@@ -45,13 +51,13 @@ function createProtocolProcedureAdapter(machineClient) {
   function notesForParams(p) {
     const list = [
       'Protocol-Backend: Prüf-/Alterungsablauf läuft im Core-ProcedureController.',
-      'Modus, Sollkraft und Iterationen werden per CmdSetTestConfiguration an den Core gesendet.',
+      'Eingliederkraft → Phase 1/2 (target_force_N). Iterationen → nur Phase 3. Phase 2 endet bei Krafttoleranz (MachineConfig).',
     ];
     if (p && p.mode === 'aging') {
-      list.push('Alterung: keine Kraft-Weg-Aufzeichnung, nur Safety-Überwachung.');
+      list.push('Alterung: Phase-3-Zyklen ohne Kraft-Weg-Aufzeichnung, nur Safety-Überwachung.');
     }
     if (p && p.mode === 'test') {
-      list.push('Prüfung: Kraft-Weg-Kurven per MsgForcePathChunk (opportunistisch, Drops möglich).');
+      list.push('Prüfung: Phase-3-Zyklen mit Kraft-Weg-Kurven (MsgForcePathChunk).');
     }
     return list;
   }
@@ -114,7 +120,27 @@ function createProtocolProcedureAdapter(machineClient) {
   function observeStatus() {
     const machineStatus = machineClient.getStatus();
     const connected = isLive();
-    const processState = machineStatus.processState || 'Idle';
+    const rawProcessState = machineStatus.processState || 'Idle';
+    const prev = procedureStore.getStatus();
+    const activeRun = prev.state === 'running' || prev.state === 'paused';
+
+    if (rawProcessState === 'Running') {
+      seenRunningSinceStart = true;
+    }
+
+    // Stale terminal/idle from a previous Core process (e.g. CmdStartProbeCalib)
+    // must not complete a freshly started procedure before Running is observed.
+    let processState = rawProcessState;
+    if (
+      activeRun &&
+      !seenRunningSinceStart &&
+      (rawProcessState === 'Completed' ||
+        rawProcessState === 'Aborted' ||
+        rawProcessState === 'Idle')
+    ) {
+      processState = 'Running';
+    }
+
     const totalPoints = points.length || Number(machineStatus.programPointCount) || 0;
     let currentPointIndex =
       machineStatus.currentPointIndex === null || machineStatus.currentPointIndex === undefined
@@ -126,6 +152,7 @@ function createProtocolProcedureAdapter(machineClient) {
     if (
       connected &&
       processState === 'Running' &&
+      seenRunningSinceStart &&
       machineStatus.currentPointIndex !== null &&
       machineStatus.currentPointIndex !== undefined &&
       machineStatus.currentPointIndex !== lastPointIndex
@@ -149,9 +176,8 @@ function createProtocolProcedureAdapter(machineClient) {
       currentPointIndex = idx;
     }
 
-    const prev = procedureStore.getStatus();
     const nextProcedureState =
-      processState === 'Completed'
+      processState === 'Completed' && seenRunningSinceStart
         ? 'completed'
         : mapGuiState(processState, connected);
     const derived = derivePointProgress({
@@ -202,7 +228,13 @@ function createProtocolProcedureAdapter(machineClient) {
         : 'Controller/Simulation nicht erreichbar — keine Prozedursteuerung möglich',
     });
 
-    if (connected && processState === 'Completed' && prev.state !== 'completed') {
+    // Completion only on observed Running → Completed for this start.
+    if (
+      connected &&
+      processState === 'Completed' &&
+      seenRunningSinceStart &&
+      prev.state !== 'completed'
+    ) {
       clearPoll();
       resultsStore.setResults(buildResultsFromObserved('Completed'));
       procedureStore.patch({
@@ -221,7 +253,13 @@ function createProtocolProcedureAdapter(machineClient) {
       });
     }
 
-    if (connected && processState === 'Aborted' && prev.state !== 'stopped' && prev.state !== 'idle') {
+    if (
+      connected &&
+      processState === 'Aborted' &&
+      seenRunningSinceStart &&
+      prev.state !== 'stopped' &&
+      prev.state !== 'idle'
+    ) {
       clearPoll();
       resultsStore.setResults(buildResultsFromObserved('Aborted'));
       procedureStore.patch({
@@ -244,6 +282,48 @@ function createProtocolProcedureAdapter(machineClient) {
         clearPoll();
       }
     }, POLL_MS);
+  }
+
+  function snapshotProcess() {
+    const s = typeof machineClient.getStatus === 'function' ? machineClient.getStatus() : {};
+    return {
+      processState: s.processState,
+      procedurePhase: s.procedurePhase,
+      machineState: s.machineState,
+      isHomed: s.isHomed,
+      plateOriginValid: s.plateOriginValid,
+      probeCenterValid: s.probeCenterValid,
+      programPointCount: s.programPointCount,
+    };
+  }
+
+  function ackCodeName(result) {
+    if (!result) return 'none';
+    if (Object.prototype.hasOwnProperty.call(result, 'resultCode')) {
+      const map = { 0: 'Ok', 1: 'Rejected', 2: 'InvalidState', 3: 'ProgramEmpty', 4: 'FaultLatched' };
+      return map[result.resultCode] || `code=${result.resultCode}`;
+    }
+    if (result.ok) return 'Ok';
+    if (result.error && String(result.error).includes('Invalid state')) return 'InvalidState';
+    if (result.error && String(result.error).includes('Program empty')) return 'ProgramEmpty';
+    return result.ok ? 'Ok' : 'Error';
+  }
+
+  async function runStartCommand(label, fn) {
+    const before = snapshotProcess();
+    console.log(`[ProcedureStart] sending ${label} | processState=${before.processState} phase=${before.procedurePhase}`);
+    const result = await fn();
+    const after = snapshotProcess();
+    const code = ackCodeName(result);
+    console.log(
+      `[ProcedureStart] received ${label} -> ${code} | processState=${after.processState} ` +
+        `phase=${after.procedurePhase} isHomed=${after.isHomed} plateValid=${after.plateOriginValid} ` +
+        `probeValid=${after.probeCenterValid} programPoints=${after.programPointCount}`
+    );
+    if (!result || !result.ok) {
+      console.error(`[ProcedureStart] FAIL at ${label}:`, (result && result.error) || 'unknown', after);
+    }
+    return result;
   }
 
   async function start(body) {
@@ -278,21 +358,43 @@ function createProtocolProcedureAdapter(machineClient) {
     if (!Number.isFinite(insertionForce) || !(insertionForce > 0)) {
       return { ok: false, error: 'insertionForce must be a positive number' };
     }
+    if (insertionForce > 50) {
+      return { ok: false, error: 'insertionForce must be <= 50 N' };
+    }
     if (!Number.isInteger(iterations) || iterations < 1) {
       return { ok: false, error: 'iterations must be an integer >= 1' };
     }
 
     const calib = calibrationStore.load();
-    if (!calib.plateOriginValid || !calib.plateOrigin) {
-      return {
-        ok: false,
-        error: 'Bauplatten-Ursprung nicht gesetzt — bitte unter Kalibrieren einmessen',
-      };
+    const machineCfg = machineConfigStore.load();
+    const preflight = validateProcedureStartPreconditions({
+      calibration: calib,
+      machineConfig: machineCfg,
+      points: selection.points,
+    });
+    if (!preflight.ok) {
+      return { ok: false, error: preflight.error };
     }
 
     const current = procedureStore.getStatus();
     if (current.state === 'running' || current.state === 'paused') {
       return { ok: false, error: 'Procedure already active' };
+    }
+
+    // Core process may be Running (e.g. manual M19) while the GUI procedure store is still idle.
+    // Refuse before any CmdSet* / CmdLoad / CmdStart — do not auto-stop the running process.
+    const coreBusy = validateCoreNotRunningForProcedureStart(snapshotProcess());
+    if (!coreBusy.ok) {
+      console.log('[ProcedureStart] blocked: core process still Running', {
+        procedurePhase: coreBusy.procedurePhase,
+        kind: coreBusy.kind,
+      });
+      return {
+        ok: false,
+        error: coreBusy.error,
+        code: coreBusy.code,
+        status: procedureStore.getStatus(),
+      };
     }
 
     points = selection.points.map((p) => ({ ...p }));
@@ -302,57 +404,104 @@ function createProtocolProcedureAdapter(machineClient) {
     resultsStore.clear();
     forcePathStore.clear();
 
-    if (typeof machineClient.setPlateOrigin === 'function') {
-      const origin = await machineClient.setPlateOrigin(
-        calib.plateOrigin.x,
-        calib.plateOrigin.y,
-        calib.plateOrigin.z
+    console.log('[ProcedureStart] begin chain', {
+      mode,
+      insertionForce,
+      iterations,
+      pointCount: points.length,
+      maxPointZ: Math.max(...points.map((p) => Number(p.z)).filter(Number.isFinite)),
+      safe_z_buffer: machineCfg.safe_z_buffer,
+      plateOrigin: calib.plateOrigin,
+      probeCenter: calib.probeCenter,
+      snapshot: snapshotProcess(),
+    });
+
+    if (typeof machineClient.setMachineConfig === 'function') {
+      const cfgPush = await runStartCommand('CmdSetMachineConfig', () =>
+        machineClient.setMachineConfig(machineCfg)
       );
-      if (!origin || !origin.ok) {
+      if (!cfgPush || !cfgPush.ok) {
+        const detail = (cfgPush && cfgPush.error) || 'CmdSetMachineConfig failed';
         return {
           ok: false,
-          error: (origin && origin.error) || 'CmdSetPlateOrigin failed',
+          error: `CmdSetMachineConfig: ${detail}`,
+          status: procedureStore.getStatus(),
+        };
+      }
+    }
+
+    if (typeof machineClient.setPlateOrigin === 'function') {
+      const origin = await runStartCommand('CmdSetPlateOrigin', () =>
+        machineClient.setPlateOrigin(calib.plateOrigin.x, calib.plateOrigin.y, calib.plateOrigin.z)
+      );
+      if (!origin || !origin.ok) {
+        const detail = (origin && origin.error) || 'CmdSetPlateOrigin failed';
+        return {
+          ok: false,
+          error: `CmdSetPlateOrigin: ${detail}`,
+          status: procedureStore.getStatus(),
+        };
+      }
+    }
+
+    if (typeof machineClient.setProbeCenter === 'function') {
+      const probe = await runStartCommand('CmdSetProbeCenter', () =>
+        machineClient.setProbeCenter(calib.probeCenter.x, calib.probeCenter.y, calib.probeCenter.z)
+      );
+      if (!probe || !probe.ok) {
+        const detail = (probe && probe.error) || 'CmdSetProbeCenter failed';
+        return {
+          ok: false,
+          error: `CmdSetProbeCenter: ${detail}`,
           status: procedureStore.getStatus(),
         };
       }
     }
 
     if (typeof machineClient.setTestConfiguration === 'function') {
-      const cfg = await machineClient.setTestConfiguration({
-        mode: mode === 'aging' ? 1 : 0,
-        target_force_N: insertionForce,
-        iterations,
-        active_point_index: 0,
-      });
+      const cfg = await runStartCommand('CmdSetTestConfiguration', () =>
+        machineClient.setTestConfiguration({
+          mode: mode === 'aging' ? 1 : 0,
+          target_force_N: insertionForce,
+          iterations,
+          active_point_index: 0,
+        })
+      );
       if (!cfg || !cfg.ok) {
+        const detail = (cfg && cfg.error) || 'CmdSetTestConfiguration failed';
         return {
           ok: false,
-          error: (cfg && cfg.error) || 'CmdSetTestConfiguration failed',
+          error: `CmdSetTestConfiguration: ${detail}`,
           status: procedureStore.getStatus(),
         };
       }
     }
 
-    const load = await machineClient.loadProgram(
-      points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+    const load = await runStartCommand('CmdLoadProgram', () =>
+      machineClient.loadProgram(points.map((p) => ({ x: p.x, y: p.y, z: p.z })))
     );
     if (!load || !load.ok) {
+      const detail = (load && load.error) || 'CmdLoadProgram failed';
       return {
         ok: false,
-        error: (load && load.error) || 'CmdLoadProgram failed',
+        error: `CmdLoadProgram: ${detail}`,
         status: procedureStore.getStatus(),
       };
     }
 
-    const started = await machineClient.start();
+    const started = await runStartCommand('CmdStart', () => machineClient.start());
     if (!started || !started.ok) {
+      const detail = (started && started.error) || 'CmdStart failed';
       return {
         ok: false,
-        error: (started && started.error) || 'CmdStart failed',
+        error: `CmdStart: ${detail}`,
         status: procedureStore.getStatus(),
       };
     }
 
+    console.log('[ProcedureStart] chain complete Ok', snapshotProcess());
+
+    seenRunningSinceStart = false;
     procedureStore.patch({
       state: 'running',
       backend: 'protocol',
@@ -376,6 +525,7 @@ function createProtocolProcedureAdapter(machineClient) {
     });
 
     startPoll();
+    // May still see stale Cached Completed from prior M19/process — must not latch.
     observeStatus();
     return { ok: true, status: procedureStore.getStatus() };
   }
@@ -429,6 +579,11 @@ function createProtocolProcedureAdapter(machineClient) {
   }
 
   function getStatus() {
+    // Protocol adapter always exposes Core TestConfiguration capabilities.
+    procedureStore.patch({
+      backend: 'protocol',
+      capabilities: capabilities(),
+    });
     // Refresh live connection flag on every poll from UI.
     if (params || procedureStore.getStatus().backend === 'protocol') {
       try {

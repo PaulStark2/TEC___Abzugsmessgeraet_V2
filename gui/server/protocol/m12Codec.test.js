@@ -233,7 +233,7 @@ function sampleMachineConfig() {
     tool_offset_x: 0.25,
     tool_offset_y: -0.5,
     tool_offset_z: 1,
-    safe_z: 10,
+    safe_z_buffer: 30,
     sample_timeout_s: 0.5,
     heartbeat_timeout_s: 0.3,
     xy_correct_timeout_s: 2,
@@ -251,6 +251,12 @@ function sampleMachineConfig() {
     probe_offset_reference_y: 0,
     probe_offset_reference_z: 5,
     num_fine_searches: 3,
+    phase1_v_extract: 1,
+    phase1_v_insert: 1,
+    phase2_v_extract: 2,
+    phase2_v_insert: 3,
+    phase3_v_extract: 2,
+    phase3_v_insert: 2,
   };
 }
 
@@ -260,13 +266,14 @@ function testMachineConfigRoundtrip() {
   assert.strictEqual(payload.length, MACHINE_CONFIG_PAYLOAD_WIRE_SIZE);
   const decoded = decodeMachineConfigPayload(payload);
   assert.ok(nearEqual(decoded.tool_offset_z, 1));
-  assert.ok(nearEqual(decoded.safe_z, 10));
+  assert.ok(nearEqual(decoded.safe_z_buffer, 30));
   assert.ok(nearEqual(decoded.heartbeat_timeout_s, 0.3));
   assert.ok(nearEqual(decoded.measuring_head_diameter, 8));
   assert.ok(nearEqual(decoded.tool_cylindrical_height, 15));
   assert.ok(nearEqual(decoded.probe_xy_search_margin, 2));
   assert.ok(nearEqual(decoded.insert_search_distance, 10));
   assert.strictEqual(decoded.num_fine_searches, 3);
+  assert.ok(nearEqual(decoded.phase2_v_insert, 3));
   assert.strictEqual(decoded.max_optimization_iterations, 10);
   const frame = encodeFrame(MessageId.CmdSetMachineConfig, payload);
   assert.ok(frame.ok);

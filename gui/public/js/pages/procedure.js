@@ -5,11 +5,20 @@ import {
   fetchCurrentProgram,
   fetchProgramSelection,
   fetchProcedureStatus,
+  fetchMachineStatus,
   startProcedure,
   pauseProcedure,
   resumeProcedure,
   stopProcedure,
+  sendCommand,
 } from '../api.js';
+import { runWithHomingGate } from '../homingGate.js';
+import {
+  describeRunningCoreProcess,
+  formatProcedurePhaseLabel,
+  isCoreProcessRunning,
+  isProcedureStartButtonDisabled,
+} from '../coreProcessStatus.js';
 
 function escapeHtml(str) {
   return String(str)
@@ -33,6 +42,7 @@ export function renderProcedure(container) {
   const contentEl = container.querySelector('#procedure-content');
   let pollTimer = null;
   let latestStatus = null;
+  let latestMachine = null;
 
   function setFeedback(text, isError) {
     feedbackEl.textContent = text || '';
@@ -82,9 +92,30 @@ export function renderProcedure(container) {
     `;
   }
 
+  function renderCoreProcessBanner(machine) {
+    if (!machine || !isCoreProcessRunning(machine.processState)) {
+      return '';
+    }
+    const described = describeRunningCoreProcess(machine.procedurePhase);
+    return `
+      <div class="progress-card" role="status">
+        <h3>Maschinenstatus</h3>
+        <p class="placeholder-note">
+          ● <b>${escapeHtml(described.processLabel)}</b><br/>
+          Phase: <b>${escapeHtml(described.phaseLabel)}</b>
+        </p>
+        <p class="placeholder-note">
+          Die Prüfprozedur kann erst gestartet werden, wenn dieser Prozess beendet ist.
+        </p>
+      </div>
+    `;
+  }
+
   function renderProgress(status) {
     const p = status.progress || {};
     const complete = p.isComplete || status.state === 'completed';
+    const rawPhase = p.procedurePhase || status.procedurePhase || '';
+    const phaseLabel = formatProcedurePhaseLabel(rawPhase);
     return `
       <div class="progress-card${complete ? ' progress-card--complete' : ''}">
         <h3>Fortschritt</h3>
@@ -98,7 +129,7 @@ export function renderProcedure(container) {
           <b>${escapeHtml(p.totalIterations ?? '—')}</b><br/>
           Punkt: <b>${escapeHtml(p.pointsDone ?? p.currentPointIndex ?? '—')}</b> /
           <b>${escapeHtml(p.totalPoints ?? '—')}</b><br/>
-          Phase: <b>${escapeHtml(p.procedurePhase || status.procedurePhase || '—')}</b><br/>
+          Phase: <b>${escapeHtml(phaseLabel)}</b><br/>
           Fortschritt: <b>${escapeHtml(p.percent ?? 0)}%</b>
         </p>
         <div class="progress-bar" aria-hidden="true">
@@ -113,6 +144,11 @@ export function renderProcedure(container) {
     const selection = await fetchProgramSelection();
     const procedure = await fetchProcedureStatus();
     latestStatus = procedure.status || {};
+    try {
+      latestMachine = await fetchMachineStatus();
+    } catch {
+      latestMachine = null;
+    }
 
     if (!program.ok) {
       contentEl.innerHTML = `
@@ -147,8 +183,14 @@ export function renderProcedure(container) {
     }
 
     const status = latestStatus;
+    const machine = latestMachine || {};
     const active = status.state === 'running' || status.state === 'paused';
     const completed = status.state === 'completed';
+    const coreRunning = isCoreProcessRunning(machine.processState);
+    const startDisabled = isProcedureStartButtonDisabled({
+      procedureState: status.state,
+      coreProcessState: machine.processState,
+    });
     const caps = status.capabilities || {};
 
     contentEl.innerHTML = `
@@ -158,11 +200,12 @@ export function renderProcedure(container) {
       </p>
 
       ${renderCapabilityNotes(status)}
+      ${renderCoreProcessBanner(machine)}
 
       <form id="procedure-form" class="control-form procedure-form">
         <label>
           Modus
-          <select id="procedure-mode" ${active ? 'disabled' : ''}>
+          <select id="procedure-mode" ${active || coreRunning ? 'disabled' : ''}>
             <option value="test" ${(status.params && status.params.mode === 'test') || !status.params ? 'selected' : ''}>Prüfen</option>
             <option value="aging" ${status.params && status.params.mode === 'aging' ? 'selected' : ''}>Altern</option>
           </select>
@@ -170,24 +213,30 @@ export function renderProcedure(container) {
         </label>
         <label>
           Eingliederungskraft [N]
-          <input id="procedure-force" type="number" min="0" step="any"
-            value="${escapeHtml(status.params ? status.params.insertionForce : 50)}"
-            ${active ? 'disabled' : ''} />
+          <input id="procedure-force" type="number" min="1" max="50" step="any"
+            value="${escapeHtml(status.params ? status.params.insertionForce : 5)}"
+            ${active || coreRunning ? 'disabled' : ''} />
           ${!caps.insertionForceSupported ? '<span class="field-hint">Core: nicht unterstützt</span>' : ''}
+          <span class="field-hint">Fachlich 1–50 N. Sim-Steifigkeit (Plant k [N/mm]) getrennt einstellen — Default 5 N/mm erreicht 50 N bei 10 mm Suchweg.</span>
         </label>
         <label>
-          Iterationen
+          Iterationen (nur Phase 3)
           <input id="procedure-iterations" type="number" min="1" step="1"
             value="${escapeHtml(status.params ? status.params.iterations : 1)}"
-            ${active ? 'disabled' : ''} />
-          ${!caps.iterationsSupported ? '<span class="field-hint">Core: nur 1× Punktfolge</span>' : ''}
+            ${active || coreRunning ? 'disabled' : ''} />
+          ${!caps.iterationsSupported ? '<span class="field-hint">Core: nicht unterstützt</span>' : ''}
+          <span class="field-hint">Anzahl der Prüf-/Alterungszyklen in Phase 3. Phase 2 optimiert dynamisch bis Krafttoleranz.</span>
         </label>
       </form>
 
       ${renderProgress(status)}
 
       <div class="control-actions page-actions">
-        <button type="button" id="btn-proc-start" ${active ? 'disabled' : ''}>Start</button>
+        <button type="button" id="btn-proc-start" ${startDisabled ? 'disabled' : ''} title="${
+          coreRunning && !active
+            ? escapeHtml(describeRunningCoreProcess(machine.procedurePhase).startBlockedMessage)
+            : ''
+        }">Prüfprozedur starten</button>
         <button type="button" id="btn-proc-pause" ${status.state === 'running' ? '' : 'disabled'}>Pause</button>
         <button type="button" id="btn-proc-resume" ${status.state === 'paused' ? '' : 'disabled'}>Fortsetzen</button>
         <button type="button" id="btn-proc-stop" ${active || status.state === 'unavailable' ? '' : 'disabled'}>Stop</button>
@@ -212,7 +261,44 @@ export function renderProcedure(container) {
         const mode = contentEl.querySelector('#procedure-mode').value;
         const insertionForce = Number(contentEl.querySelector('#procedure-force').value);
         const iterations = Number(contentEl.querySelector('#procedure-iterations').value);
-        await startProcedure({ mode, insertionForce, iterations });
+
+        const machine = await fetchMachineStatus();
+        const isHomed = machine.isHomed === true;
+
+        const gate = await runWithHomingGate({
+          status: { connected: machine.connected !== false, isHomed },
+          startHoming: () => sendCommand({ command: 'home' }),
+          getStatus: async () => {
+            const st = await fetchMachineStatus();
+            return {
+              connected: st.connected !== false,
+              isHomed: st.isHomed === true,
+              homingState: st.homingState,
+              machineState: st.machineState,
+              eStop: st.eStop === true,
+            };
+          },
+          onHomingStarted: () => {
+            setFeedback('Homing gestartet — warte auf erfolgreichen Abschluss…', false);
+          },
+          action: () => startProcedure({ mode, insertionForce, iterations }),
+        });
+
+        if (gate.result === 'cancelled') {
+          setFeedback('Start abgebrochen — Homing erforderlich.', false);
+          return;
+        }
+        if (gate.result === 'failed') {
+          setFeedback('Homing fehlgeschlagen — Prüfprozedur nicht gestartet.', true);
+          await refresh();
+          return;
+        }
+        if (gate.result === 'timeout') {
+          setFeedback('Homing-Timeout — Prüfprozedur nicht gestartet.', true);
+          await refresh();
+          return;
+        }
+
         setFeedback('Prozedur gestartet.', false);
         await refresh();
         ensurePolling();
@@ -258,11 +344,19 @@ export function renderProcedure(container) {
       setFeedback('Prozedur abgeschlossen — Ergebnisse verfügbar.', false);
     } else if (status.state === 'unavailable') {
       setFeedback(status.error || 'Controller offline.', true);
+    } else if (coreRunning && !active) {
+      setFeedback(describeRunningCoreProcess(machine.procedurePhase).startBlockedMessage, false);
+    }
+
+    if (active || coreRunning) {
+      ensurePolling();
+    } else {
+      clearPoll();
     }
   }
 
   function ensurePolling() {
-    clearPoll();
+    if (pollTimer) return;
     pollTimer = setInterval(() => {
       refresh().catch(() => {});
     }, 500);
@@ -271,7 +365,8 @@ export function renderProcedure(container) {
   refresh()
     .then(() => {
       const state = latestStatus && latestStatus.state;
-      if (state === 'running' || state === 'paused') {
+      const coreRunning = latestMachine && isCoreProcessRunning(latestMachine.processState);
+      if (state === 'running' || state === 'paused' || coreRunning) {
         ensurePolling();
       }
     })

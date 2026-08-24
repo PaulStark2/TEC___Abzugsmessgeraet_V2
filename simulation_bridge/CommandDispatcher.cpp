@@ -9,8 +9,33 @@
 #include "TestProgram.hpp"
 #include "Types.hpp"
 
+#include <cstdio>
+
 namespace simbridge
 {
+
+namespace
+{
+
+void logCmdStartReject(const char* reason, const Machine& machine, const TestExecutor& executor,
+                       uint8_t program_point_count)
+{
+    const CalibrationSet& calib = machine.calibrationSet();
+    std::fprintf(stderr,
+                 "[CmdStart] rejected: %s | program_points=%u isHomed=%d plate_origin_valid=%d "
+                 "probe_center_valid=%d process_state=%u machine_state=%u "
+                 "safe_z_buffer=%.3f plate_origin=(%.3f,%.3f,%.3f) tool_offset.z=%.3f "
+                 "pose=(%.3f,%.3f,%.3f) runtime_locked=%d\n",
+                 reason, static_cast<unsigned>(program_point_count), machine.isHomed() ? 1 : 0,
+                 calib.plate_origin_valid ? 1 : 0, calib.probe_center_valid ? 1 : 0,
+                 static_cast<unsigned>(executor.processState()),
+                 static_cast<unsigned>(machine.machineState()),
+                 machine.machineConfig().motion.safe_z_buffer, calib.plate_origin.x,
+                 calib.plate_origin.y, calib.plate_origin.z, calib.tool_offset.z, machine.x(),
+                 machine.y(), machine.z(), machine.runtimeConfigLocked() ? 1 : 0);
+}
+
+} // namespace
 
 CommandDispatcher::CommandDispatcher(Machine& machine, TestExecutor& executor)
     : machine_(machine)
@@ -128,26 +153,31 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
     {
         if (program_point_count_ == 0)
         {
+            logCmdStartReject("program_empty", machine_, executor_, program_point_count_);
             appendAck(message_id, tecomm::AckResultCode::ProgramEmpty, out);
             break;
         }
         if (!machine_.calibrationSet().plate_origin_valid)
         {
+            logCmdStartReject("plate_origin_valid=false", machine_, executor_, program_point_count_);
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
         if (!machine_.isHomed())
         {
+            logCmdStartReject("isHomed=false", machine_, executor_, program_point_count_);
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
         if (!machine_.calibrationSet().probe_center_valid)
         {
+            logCmdStartReject("probe_center_valid=false", machine_, executor_, program_point_count_);
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
         if (executor_.processState() == ProcessState::Running)
         {
+            logCmdStartReject("process already Running", machine_, executor_, program_point_count_);
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
@@ -157,9 +187,17 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         }
         else
         {
-            // Preserve diagnostic correctness: lack of probe calibration (or
-            // other guard failures in ProcedureController) must not be
-            // misreported as "program empty".
+            // Remaining ProcedureController guards: dynamic Safe-Z unresolved or points not below it.
+            logCmdStartReject("ProcedureController::start()=false (safe_z/program guard)", machine_,
+                              executor_, program_point_count_);
+            std::fprintf(stderr,
+                         "[CmdStart] safe_z_buffer=%.3f plate_origin.z=%.3f tool_offset.z=%.3f "
+                         "plate_origin_valid=%d programPointCount=%u\n",
+                         machine_.machineConfig().motion.safe_z_buffer,
+                         machine_.calibrationSet().plate_origin.z,
+                         machine_.calibrationSet().tool_offset.z,
+                         machine_.calibrationSet().plate_origin_valid ? 1 : 0,
+                         static_cast<unsigned>(program_point_count_));
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
         }
         break;
@@ -364,6 +402,13 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
             break;
         }
         machine_.setPlateOrigin(TestPoint{pose.x, pose.y, pose.z});
+        if (!machine_.calibrationSet().plate_origin_valid)
+        {
+            std::fprintf(stderr,
+                         "[CmdSetPlateOrigin] Ack Ok but plate_origin_valid still false "
+                         "(runtime_locked=%d) — silent no-op in Machine::setPlateOrigin\n",
+                         machine_.runtimeConfigLocked() ? 1 : 0);
+        }
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
     }
@@ -393,7 +438,7 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;
         }
-        if (!machine_.isHomed())
+        if (machine_.homingState() != HomingState::Homed)
         {
             appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
             break;

@@ -16,6 +16,7 @@ const machineConfigStore = require('./config/machineConfigStore');
 const { GROUPS: parameterGroups, validateMachineConfigPayload } = require('./config/parameterCatalog');
 const calibrationStore = require('./config/calibrationStore');
 const forcePathStore = require('./results/forcePathStore');
+const { plantProbeDiscCenterOnly } = require('./coord/physicalGeometry');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -721,19 +722,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && urlPath === '/api/simulation/probe-disc') {
     try {
       const body = await readJsonBody(req);
-      const disc = {};
-      for (const key of ['x', 'y', 'z', 'diameter', 'thickness', 'toolDiameter', 'toolCylindricalHeight']) {
-        if (body[key] !== undefined) {
-          const value = readFiniteNumber(body[key]);
-          if (value === null) {
-            sendJson(res, 400, { ok: false, error: `Invalid ${key}` });
-            return;
-          }
-          disc[key] = value;
-        }
-      }
+      const disc = plantProbeDiscCenterOnly(body);
       if (Object.keys(disc).length === 0) {
-        sendJson(res, 400, { ok: false, error: 'No probe disc values provided' });
+        sendJson(res, 400, {
+          ok: false,
+          error: 'No probe disc position provided (x/y/z). Physical geometry is MachineConfig-only.',
+        });
         return;
       }
       sendPlantResult(res, await plantClient.setProbeDisc(disc));
@@ -751,6 +745,21 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       sendPlantResult(res, await plantClient.setEStop(body.active));
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/simulation/force-stiffness') {
+    try {
+      const body = await readJsonBody(req);
+      const nPerMm = Number(body.nPerMm);
+      if (!Number.isFinite(nPerMm) || nPerMm < 0) {
+        sendJson(res, 400, { ok: false, error: 'nPerMm must be a non-negative number' });
+        return;
+      }
+      sendPlantResult(res, await plantClient.setForceStiffness(nPerMm));
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
     }

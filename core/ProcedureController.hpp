@@ -32,6 +32,8 @@ public:
     bool currentPoint(TestPoint& out) const;
     float insertionZ() const;
     float extractionZ() const;
+    float forceFreeZ() const;
+    unsigned cycleLeg() const;
     ForcePathRecorder& forcePath();
     const ForcePathRecorder& forcePath() const;
     unsigned testIteration() const;
@@ -43,12 +45,13 @@ private:
     bool zMinBlocked() const;
     bool atSafeZ() const;
     bool resolveCurrentMachinePoint();
+    bool resolveSafeZMachine(float& out_safe_z_machine) const;
     bool programPointsBelowSafeZ() const;
     void enterPhase(ProcedurePhase phase);
     void commandRaiseSafeZ();
     void commandTraverseXY(float x, float y);
     void commandLowerToZ(float z);
-    void abortProcess();
+    void abortProcess(const char* reason = "unspecified");
     void setAutomaticProcessGuards(bool active);
     void handleMoveSafePose();
     void handleProbeApproach();
@@ -72,17 +75,20 @@ private:
     ForcePathRecorder force_path_;
     float insertion_z_;
     float extraction_z_;
+    float force_free_z_;
     float point_x_;
     float point_y_;
     unsigned optimize_attempts_;
     unsigned cycle_iteration_;
-    uint8_t cycle_leg_; // 0 = at insertion, 1 = at extraction, 2 = extract then TestOrAge
-    uint8_t approach_leg_; // 0 = Safe-Z, 1 = XY, 2 = lower Z
+    uint8_t cycle_leg_; // phase-specific leg (InsertInitial unload/insert; Optimize/Test; Unclamp)
+    uint8_t approach_leg_; // PointApproach: 0 raise, 1 XY, 2 coarse Z, 3 fine Z; MoveSafeEnd: 0 raise, 2 homing
     TestPoint target_machine_;
     float end_x_;
     float end_y_;
     float preclamp_elapsed_s_;
     int8_t phase2_last_error_sign_;
     unsigned phase2_sign_flips_;
+    float phase2_measured_fz_; // Fz latched at insertion_z after insert leg
+    float phase2_motion_fz_; // last Fz observed while inserting
     bool probe_calib_standalone_;
 };

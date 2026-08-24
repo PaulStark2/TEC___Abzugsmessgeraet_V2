@@ -179,6 +179,20 @@ PlantCommand parsePlantCommand(const std::string& line)
         return command;
     }
 
+    if (name == "setForceStiffness")
+    {
+        command.type = PlantCommandType::SetForceStiffness;
+        if (!extractNumber(line, "nPerMm", command.force_stiffness_n_per_mm))
+        {
+            command.type = PlantCommandType::Unknown;
+        }
+        else
+        {
+            command.has_force_stiffness = true;
+        }
+        return command;
+    }
+
     return command;
 }
 
@@ -247,25 +261,19 @@ bool applyPlantCommand(SimPlant& plant, const PlantCommand& command)
         {
             disc.center.z = command.probe_z;
         }
-        if (command.has_probe_diameter)
-        {
-            disc.diameter = command.probe_diameter;
-        }
-        if (command.has_probe_thickness)
-        {
-            disc.thickness = command.probe_thickness;
-        }
-        if (command.has_tool_diameter)
-        {
-            disc.tool_diameter = command.tool_diameter;
-        }
-        if (command.has_tool_cylindrical_height)
-        {
-            disc.tool_cylindrical_height = command.tool_cylindrical_height;
-        }
+        // Disc center stays plant-owned. Diameter/thickness/tool size follow MachineConfig
+        // via SimProtocolBridge::applyHostInputs — ignore competing plant geometry.
         plant.setProbeDisc(disc);
         return true;
     }
+
+    case PlantCommandType::SetForceStiffness:
+        if (!command.has_force_stiffness || command.force_stiffness_n_per_mm < 0.0f)
+        {
+            return false;
+        }
+        plant.setForceStiffnessNPerMm(command.force_stiffness_n_per_mm);
+        return true;
 
     case PlantCommandType::Unknown:
     default:
@@ -310,6 +318,7 @@ std::string formatPlantStateResponse(const PlantState& state, float x, float y, 
     json += ",\"triggerZ\":" + formatFloat(state.probe_trigger_z) + "}";
     json += ",\"eStop\":";
     json += boolLiteral(state.e_stop);
+    json += ",\"forceStiffnessNPerMm\":" + formatFloat(state.force_stiffness_n_per_mm);
     json += "},\"pose\":{\"x\":" + formatFloat(x);
     json += ",\"y\":" + formatFloat(y);
     json += ",\"z\":" + formatFloat(z) + "}}";

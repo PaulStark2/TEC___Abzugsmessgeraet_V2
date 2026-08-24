@@ -2,6 +2,7 @@
 #include "MotionPlanner.hpp"
 
 #include <cmath>
+#include <vector>
 
 // Compare two floats within a deterministic tolerance.
 static bool nearEqual(float a, float b, float epsilon = 1e-4f)
@@ -255,6 +256,54 @@ int main()
         if (mp_slow.motionState() != MotionState::AtTarget)
         {
             return 24;
+        }
+    }
+
+    // Dry-run sampleWaypointPath matches live moveTo+tick TCP samples.
+    {
+        MotionPlanner live;
+        live.setMotionParams(10.0f, 0.0f);
+        live.setCurrentPose(0.0f, 0.0f, 40.0f);
+
+        MotionPlanner::TcpPose waypoints[] = {
+            {0.0f, 0.0f, 40.0f},
+            {20.0f, 10.0f, 40.0f},
+            {20.0f, 10.0f, 5.0f},
+        };
+
+        const auto planned = live.sampleWaypointPath(waypoints, 3, 10.0f, 0.0f, 0.05f, 30.0f);
+
+        MotionPlanner check;
+        check.setMotionParams(10.0f, 0.0f);
+        check.setCurrentPose(0.0f, 0.0f, 40.0f);
+        std::vector<MotionPlanner::TcpPose> actual;
+        actual.push_back({check.x(), check.y(), check.z()});
+        for (const auto& wp : waypoints)
+        {
+            check.moveTo(wp.x, wp.y, wp.z);
+            while (check.motionState() == MotionState::Moving)
+            {
+                check.tick(0.05f);
+                actual.push_back({check.x(), check.y(), check.z()});
+            }
+        }
+
+        if (planned.size() != actual.size() || planned.empty())
+        {
+            return 30;
+        }
+        for (std::size_t i = 0; i < planned.size(); ++i)
+        {
+            if (!nearEqual(planned[i].x, actual[i].x) || !nearEqual(planned[i].y, actual[i].y) ||
+                !nearEqual(planned[i].z, actual[i].z))
+            {
+                return 31;
+            }
+        }
+        // Live planner pose unchanged by sample.
+        if (!nearEqual(live.x(), 0.0f) || !nearEqual(live.y(), 0.0f) || !nearEqual(live.z(), 40.0f))
+        {
+            return 32;
         }
     }
 

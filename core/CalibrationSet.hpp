@@ -15,7 +15,14 @@ struct CalibrationSet
     // TCP correction in machine coordinates. Replaced on each successful calib:
     // tool_offset = probe_offset_reference - measured_probe. Never accumulated.
     TestPoint tool_offset{0.0f, 0.0f, 0.0f};
-    TestPoint home_offset{0.0f, 0.0f, 0.0f}; // pose applied after successful homing
+
+    // Calibrated MCS home pose (machine frame) after defineMachineCoordinateSystem /
+    // first successful MCS definition. Normal home() returns here without redefining MCS.
+    TestPoint home_offset{0.0f, 0.0f, 0.0f};
+    // Not MachineConfig.calibration.home_offset (that field is retract distance R only).
+
+    // True after MCS has been defined once; normal home() re-applies this frame at the switches.
+    bool machine_coordinate_system_valid = false;
 };
 
 // Overwrite plate origin with the given machine pose and mark it valid.

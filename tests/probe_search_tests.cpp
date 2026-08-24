@@ -250,5 +250,81 @@ int main()
         }
     }
 
+    // Descend (Z prep) uses approach_speed, not fine_speed.
+    {
+        Machine m;
+        ProbeSearch search;
+        ProbeSearch::Request r = zRequest();
+        r.dir = ProbeSearchDir::PosX;
+        r.approach_speed = 20.0f;
+        r.fine_speed = 5.0f;
+        r.num_fine_searches = 0;
+        if (!search.start(m, r))
+        {
+            return 80;
+        }
+        float peak_descend_vz = 0.0f;
+        for (int i = 0; i < 800 && !search.isComplete() && !search.isError(); ++i)
+        {
+            tickNoDisc(m, search);
+            if (search.state() == ProbeSearch::State::Descend)
+            {
+                const float vz = std::fabs(m.zVelocity());
+                if (vz > peak_descend_vz)
+                {
+                    peak_descend_vz = vz;
+                }
+            }
+            if (search.state() == ProbeSearch::State::FastSearch)
+            {
+                break;
+            }
+        }
+        if (peak_descend_vz < 15.0f)
+        {
+            return 81; // should be ~approach_speed, not ~fine_speed
+        }
+    }
+
+    // Retreat clears to startPose (lateral_offset), not merely raise Z at contact XY.
+    {
+        Machine m;
+        ProbeSearch search;
+        ProbeSearch::Request r = zRequest();
+        r.dir = ProbeSearchDir::PosX;
+        r.num_fine_searches = 0;
+        if (!search.start(m, r) || !runUntilDone(search, m, disc, 1200))
+        {
+            return 90;
+        }
+        const float expected_x = disc.x + r.lateral_offset;
+        const float expected_z = disc.z + r.approach_distance;
+        if (!nearEqual(m.x(), expected_x, 0.8f) || !nearEqual(m.y(), disc.y, 0.8f) ||
+            !nearEqual(m.z(), expected_z, 0.8f))
+        {
+            return 91;
+        }
+    }
+
+    // Symmetry: +Y retreat also ends at its startPose.
+    {
+        Machine m;
+        ProbeSearch search;
+        ProbeSearch::Request r = zRequest();
+        r.dir = ProbeSearchDir::PosY;
+        r.num_fine_searches = 0;
+        if (!search.start(m, r) || !runUntilDone(search, m, disc, 1200))
+        {
+            return 92;
+        }
+        const float expected_y = disc.y + r.lateral_offset;
+        const float expected_z = disc.z + r.approach_distance;
+        if (!nearEqual(m.y(), expected_y, 0.8f) || !nearEqual(m.x(), disc.x, 0.8f) ||
+            !nearEqual(m.z(), expected_z, 0.8f))
+        {
+            return 93;
+        }
+    }
+
     return 0;
 }

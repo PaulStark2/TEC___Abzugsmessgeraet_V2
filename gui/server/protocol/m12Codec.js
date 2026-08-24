@@ -125,7 +125,7 @@ function encodeMachineConfigPayload(cfg) {
     'tool_offset_x',
     'tool_offset_y',
     'tool_offset_z',
-    'safe_z',
+    'safe_z_buffer',
     'sample_timeout_s',
     'heartbeat_timeout_s',
     'xy_correct_timeout_s',
@@ -154,6 +154,20 @@ function encodeMachineConfigPayload(cfg) {
   }
   out.writeUInt16LE(cfg.num_fine_searches & 0xffff, offset);
   offset += 2;
+  const phaseSpeeds = [
+    'phase1_v_extract',
+    'phase1_v_insert',
+    'phase2_v_extract',
+    'phase2_v_insert',
+    'phase3_v_extract',
+    'phase3_v_insert',
+  ];
+  for (const key of phaseSpeeds) {
+    if (!writeF32LE(out, offset, cfg[key])) {
+      return null;
+    }
+    offset += 4;
+  }
   return offset === MACHINE_CONFIG_PAYLOAD_WIRE_SIZE ? out : null;
 }
 
@@ -183,7 +197,7 @@ function decodeMachineConfigPayload(payload) {
     'tool_offset_x',
     'tool_offset_y',
     'tool_offset_z',
-    'safe_z',
+    'safe_z_buffer',
     'sample_timeout_s',
     'heartbeat_timeout_s',
     'xy_correct_timeout_s',
@@ -211,6 +225,22 @@ function decodeMachineConfigPayload(payload) {
   }
   out.num_fine_searches = payload.readUInt16LE(offset);
   offset += 2;
+  const phaseSpeeds = [
+    'phase1_v_extract',
+    'phase1_v_insert',
+    'phase2_v_extract',
+    'phase2_v_insert',
+    'phase3_v_extract',
+    'phase3_v_insert',
+  ];
+  for (const key of phaseSpeeds) {
+    const value = readF32LE(payload, offset);
+    if (!value.ok) {
+      return null;
+    }
+    out[key] = value.value;
+    offset += 4;
+  }
   return offset === MACHINE_CONFIG_PAYLOAD_WIRE_SIZE ? out : null;
 }
 

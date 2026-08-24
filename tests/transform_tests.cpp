@@ -87,11 +87,11 @@ int main()
         }
     }
 
-    // Homing snaps pose to homeOffset.
+    // Homing: retract from +max, keep continuous pose (no snap to absolute home_offset).
     {
         Machine machine;
         MachineConfig cfg = machine.machineConfig();
-        cfg.calibration.home_offset = TestPoint{1.0f, 2.0f, 3.0f};
+        cfg.calibration.home_offset = TestPoint{2.0f, 2.0f, 2.0f}; // retract distances
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(cfg, err))
         {
@@ -99,25 +99,20 @@ int main()
         }
         HostInputs in{};
         machine.setHostInputs(withFreshForce(in));
-        machine.home();
-        in.limitZMax = true;
-        machine.setHostInputs(withFreshForce(in));
-        machine.tick(0.05f);
-        in.limitZMax = false;
-        in.limitXMax = true;
-        machine.setHostInputs(withFreshForce(in));
-        machine.tick(0.05f);
-        in.limitXMax = false;
-        in.limitYMax = true;
-        machine.setHostInputs(withFreshForce(in));
-        machine.tick(0.05f);
-        if (!machine.isHomed())
+        if (!homeMachine(machine))
         {
             return 21;
         }
-        if (!nearEqual(machine.x(), 1.0f) || !nearEqual(machine.y(), 2.0f) || !nearEqual(machine.z(), 3.0f))
+        // Pose must remain finite and match stored measured home (not forced to config as absolute).
+        const TestPoint home = machine.calibrationSet().home_offset;
+        if (!nearEqual(machine.x(), home.x) || !nearEqual(machine.y(), home.y) ||
+            !nearEqual(machine.z(), home.z))
         {
             return 22;
+        }
+        if (machine.limitWarningActive())
+        {
+            return 23;
         }
     }
 

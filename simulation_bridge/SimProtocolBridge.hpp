@@ -49,6 +49,9 @@ private:
     TestExecutor executor_;
     simplant::SimPlant plant_;
     CommandDispatcher dispatcher_;
+    float process_z_test_ = 0.0f;
+    bool process_force_latched_ = false;
+    bool process_force_unloaded_ = false;
 };
 
 } // namespace simbridge

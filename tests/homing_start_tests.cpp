@@ -117,6 +117,14 @@ int main()
             return 32;
         }
         ex.stop();
+        if (machine.isHomed())
+        {
+            return 33;
+        }
+        if (ex.start())
+        {
+            return 34;
+        }
     }
 
     // Starting a new homing clears isHomed; automatic start is forbidden again.
@@ -159,6 +167,34 @@ int main()
         if (machine.machineState() != MachineState::Homing)
         {
             return 52;
+        }
+    }
+
+    // After Homed, a jog (moveTo) clears isHomed → automatic start rejected.
+    {
+        Machine machine;
+        machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        if (!homeMachine(machine))
+        {
+            return 60;
+        }
+        if (!machine.isHomed())
+        {
+            return 61;
+        }
+        machine.setHostInputs(withFreshForce(HostInputs{}));
+        machine.moveTo(machine.x() + 1.0f, machine.y(), machine.z());
+        if (machine.isHomed())
+        {
+            return 62;
+        }
+        TestExecutor ex(machine);
+        TestProgram program;
+        program.add(TestPoint{1.0f, 0.0f, 0.0f});
+        ex.setProgram(program);
+        if (ex.start())
+        {
+            return 63;
         }
     }
 

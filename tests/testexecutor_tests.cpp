@@ -1,6 +1,7 @@
-// Deterministic unit tests for TestExecutor (Milestone 7).
+﻿// Deterministic unit tests for TestExecutor (Milestone 7).
 #include "ForceSample.hpp"
 #include "Machine.hpp"
+#include "SafeZ.hpp"
 #include "TestExecutor.hpp"
 #include "TestPoint.hpp"
 #include "TestProgram.hpp"
@@ -29,6 +30,8 @@ static void runUntilDone(TestExecutor& ex, Machine& machine, int max_steps)
     }
 }
 
+// End-homing after the last point needs a larger tick budget than approach alone.
+
 // Build a simple 3-point program along +X. // helper
 static TestProgram makeThreePointProgram()
 {
@@ -54,7 +57,7 @@ static void seedIdentityPlate(Machine& machine)
 
 int main()
 {
-    // Test 1 – Initial Idle, no current point.
+    // Test 1 â€“ Initial Idle, no current point.
     {
         Machine machine; // host machine
         TestExecutor ex(machine); // idle executor
@@ -71,7 +74,7 @@ int main()
         }
     }
 
-    // Test 2 – Start a 3-point program.
+    // Test 2 â€“ Start a 3-point program.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -114,7 +117,7 @@ int main()
         }
     }
 
-    // Test 3 – Sequence order to Completed.
+    // Test 3 â€“ Sequence order to Completed.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -131,7 +134,7 @@ int main()
         bool saw1 = false; // later
         bool saw2 = false; // later
 
-        for (int i = 0; i < 2500 && ex.processState() == ProcessState::Running; ++i)
+        for (int i = 0; i < 20000 && ex.processState() == ProcessState::Running; ++i)
         {
             const std::size_t idx = ex.currentIndex(); // sample
             if (idx == 1)
@@ -163,14 +166,19 @@ int main()
         {
             return 12; // fail
         }
-        if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f) ||
-            !nearEqual(machine.z(), machine.machineConfig().motion.safe_z))
+        const TestPoint home = machine.calibrationSet().home_offset;
+        if (!machine.isHomed() || machine.homingState() != HomingState::Homed)
         {
-            return 13; // fail end pose (safe pose)
+            return 121;
+        }
+        if (!nearEqual(machine.x(), home.x) || !nearEqual(machine.y(), home.y) ||
+            !nearEqual(machine.z(), home.z))
+        {
+            return 13; // fail end pose (Safe-End â†’ Machine::home())
         }
     }
 
-    // Test 4 – Pause keeps Process Running and freezes progress.
+    // Test 4 â€“ Pause keeps Process Running and freezes progress.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -203,7 +211,7 @@ int main()
         }
     }
 
-    // Test 5 – Resume continues to Completed.
+    // Test 5 â€“ Resume continues to Completed.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -219,18 +227,18 @@ int main()
             return 18; // fail
         }
 
-        runUntilDone(ex, machine, 2500); // finish
+        runUntilDone(ex, machine, 20000); // finish
         if (ex.processState() != ProcessState::Completed) // complete
         {
             return 19; // fail
         }
-        if (!nearEqual(machine.x(), 0.0f)) // safe-end pose
+        if (!nearEqual(machine.x(), machine.calibrationSet().home_offset.x)) // Safe-End XY
         {
             return 20; // fail
         }
     }
 
-    // Test 6 – Stop aborts and freezes.
+    // Test 6 â€“ Stop aborts and freezes.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -261,7 +269,7 @@ int main()
         }
     }
 
-    // Test 7 – Empty program start fails and stays Idle.
+    // Test 7 â€“ Empty program start fails and stays Idle.
     {
         Machine machine; // machine
         TestExecutor ex(machine); // idle
@@ -278,7 +286,7 @@ int main()
         }
     }
 
-    // Test 8 – Invalid transitions are no-ops / rejected.
+    // Test 8 â€“ Invalid transitions are no-ops / rejected.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -315,7 +323,7 @@ int main()
         }
     }
 
-    // Test 9 – External Machine::stop aborts on next tick.
+    // Test 9 â€“ External Machine::stop aborts on next tick.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -337,7 +345,7 @@ int main()
         }
     }
 
-    // Test 10 – Restart after Completed and after Aborted.
+    // Test 10 â€“ Restart after Completed and after Aborted.
     {
         Machine machine; // machine
         seedIdentityPlate(machine);
@@ -346,7 +354,7 @@ int main()
         // Complete first run. // complete path
         ex.setProgram(makeThreePointProgram()); // prog A
         ex.start(); // run
-        runUntilDone(ex, machine, 2500); // finish
+        runUntilDone(ex, machine, 20000); // finish
         if (ex.processState() != ProcessState::Completed) // done
         {
             return 34; // fail
@@ -359,12 +367,13 @@ int main()
         {
             return 35; // fail
         }
-        runUntilDone(ex, machine, 2500); // finish
+        runUntilDone(ex, machine, 20000); // finish
         if (ex.processState() != ProcessState::Completed) // completed again
         {
             return 36; // fail
         }
-        if (!nearEqual(machine.x(), 0.0f) || !nearEqual(machine.y(), 0.0f)) // safe-end pose
+        if (!nearEqual(machine.x(), machine.calibrationSet().home_offset.x) ||
+            !nearEqual(machine.y(), machine.calibrationSet().home_offset.y)) // Safe-End XY
         {
             return 37; // fail
         }
@@ -378,6 +387,11 @@ int main()
         {
             return 38; // fail
         }
+        // Soft-STOP clears isHomed; re-home before the next automatic start.
+        if (!homeMachine(machine) || !calibrateProbeCenter(machine))
+        {
+            return 381;
+        }
 
         TestProgram prog_d; // another
         prog_d.add(TestPoint{0.0f, 0.0f, 0.0f}); // return home-ish
@@ -386,7 +400,7 @@ int main()
         {
             return 39; // fail
         }
-        runUntilDone(ex, machine, 2500); // finish
+        runUntilDone(ex, machine, 20000); // finish
         if (ex.processState() != ProcessState::Completed) // completed
         {
             return 40; // fail

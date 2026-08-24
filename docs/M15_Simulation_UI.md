@@ -81,10 +81,21 @@ The simulation UI can move the disc with `setProbeDisc`. See
 
 ## Force
 
-Force simulation is disabled in M15: `SimPlant::sample()` always reports
-`fx = fy = fz = 0`. The Core force control (`Machine::ForceControlParams`,
-hysteresis, Fz safety) is fully retained and still covered by
-`forcecontrol_tests`.
+`SimPlant::sample()` still reports `fx = fy = fz = 0` (limits/probe/e-stop only).
+
+`SimProtocolBridge::applyHostInputs()` overlays a **simulation-only** linear Z spring
+during procedure phases `InsertInitial`, `OptimizeInsert`, and `TestOrAge`:
+
+```text
+Fz = k * (z_contact - z)     // N, with Z+ up
+fx = fy = 0
+```
+
+- `z_contact` is latched to the TCP Z when entering the first of those phases.
+- Default `k = 1 N/mm`, adjustable via plant command `setForceStiffness` / Sim-UI.
+- Outside those phases (approach, probe calib, Safe-Z, …) force stays 0.
+
+Sign convention matches Core Phase 1 (`Fz >= targetForce` on compression while Z decreases).
 
 The older `SimHostInputProvider` (M9 demo force `k · pose`) is no longer used by
 the protocol host; it remains as the M9/M13 input stub for `bridge_status_tests`.
@@ -101,12 +112,13 @@ channel is PC-simulation only and carries no machine commands.
 | `{"cmd":"triggerProbe","pulseMs":100}` | one probe pulse (debug) |
 | `{"cmd":"setProbeDisc","x":40,"y":40,"z":10,"diameter":8,"thickness":3,"toolDiameter":2.5,"toolCylindricalHeight":15}` | virtual measuring disc |
 | `{"cmd":"setEStop","active":true}` | set/clear the virtual e-stop input |
+| `{"cmd":"setForceStiffness","nPerMm":1}` | sim Z-spring stiffness (N/mm) |
 
 Response: `{"ok":true,"state":{...},"pose":{"x":…,"y":…,"z":…}}` or
 `{"ok":false,"error":"…"}`. Unknown commands (for example `moveTo`) are rejected.
 
 Node exposes it as `GET /api/simulation/state` and
-`POST /api/simulation/{limits,probe,probe-disc,estop}`. If the simulation host is down, the
+`POST /api/simulation/{limits,probe,probe-disc,estop,force-stiffness}`. If the simulation host is down, the
 proxy answers HTTP 503 with a readable message.
 
 ## 3D gantry hierarchy

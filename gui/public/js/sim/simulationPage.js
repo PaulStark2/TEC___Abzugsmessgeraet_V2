@@ -1,11 +1,23 @@
 /**
  * M15/M16 simulation UI — display only; Core is motion authority.
+ * Program points are plate-frame; machine overlay only after plate_origin is valid.
  */
-import { connectStatus } from '/js/api.js';
+import { connectStatus, fetchCalibration, fetchMachineConfig } from '/js/api.js';
+import { toMachinePoints } from '/js/coord/coordinateTransform.js';
+import { resolveProgramSafeZ } from '/js/coord/safeZ.js';
 import { createGantryView } from '/js/sim/gantryView.js';
+import { buildProcedurePlannedPath } from '/js/sim/safeZPath.js';
+import { collectOverlayLabels } from '/js/sim/overlayLabels.js';
+import { homeMarkerPose } from '/js/sim/homeMarker.js';
+import {
+  physicalGeometryFromMachineConfig,
+  plantProbeDiscCenterOnly,
+  probeVisualFromSources,
+} from '/js/sim/physicalGeometry.js';
 import {
   fetchPlantState,
   setPlantEStop,
+  setPlantForceStiffness,
   setPlantLimits,
   setPlantProbeDisc,
   triggerPlantProbe,
@@ -42,12 +54,63 @@ const dom = {
   probeState: el('sim-probe-state'),
   limitState: el('sim-limit-state'),
   estopPlant: el('sim-estop-plant'),
+  forceStiffness: el('sim-force-stiffness'),
+  programFrameNote: el('sim-program-frame-note'),
+  safeZNote: el('sim-safe-z-note'),
 };
 
 const gantry = createGantryView(el('gantry-canvas'), readGeometryInputs());
 
-let programPoints = [];
+/** Plate-frame program points from /api/program (never treat as machine). */
+let plateProgramPoints = [];
+/** Machine-frame points for 3D overlay, or [] when plate_origin not valid. */
+let machineProgramPoints = [];
+let calibrationSnapshot = null;
+let machineConfigSnapshot = null;
 let lastStatus = null;
+let lastPlantPose = null;
+let lastPlannedSegments = [];
+let traveledSamples = [];
+let lastSampleKey = '';
+/** Frozen TCP origin for blue planned path (selection load / first valid status). */
+let plannedPathStartPose = null;
+let lastProcessStateForTraj = null;
+let trajectoryRunId = 0;
+
+function clearTrajectorySession(reason) {
+  trajectoryRunId += 1;
+  plannedPathStartPose = null;
+  traveledSamples = [];
+  lastSampleKey = '';
+  lastPlannedSegments = [];
+  gantry.setPlannedSegments([]);
+  gantry.setTraveledSamples([]);
+  if (reason) {
+    console.info(`[sim] trajectory session cleared (${reason}) runId=${trajectoryRunId}`);
+  }
+}
+
+/**
+ * STOP → clear trails. New Running → new session (no leftover planned/actual).
+ */
+function syncTrajectorySession(status) {
+  const ps = status?.processState || 'Idle';
+  if (ps === 'Aborted' && lastProcessStateForTraj !== 'Aborted') {
+    clearTrajectorySession('process Aborted/STOP');
+  }
+  if (ps === 'Running' && lastProcessStateForTraj !== 'Running') {
+    clearTrajectorySession('new procedure Running');
+    if (
+      status &&
+      Number.isFinite(status.x) &&
+      Number.isFinite(status.y) &&
+      Number.isFinite(status.z)
+    ) {
+      plannedPathStartPose = { x: status.x, y: status.y, z: status.z };
+    }
+  }
+  lastProcessStateForTraj = ps;
+}
 let estopActive = false;
 let limitInputsTouched = false;
 let probeInputsTouched = false;
@@ -74,6 +137,120 @@ function setHeaderStatus(message, isError) {
 function setPlantFeedback(message, isError) {
   dom.plantFeedback.textContent = message;
   dom.plantFeedback.classList.toggle('command-feedback--error', Boolean(isError));
+}
+
+function setProgramFrameNote(message, isWarning) {
+  if (!dom.programFrameNote) {
+    return;
+  }
+  dom.programFrameNote.textContent = message || '';
+  dom.programFrameNote.hidden = !message;
+  dom.programFrameNote.classList.toggle('sim-program-note--warn', Boolean(isWarning));
+}
+
+function updateReferenceMarkers(status) {
+  const st = status || lastStatus;
+  const showHome = el('toggle-ref-home')?.checked !== false;
+  const showPlate = el('toggle-ref-plate')?.checked !== false;
+  const showProbe = el('toggle-ref-probe')?.checked !== false;
+  const showPoints = el('toggle-ref-points')?.checked !== false;
+
+  if (typeof gantry.setTestPointsVisible === 'function') {
+    gantry.setTestPointsVisible(showPoints);
+  }
+
+  // Core measured home (latched at Homing* → Homed). Never live TCP pose.
+  const home =
+    st?.isHomed === true ? homeMarkerPose({ isHomed: true, measuredHome: st.measuredHome }) : null;
+
+  const plate =
+    st?.plateOriginValid === true && calibrationSnapshot?.plateOriginValid
+      ? calibrationSnapshot.plateOrigin
+      : null;
+
+  // Core-only probe_center — never SimPlant::ProbeDisc.center.
+  const probe =
+    st?.probeCenterValid === true &&
+    calibrationSnapshot?.probeCenterValid &&
+    calibrationSnapshot?.probeCenter
+      ? calibrationSnapshot.probeCenter
+      : null;
+
+  gantry.setReferenceMarkers({
+    home: showHome ? home : null,
+    plateOrigin: showPlate ? plate : null,
+    probeCenter: showProbe ? probe : null,
+    showHome,
+    showPlate,
+    showProbe,
+  });
+}
+
+function plateOriginReady(calib, status) {
+  const fromStatus = status && status.plateOriginValid === true;
+  const fromStore = Boolean(calib && calib.plateOriginValid && calib.plateOrigin);
+  // Prefer live Core flag; still need stored origin values for the transform.
+  if (status && Object.prototype.hasOwnProperty.call(status, 'plateOriginValid')) {
+    return fromStatus && fromStore;
+  }
+  return fromStore;
+}
+
+function refreshMachineOverlay(status) {
+  const st = status || lastStatus;
+  if (!plateProgramPoints.length) {
+    machineProgramPoints = [];
+    traveledSamples = [];
+    lastSampleKey = '';
+    lastPlannedSegments = [];
+    gantry.setTestPoints([]);
+    gantry.setPlannedSegments([]);
+    gantry.setTraveledSamples([]);
+    updateOverlayLabels();
+    setProgramFrameNote('');
+    return;
+  }
+
+  if (!plateOriginReady(calibrationSnapshot, st)) {
+    machineProgramPoints = [];
+    lastPlannedSegments = [];
+    gantry.setTestPoints([]);
+    gantry.setPlannedSegments([]);
+    gantry.setTraveledSamples([]);
+    updateOverlayLabels();
+    setProgramFrameNote(
+      'Prüfprogramm geladen (Bauplatten-Koordinaten). Zur Darstellung der Maschinenpositionen ist eine Bauplatten-Kalibrierung erforderlich.',
+      true
+    );
+    return;
+  }
+
+  const transformed = toMachinePoints(calibrationSnapshot, plateProgramPoints);
+  if (!transformed) {
+    machineProgramPoints = [];
+    lastPlannedSegments = [];
+    gantry.setTestPoints([]);
+    gantry.setPlannedSegments([]);
+    gantry.setTraveledSamples([]);
+    updateOverlayLabels();
+    setProgramFrameNote(
+      'Prüfprogramm geladen. Bauplatten-Kalibrierung erforderlich — keine Maschinenkoordinaten berechenbar.',
+      true
+    );
+    return;
+  }
+
+  machineProgramPoints = transformed;
+  gantry.setTestPoints(machineProgramPoints);
+  setProgramFrameNote(
+    `Prüfpunkte als Maschinenkoordinaten (plate_origin + Platepunkt + tool_offset), ${machineProgramPoints.length} Punkt(e).`,
+    false
+  );
+  if (st) {
+    updateTrajectory(st);
+  } else {
+    updateOverlayLabels();
+  }
 }
 
 function readNumberInput(id, fallback) {
@@ -115,25 +292,146 @@ function normalizePlantLimits(limits) {
   };
 }
 
-function updateTrajectory(status) {
-  if (!programPoints.length) {
-    gantry.setPlannedTrajectory([]);
-    gantry.setTraveledTrajectory([], null);
+function updateOverlayLabels() {
+  const showPointLabels = el('toggle-point-labels')?.checked === true;
+  const showSegmentLabels =
+    el('toggle-trajectory')?.checked !== false && el('toggle-segment-labels')?.checked === true;
+  gantry.setOverlayLabels(
+    collectOverlayLabels({
+      points: machineProgramPoints,
+      segments: lastPlannedSegments,
+      machineConfig: machineConfigSnapshot,
+      showPointLabels,
+      showSegmentLabels,
+    })
+  );
+}
+
+function updateSafeZNote() {
+  const note = dom.safeZNote;
+  if (!note) {
     return;
   }
-  gantry.setPlannedTrajectory(programPoints);
-  const idx = typeof status?.currentPointIndex === 'number' ? status.currentPointIndex : 0;
-  const completed = programPoints.slice(0, Math.max(0, idx));
-  gantry.setTraveledTrajectory(completed, { x: status.x, y: status.y, z: status.z });
+  const resolved = resolveProgramSafeZ(
+    plateProgramPoints,
+    machineConfigSnapshot?.safe_z_buffer,
+    calibrationSnapshot
+  );
+  if (!resolved) {
+    note.hidden = false;
+    note.textContent =
+      plateProgramPoints.length === 0
+        ? 'Kein Prüfprogramm geladen. Die Safe-Z-Höhe kann nicht berechnet werden.'
+        : 'Safe-Z nicht berechenbar (Programm, Puffer oder Bauplatten-Kalibrierung prüfen).';
+    return;
+  }
+  note.hidden = false;
+  note.textContent =
+    `Höchster Prüfpunkt: ${resolved.maxPointZ.toFixed(2)} mm · ` +
+    `Safe-Z-Puffer: ${resolved.safeZBuffer.toFixed(2)} mm · ` +
+    `Safe-Z (Bauplatte): ${resolved.safeZPlate.toFixed(2)} mm · ` +
+    `Safe-Z (Maschine): ${resolved.safeZMachine.toFixed(2)} mm`;
+}
+
+function updateTrajectory(status) {
+  if (!machineProgramPoints.length) {
+    lastPlannedSegments = [];
+    plannedPathStartPose = null;
+    gantry.setPlannedSegments([]);
+    gantry.setTraveledSamples([]);
+    updateOverlayLabels();
+    updateSafeZNote();
+    return;
+  }
+  const resolved = resolveProgramSafeZ(
+    plateProgramPoints,
+    machineConfigSnapshot?.safe_z_buffer,
+    calibrationSnapshot
+  );
+  const safeZ = resolved ? resolved.safeZMachine : NaN;
+
+  if (
+    status &&
+    Number.isFinite(status.x) &&
+    Number.isFinite(status.y) &&
+    Number.isFinite(status.z) &&
+    !plannedPathStartPose
+  ) {
+    plannedPathStartPose = { x: status.x, y: status.y, z: status.z };
+  }
+  const startPose =
+    plannedPathStartPose ||
+    (status && Number.isFinite(status.x)
+      ? { x: status.x, y: status.y, z: status.z }
+      : null);
+
+  const probeCenter =
+    status?.probeCenterValid === true &&
+    calibrationSnapshot?.probeCenterValid &&
+    calibrationSnapshot?.probeCenter
+      ? calibrationSnapshot.probeCenter
+      : null;
+
+  const standoff = Number(machineConfigSnapshot?.approach_distance);
+  const insertSearch = Number(machineConfigSnapshot?.insert_search_distance);
+  const insertionBuffer = Number(machineConfigSnapshot?.insertion_buffer);
+
+  if (Number.isFinite(safeZ) && startPose) {
+    const planned = buildProcedurePlannedPath(
+      startPose,
+      machineProgramPoints,
+      safeZ,
+      probeCenter,
+      {
+        approachStandoffMm: Number.isFinite(standoff) ? standoff : 15,
+        insertSearchDistance: Number.isFinite(insertSearch) ? insertSearch : 10,
+        insertionBuffer: Number.isFinite(insertionBuffer) ? insertionBuffer : 1,
+        includeProbe: Boolean(probeCenter),
+        measuredHome: status?.measuredHome || null,
+      }
+    );
+    lastPlannedSegments = planned.segments;
+    gantry.setPlannedSegments(planned.segments);
+  } else {
+    // Do not invent a direct polyline when Safe-Z/start are unknown.
+    lastPlannedSegments = [];
+    gantry.setPlannedSegments([]);
+  }
+
+  // Traveled: real TCP samples from StatusReport (machine frame) during a run.
+  if (
+    status &&
+    status.processState === 'Running' &&
+    Number.isFinite(status.x) &&
+    Number.isFinite(status.y) &&
+    Number.isFinite(status.z)
+  ) {
+    const key = `${status.x.toFixed(3)},${status.y.toFixed(3)},${status.z.toFixed(3)}`;
+    if (key !== lastSampleKey) {
+      lastSampleKey = key;
+      traveledSamples.push({ x: status.x, y: status.y, z: status.z });
+      if (traveledSamples.length > 4000) {
+        traveledSamples = traveledSamples.slice(-3000);
+      }
+    }
+  }
+  gantry.setTraveledSamples(traveledSamples);
+  updateOverlayLabels();
+  updateSafeZNote();
 }
 
 function renderStatus(status) {
   lastStatus = status;
+  syncTrajectorySession(status);
   dom.clientMode.textContent = status.machineClientMode || '—';
   dom.machineState.textContent = status.machineState || '—';
   dom.motionState.textContent = status.motionState || '—';
   dom.homingState.textContent = status.homingState || 'None';
-  dom.homedState.textContent = status.isHomed ? 'ja' : 'nein';
+  {
+    // Core isHomed: true only while still at the last successful home pose.
+    dom.homedState.textContent =
+      status.isHomed === true ? 'ja (Homed)' : 'nein (nicht referenziert)';
+  }
   dom.warningState.textContent = status.limitWarning ? 'Limit aktiv' : '—';
   dom.x.textContent = formatNumber(status.x);
   dom.y.textContent = formatNumber(status.y);
@@ -165,8 +463,18 @@ function renderStatus(status) {
     return;
   }
 
-  gantry.setPose({ x: status.x, y: status.y, z: status.z });
-  updateTrajectory(status);
+  // Gantry follows continuous plant/raw TCP (no jump on machine re-reference).
+  // Status x/y/z remain machine-frame coordinates for the numeric readout.
+  const visual =
+    lastPlantPose &&
+    Number.isFinite(lastPlantPose.x) &&
+    Number.isFinite(lastPlantPose.y) &&
+    Number.isFinite(lastPlantPose.z)
+      ? lastPlantPose
+      : { x: status.x, y: status.y, z: status.z };
+  gantry.setPose(visual);
+  refreshMachineOverlay(status);
+  updateReferenceMarkers(status);
   setHeaderStatus('Controller verbunden — Pose aus Core-Status', false);
 }
 
@@ -184,8 +492,17 @@ function renderPlantState(state) {
   dom.estopPlant.textContent = state.eStop ? 'AKTIV' : 'inaktiv';
   estopActive = Boolean(state.eStop);
   el('btn-estop-toggle').classList.toggle('sim-estop-btn--active', estopActive);
+  if (dom.forceStiffness && Number.isFinite(Number(state.forceStiffnessNPerMm))) {
+    dom.forceStiffness.textContent = Number(state.forceStiffnessNPerMm).toFixed(2);
+    const input = el('input-force-stiffness');
+    if (input && document.activeElement !== input) {
+      input.value = String(state.forceStiffnessNPerMm);
+    }
+  }
   if (state.probe) {
-    gantry.setProbeDisc(state.probe);
+    gantry.setProbeDisc(
+      probeVisualFromSources({ plantProbe: state.probe, machineConfig: machineConfigSnapshot })
+    );
   }
 }
 
@@ -201,6 +518,22 @@ function syncLimitInputs(limits) {
   el('input-limit-z-max').value = String(limits.zMax);
 }
 
+function syncPhysicalGeometryReadouts(geo) {
+  if (!geo) {
+    return;
+  }
+  el('input-probe-diameter').value = String(geo.diameter);
+  el('input-probe-thickness').value = String(geo.thickness);
+  el('input-probe-tool').value = String(geo.toolDiameter);
+  el('input-probe-tool-height').value = String(geo.toolCylindricalHeight);
+  if (typeof gantry.setToolGeometry === 'function') {
+    gantry.setToolGeometry({
+      toolDiameter: geo.toolDiameter,
+      toolCylindricalHeight: geo.toolCylindricalHeight,
+    });
+  }
+}
+
 function syncProbeDiscInputs(probe) {
   if (probeInputsTouched || !probe) {
     return;
@@ -208,22 +541,14 @@ function syncProbeDiscInputs(probe) {
   if (Number.isFinite(probe.x)) el('input-probe-x').value = String(probe.x);
   if (Number.isFinite(probe.y)) el('input-probe-y').value = String(probe.y);
   if (Number.isFinite(probe.z)) el('input-probe-z').value = String(probe.z);
-  if (Number.isFinite(probe.diameter)) el('input-probe-diameter').value = String(probe.diameter);
-  if (Number.isFinite(probe.thickness)) el('input-probe-thickness').value = String(probe.thickness);
-  if (Number.isFinite(probe.toolDiameter)) el('input-probe-tool').value = String(probe.toolDiameter);
-  if (Number.isFinite(probe.toolCylindricalHeight)) el('input-probe-tool-height').value = String(probe.toolCylindricalHeight);
 }
 
 function readProbeDiscInputs() {
-  return {
+  return plantProbeDiscCenterOnly({
     x: readNumberInput('input-probe-x', 40),
     y: readNumberInput('input-probe-y', 40),
     z: readNumberInput('input-probe-z', 10),
-    diameter: readNumberInput('input-probe-diameter', 8),
-    thickness: readNumberInput('input-probe-thickness', 3),
-    toolDiameter: readNumberInput('input-probe-tool', 2.5),
-    toolCylindricalHeight: readNumberInput('input-probe-tool-height', 15),
-  };
+  });
 }
 
 async function pollPlantState() {
@@ -233,6 +558,17 @@ async function pollPlantState() {
     syncLimitInputs(result.state.limits);
     syncProbeDiscInputs(result.state.probe);
     gantry.setLimits(normalizePlantLimits(result.state.limits));
+    if (
+      result.pose &&
+      Number.isFinite(result.pose.x) &&
+      Number.isFinite(result.pose.y) &&
+      Number.isFinite(result.pose.z)
+    ) {
+      lastPlantPose = { x: result.pose.x, y: result.pose.y, z: result.pose.z };
+      if (lastStatus && lastStatus.connected !== false) {
+        gantry.setPose(lastPlantPose);
+      }
+    }
   } catch (err) {
     dom.probeState.textContent = '—';
     dom.limitState.textContent = '—';
@@ -240,31 +576,65 @@ async function pollPlantState() {
   }
 }
 
+async function refreshCalibration() {
+  try {
+    const result = await fetchCalibration();
+    if (result && result.ok && result.calibration) {
+      calibrationSnapshot = result.calibration;
+    }
+  } catch {
+    // keep last snapshot
+  }
+  try {
+    const cfg = await fetchMachineConfig();
+    if (cfg && cfg.ok && cfg.config) {
+      machineConfigSnapshot = cfg.config;
+      syncPhysicalGeometryReadouts(physicalGeometryFromMachineConfig(machineConfigSnapshot));
+    }
+  } catch {
+    // keep last
+  }
+  refreshMachineOverlay(lastStatus);
+}
+
 async function fetchProgramPoints() {
   try {
-    let res = await fetch('/api/program/selection');
-    let data = await res.json();
+    const res = await fetch('/api/program/selection');
+    const data = await res.json();
     if (data.ok && data.selection && data.selection.confirmed && data.selection.points?.length) {
-      programPoints = data.selection.points
+      const next = data.selection.points
         .slice()
         .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-      gantry.setTestPoints(programPoints);
-      if (lastStatus) {
-        updateTrajectory(lastStatus);
+      const changed =
+        next.length !== plateProgramPoints.length ||
+        next.some(
+          (p, i) =>
+            !plateProgramPoints[i] ||
+            p.x !== plateProgramPoints[i].x ||
+            p.y !== plateProgramPoints[i].y ||
+            p.z !== plateProgramPoints[i].z
+        );
+      plateProgramPoints = next;
+      if (changed) {
+        plannedPathStartPose = null;
+        traveledSamples = [];
+        lastSampleKey = '';
       }
+      if (dom.programFrameNote) {
+        dom.programFrameNote.hidden = false;
+        dom.programFrameNote.textContent = `${next.length} ausgewählte Prüfpunkte (bestätigte Auswahl).`;
+      }
+      await refreshCalibration();
       return;
     }
-    res = await fetch('/api/program/current');
-    data = await res.json();
-    if (data.ok && data.current?.testPoints?.length) {
-      programPoints = data.current.testPoints
-        .slice()
-        .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-      gantry.setTestPoints(programPoints);
-      if (lastStatus) {
-        updateTrajectory(lastStatus);
-      }
+    plateProgramPoints = [];
+    plannedPathStartPose = null;
+    if (dom.programFrameNote) {
+      dom.programFrameNote.hidden = false;
+      dom.programFrameNote.textContent =
+        'Keine bestätigte Prüfpunkt-Auswahl — keine Punkte in der Simulation.';
     }
+    refreshMachineOverlay(lastStatus);
   } catch {
     // program API optional for simulation view
   }
@@ -294,10 +664,7 @@ function bindPanel() {
     });
   }
 
-  for (const id of [
-    'input-probe-x', 'input-probe-y', 'input-probe-z',
-    'input-probe-diameter', 'input-probe-thickness', 'input-probe-tool', 'input-probe-tool-height',
-  ]) {
+  for (const id of ['input-probe-x', 'input-probe-y', 'input-probe-z']) {
     el(id).addEventListener('input', () => {
       probeInputsTouched = true;
     });
@@ -312,7 +679,7 @@ function bindPanel() {
 
   el('btn-apply-probe-disc').addEventListener('click', () => {
     const disc = readProbeDiscInputs();
-    runPlantAction(() => setPlantProbeDisc(disc), 'Messtaster-Geometrie übernommen');
+    runPlantAction(() => setPlantProbeDisc(disc), 'Scheibenposition übernommen');
   });
 
   el('btn-apply-limits').addEventListener('click', () => {
@@ -328,10 +695,20 @@ function bindPanel() {
     );
   });
 
+  el('btn-apply-force-stiffness').addEventListener('click', () => {
+    const nPerMm = Number(el('input-force-stiffness').value);
+    runPlantAction(
+      () => setPlantForceStiffness(nPerMm),
+      `Kraftsteifigkeit gesetzt: ${nPerMm} N/mm`
+    );
+  });
+
   el('toggle-trajectory').addEventListener('change', (event) => {
     gantry.setShowTrajectory(event.target.checked);
     if (lastStatus) {
       updateTrajectory(lastStatus);
+    } else {
+      updateOverlayLabels();
     }
   });
 
@@ -339,8 +716,27 @@ function bindPanel() {
     gantry.setShowLimitMarkers(event.target.checked);
   });
 
+  for (const id of ['toggle-ref-home', 'toggle-ref-plate', 'toggle-ref-probe', 'toggle-ref-points']) {
+    const node = el(id);
+    if (node) {
+      node.addEventListener('change', () => updateReferenceMarkers(lastStatus));
+    }
+  }
+
+  for (const id of ['toggle-point-labels', 'toggle-segment-labels']) {
+    const node = el(id);
+    if (node) {
+      node.addEventListener('change', () => updateOverlayLabels());
+    }
+  }
+
   el('btn-apply-geometry').addEventListener('click', () => {
-    gantry.setGeometry(readGeometryInputs());
+    const geo = readGeometryInputs();
+    if (machineConfigSnapshot) {
+      geo.toolDiameter = Number(machineConfigSnapshot.tool_diameter) || 2.5;
+      geo.toolCylindricalHeight = Number(machineConfigSnapshot.tool_cylindrical_height) || 15;
+    }
+    gantry.setGeometry(geo);
     setPlantFeedback('Darstellungsgeometrie aktualisiert', false);
   });
 
@@ -358,9 +754,11 @@ function init() {
   });
 
   pollPlantState();
+  refreshCalibration();
   fetchProgramPoints();
   window.setInterval(pollPlantState, PLANT_POLL_MS);
   window.setInterval(fetchProgramPoints, PROGRAM_POLL_MS);
+  window.setInterval(refreshCalibration, PROGRAM_POLL_MS);
 }
 
 init();
