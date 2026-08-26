@@ -506,7 +506,7 @@ const GROUPS = [
         integer: true,
         min: 0,
         max: 10000,
-        info: 'Anzahl langsamer Feinmessungen nach der Schnellsuche. 0 = nur Schnellsuche.',
+        info: 'Anzahl langsamer Feinmessungen nach der Grobsuche. Default 1 (ein Feintasten). 0 = nur Grobsuche.',
       },
       {
         key: 'head_diameter',
@@ -650,7 +650,7 @@ function defaultMachineConfigPayload() {
     probe_backoff: 1,
     search_depth: 5,
     approach_distance: 15,
-    num_fine_searches: 3,
+    num_fine_searches: 1,
     head_diameter: 0,
     measuring_head_diameter: 8,
     measuring_head_thickness: 3,

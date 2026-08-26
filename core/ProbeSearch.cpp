@@ -1,5 +1,7 @@
 #include "ProbeSearch.hpp"
 
+#include "HostInputs.hpp"
+
 #include <cmath>
 
 namespace
@@ -15,15 +17,23 @@ bool finiteRequest(const ProbeSearch::Request& request)
     if (!(std::isfinite(request.reference.x) && std::isfinite(request.reference.y) &&
           std::isfinite(request.reference.z) && request.approach_distance > 0.0f &&
           request.search_distance > 0.0f && request.search_depth > 0.0f &&
-          request.lateral_offset > 0.0f && request.xy_inner_radius >= 0.0f && request.backoff >= 0.0f &&
+          request.lateral_offset > 0.0f && request.xy_keepout_radius >= 0.0f && request.backoff >= 0.0f &&
           request.approach_speed > 0.0f && request.transfer_speed > 0.0f &&
-          request.fast_speed > 0.0f && request.fine_speed > 0.0f))
+          request.fast_speed > 0.0f && request.fine_speed > 0.0f && request.max_search_travel >= 0.0f &&
+          request.search_timeout_s >= 0.0f))
     {
         return false;
     }
-    if (isXySearch(request.dir) && !(request.lateral_offset > request.xy_inner_radius))
+    if (isXySearch(request.dir))
     {
-        return false;
+        if (!request.have_measured_center_z || !std::isfinite(request.measured_center_z))
+        {
+            return false;
+        }
+        if (!(request.lateral_offset > request.xy_keepout_radius))
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -34,7 +44,7 @@ bool ProbeSearch::start(Machine& machine, const Request& request)
 {
     if (machine.machineState() == MachineState::Fault || !finiteRequest(request))
     {
-        state_ = State::Error;
+        enterError(ErrorReason::InvalidRequest);
         return false;
     }
 
@@ -46,9 +56,11 @@ bool ProbeSearch::start(Machine& machine, const Request& request)
     have_fast_ = false;
     braking_ = false;
     retreat_after_brake_ = false;
+    search_elapsed_s_ = 0.0f;
+    active_search_timeout_s_ = 0.0f;
+    error_reason_ = ErrorReason::None;
     machine.consumeProbeTrigger();
     machine.setCollisionContext(CollisionContext::Approach);
-    // One multi-axis move to hub (Z then X/Y) so corner_probe_transfer can blend.
     commandAlignHub(machine);
     state_ = State::AlignHub;
     if (motionSettled(machine))
@@ -60,14 +72,13 @@ bool ProbeSearch::start(Machine& machine, const Request& request)
 
 void ProbeSearch::tick(float dt, Machine& machine)
 {
-    (void)dt;
     if (state_ == State::Idle || state_ == State::Complete || state_ == State::Error)
     {
         return;
     }
     if (faulted(machine))
     {
-        enterError();
+        enterError(ErrorReason::Fault);
         return;
     }
 
@@ -97,15 +108,12 @@ void ProbeSearch::tick(float dt, Machine& machine)
     case State::Descend:
         if (motionSettled(machine))
         {
-            machine.consumeProbeTrigger();
-            commandSearch(machine, request_.fast_speed);
-            state_ = State::FastSearch;
+            beginSearch(machine, request_.fast_speed, State::FastSearch);
         }
         break;
     case State::FastSearch:
     case State::FineSearch:
     {
-        // After trigger: brakeToStop then wait for settle before backoff/retreat.
         if (braking_)
         {
             if (!motionSettled(machine))
@@ -124,33 +132,25 @@ void ProbeSearch::tick(float dt, Machine& machine)
             }
             break;
         }
+        if (dt > 0.0f)
+        {
+            search_elapsed_s_ += dt;
+        }
         TestPoint trigger{};
-        if (consumeTrigger(machine, trigger))
+        if (tryContact(machine, trigger))
         {
             onProbeTrigger(machine, trigger);
         }
-        else if (motionSettled(machine))
+        else if (search_elapsed_s_ > active_search_timeout_s_ || motionSettled(machine))
         {
-            enterError();
-        }
-        else if (isXySearch(request_.dir))
-        {
-            const float dx = machine.x() - request_.reference.x;
-            const float dy = machine.y() - request_.reference.y;
-            const float r = std::sqrt(dx * dx + dy * dy);
-            if (r + 1.0e-3f < request_.xy_inner_radius)
-            {
-                enterError();
-            }
+            enterError(ErrorReason::NoContact);
         }
         break;
     }
     case State::Backoff:
         if (motionSettled(machine))
         {
-            machine.consumeProbeTrigger();
-            commandSearch(machine, request_.fine_speed);
-            state_ = State::FineSearch;
+            beginSearch(machine, request_.fine_speed, State::FineSearch);
         }
         break;
     case State::RetreatClear:
@@ -160,13 +160,12 @@ void ProbeSearch::tick(float dt, Machine& machine)
             {
                 if (!have_fast_ && fine_done_ == 0)
                 {
-                    enterError();
+                    enterError(ErrorReason::NoContact);
                     return;
                 }
                 state_ = State::Complete;
                 return;
             }
-            // Raise to hub Z and return XY in one moveTo (blend-capable).
             commandRetreatToHub(machine);
             state_ = State::RetreatToHub;
             if (motionSettled(machine))
@@ -180,7 +179,7 @@ void ProbeSearch::tick(float dt, Machine& machine)
         {
             if (!have_fast_ && fine_done_ == 0)
             {
-                enterError();
+                enterError(ErrorReason::NoContact);
                 return;
             }
             state_ = State::Complete;
@@ -195,7 +194,7 @@ void ProbeSearch::abort()
 {
     if (state_ != State::Idle && state_ != State::Complete)
     {
-        enterError();
+        enterError(ErrorReason::Aborted);
     }
 }
 
@@ -214,6 +213,11 @@ ProbeSearch::State ProbeSearch::state() const
     return state_;
 }
 
+ProbeSearch::ErrorReason ProbeSearch::errorReason() const
+{
+    return error_reason_;
+}
+
 TestPoint ProbeSearch::result() const
 {
     return result_;
@@ -228,7 +232,6 @@ void ProbeSearch::commandAlignHub(Machine& machine)
 
 void ProbeSearch::commandTraverseStart(Machine& machine)
 {
-    // Single-axis lateral move at hub Z to this direction's outer start.
     const TestPoint start = startPose();
     applyTransferProfile(machine);
     switch (request_.dir)
@@ -248,31 +251,28 @@ void ProbeSearch::commandTraverseStart(Machine& machine)
 
 void ProbeSearch::commandDescend(Machine& machine)
 {
-    const TestPoint target = searchTarget();
-    // Prep Z into the search plane is still outside contact risk along the search
-    // axis — use approach speed. Slow speeds apply only in FastSearch/FineSearch.
     applyApproachProfile(machine);
     machine.setCollisionContext(CollisionContext::Contact);
-    machine.moveTo(machine.x(), machine.y(), target.z);
+    machine.moveTo(machine.x(), machine.y(), xyWorkZ());
 }
 
 void ProbeSearch::commandSearch(Machine& machine, float speed)
 {
-    const TestPoint target = searchTarget();
+    const TestPoint bound = searchBound();
     machine.setCollisionContext(CollisionContext::Contact);
     applySearchProfile(machine, speed);
     switch (request_.dir)
     {
     case ProbeSearchDir::NegX:
     case ProbeSearchDir::PosX:
-        machine.moveTo(target.x, machine.y(), machine.z());
+        machine.moveTo(bound.x, machine.y(), machine.z());
         break;
     case ProbeSearchDir::NegY:
     case ProbeSearchDir::PosY:
-        machine.moveTo(machine.x(), target.y, machine.z());
+        machine.moveTo(machine.x(), bound.y, machine.z());
         break;
     case ProbeSearchDir::NegZ:
-        machine.moveTo(machine.x(), machine.y(), target.z);
+        machine.moveTo(machine.x(), machine.y(), bound.z);
         break;
     }
 }
@@ -299,8 +299,6 @@ void ProbeSearch::commandBackoff(Machine& machine, const TestPoint& trigger_pose
 
 void ProbeSearch::commandRetreatClear(Machine& machine)
 {
-    // Along the search axis back to the direction start at current (work) Z.
-    // For NegZ this is hub Z (P_z height) at hub XY.
     machine.setCollisionContext(CollisionContext::Approach);
     applyTransferProfile(machine);
     if (!isXySearch(request_.dir))
@@ -343,13 +341,25 @@ void ProbeSearch::beginRetreat(Machine& machine)
     }
 }
 
+void ProbeSearch::beginSearch(Machine& machine, float speed, State next)
+{
+    machine.consumeProbeTrigger();
+    commandSearch(machine, speed);
+    state_ = next;
+    search_elapsed_s_ = 0.0f;
+    active_search_timeout_s_ = searchTimeoutS(speed);
+    TestPoint already{};
+    if (tryContact(machine, already))
+    {
+        onProbeTrigger(machine, already);
+    }
+}
+
 void ProbeSearch::advanceAfterHubAligned(Machine& machine)
 {
     if (!isXySearch(request_.dir))
     {
-        machine.consumeProbeTrigger();
-        commandSearch(machine, request_.fast_speed);
-        state_ = State::FastSearch;
+        beginSearch(machine, request_.fast_speed, State::FastSearch);
         return;
     }
     commandTraverseStart(machine);
@@ -372,9 +382,9 @@ void ProbeSearch::applyTransferProfile(Machine& machine) const
 
 void ProbeSearch::applySearchProfile(Machine& machine, float speed) const
 {
-    // No corner blend during contact search (single-axis legs).
     const MachineConfig::Probe& probe = machine.machineConfig().probe;
-    machine.setActiveMotionProfile(speed, probe.a_probe_search, 0.0f);
+    const float a = (probe.a_probe_brake > 0.0f) ? probe.a_probe_brake : probe.a_probe_search;
+    machine.setActiveMotionProfile(speed, a, 0.0f);
 }
 
 void ProbeSearch::onProbeTrigger(Machine& machine, const TestPoint& trigger)
@@ -409,9 +419,10 @@ void ProbeSearch::onProbeTrigger(Machine& machine, const TestPoint& trigger)
     braking_ = true;
 }
 
-void ProbeSearch::enterError()
+void ProbeSearch::enterError(ErrorReason reason)
 {
     braking_ = false;
+    error_reason_ = reason;
     state_ = State::Error;
 }
 
@@ -429,9 +440,7 @@ bool ProbeSearch::faulted(const Machine& machine) const
 
 TestPoint ProbeSearch::hubPose() const
 {
-    TestPoint p = request_.reference;
-    p.z = request_.reference.z + request_.approach_distance;
-    return p;
+    return request_.reference;
 }
 
 TestPoint ProbeSearch::startPose() const
@@ -457,32 +466,34 @@ TestPoint ProbeSearch::startPose() const
     return p;
 }
 
-TestPoint ProbeSearch::searchTarget() const
+TestPoint ProbeSearch::searchBound() const
 {
-    TestPoint p = request_.reference;
-    p.z = request_.reference.z - request_.search_depth;
-    const float inner = request_.xy_inner_radius;
+    TestPoint p = hubPose();
+    const float keep = request_.xy_keepout_radius;
     switch (request_.dir)
     {
     case ProbeSearchDir::NegX:
-        p.x = request_.reference.x - inner;
+        p.x = request_.reference.x - keep;
         p.y = request_.reference.y;
+        p.z = xyWorkZ();
         break;
     case ProbeSearchDir::PosX:
-        p.x = request_.reference.x + inner;
+        p.x = request_.reference.x + keep;
         p.y = request_.reference.y;
+        p.z = xyWorkZ();
         break;
     case ProbeSearchDir::NegY:
         p.x = request_.reference.x;
-        p.y = request_.reference.y - inner;
+        p.y = request_.reference.y - keep;
+        p.z = xyWorkZ();
         break;
     case ProbeSearchDir::PosY:
         p.x = request_.reference.x;
-        p.y = request_.reference.y + inner;
+        p.y = request_.reference.y + keep;
+        p.z = xyWorkZ();
         break;
     case ProbeSearchDir::NegZ:
-        p.x = request_.reference.x;
-        p.y = request_.reference.y;
+        p.z = request_.reference.z - maxSearchTravel();
         break;
     }
     return p;
@@ -512,7 +523,47 @@ TestPoint ProbeSearch::backoffPose(const TestPoint& trigger_pose) const
     return p;
 }
 
-bool ProbeSearch::consumeTrigger(Machine& machine, TestPoint& pose_out)
+float ProbeSearch::maxSearchTravel() const
 {
-    return machine.consumeProbeTrigger(pose_out);
+    if (request_.max_search_travel > 0.0f)
+    {
+        return request_.max_search_travel;
+    }
+    if (!isXySearch(request_.dir))
+    {
+        return request_.approach_distance + request_.search_distance + request_.search_depth;
+    }
+    const float travel = request_.lateral_offset - request_.xy_keepout_radius;
+    return travel > 0.0f ? travel : request_.lateral_offset;
+}
+
+float ProbeSearch::xyWorkZ() const
+{
+    return request_.measured_center_z - request_.search_depth;
+}
+
+float ProbeSearch::searchTimeoutS(float speed) const
+{
+    if (request_.search_timeout_s > 0.0f)
+    {
+        return request_.search_timeout_s;
+    }
+    const float v = (speed > 0.0f) ? speed : request_.fast_speed;
+    return maxSearchTravel() / v * 2.0f + 1.0f;
+}
+
+bool ProbeSearch::tryContact(Machine& machine, TestPoint& pose_out)
+{
+    if (machine.consumeProbeTrigger(pose_out))
+    {
+        return true;
+    }
+    const HostInputs& in = machine.hostInputs();
+    if (in.probeTriggered && in.probeTriggerPoseValid && std::isfinite(in.probeTriggerX) &&
+        std::isfinite(in.probeTriggerY) && std::isfinite(in.probeTriggerZ))
+    {
+        pose_out = TestPoint{in.probeTriggerX, in.probeTriggerY, in.probeTriggerZ};
+        return true;
+    }
+    return false;
 }

@@ -555,7 +555,12 @@ export function renderCalibrate(container) {
         btnStart.disabled = false;
         statusEl.textContent = 'Einmessung abgebrochen.';
         statusEl.style.color = 'var(--clr-err,red)';
-        feedbackEl.textContent = 'Bisherige gültige Kalibrierung bleibt erhalten.';
+        if (s.faultReason === 'ProbeSearchNoContact') {
+          feedbackEl.textContent =
+            'Kein Messtasterkontakt (Timeout). Bisherige gültige Kalibrierung bleibt erhalten.';
+        } else {
+          feedbackEl.textContent = 'Bisherige gültige Kalibrierung bleibt erhalten.';
+        }
         feedbackEl.classList.add('command-feedback--error');
         return;
       }

@@ -33,7 +33,7 @@ function run() {
   assert.strictEqual(cfg.tool_cylindrical_height, 15);
   assert.strictEqual(cfg.probe_xy_search_margin, 2);
   assert.strictEqual(cfg.insert_search_distance, 10);
-  assert.strictEqual(cfg.num_fine_searches, 3);
+  assert.strictEqual(cfg.num_fine_searches, 1);
   const keys = new Set(GROUPS.flatMap((g) => g.fields.map((f) => f.key)));
   for (const key of Object.keys(cfg)) {
     assert.ok(keys.has(key), `catalog missing ${key}`);

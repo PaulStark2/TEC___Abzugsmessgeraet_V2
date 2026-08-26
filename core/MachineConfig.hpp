@@ -98,7 +98,7 @@ struct MachineConfig
         float tool_diameter = 2.5f;
         float tool_cylindrical_height = 15.0f; // vertical tool cylinder from TCP in +Z
         float xy_search_margin = 2.0f; // extra inward XY travel past probe radius; not tool radius
-        unsigned num_fine_searches = 3u;
+        unsigned num_fine_searches = 1u;
         // Legacy field only (older builds used it for tool_offset math). Not the durable
         // probe position; not a motion/search target. Current M19 uses CalibrationSet.probe_center.
         TestPoint probe_offset_reference{40.0f, 40.0f, 10.0f};

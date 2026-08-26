@@ -134,7 +134,8 @@ enum class FaultReason : uint8_t
     ForceInvalidSample = 5,
     ForceStale = 6,
     CommunicationTimeout = 7,
-    ProcedureAbort = 8
+    ProcedureAbort = 8,
+    ProbeSearchNoContact = 9
 };
 
 // Electrical/timing view of the spreader. There is no end-position sensor.

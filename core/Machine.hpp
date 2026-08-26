@@ -180,6 +180,8 @@ public:
     CollisionContext collisionContext() const;
     ForceWatchdogTrip lastForceWatchdogTrip() const;
     FaultReason lastFaultReason() const;
+    // Latch a process abort reason without entering MachineState::Fault.
+    void latchFaultReason(FaultReason reason);
     float forceSampleAge() const;
 
     bool spreaderBusy() const;

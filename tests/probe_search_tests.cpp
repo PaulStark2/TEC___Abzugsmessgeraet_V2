@@ -31,18 +31,27 @@ static HostInputs withDiscTrigger(const Machine& machine, const TestPoint& disc,
 static ProbeSearch::Request zRequest()
 {
     ProbeSearch::Request r{};
-    r.reference = TestPoint{0.0f, 0.0f, 5.0f};
+    r.reference = TestPoint{0.0f, 0.0f, 15.0f}; // hub above disc at z=5
     r.dir = ProbeSearchDir::NegZ;
     r.approach_distance = 10.0f;
     r.search_distance = 10.0f;
-    r.search_depth = 8.0f;
+    r.search_depth = 5.0f;
     r.lateral_offset = 15.25f;
-    r.xy_inner_radius = 2.0f;
+    r.xy_keepout_radius = 0.0f;
     r.backoff = 1.0f;
     r.approach_speed = 20.0f;
     r.fast_speed = 10.0f;
     r.fine_speed = 5.0f;
     r.num_fine_searches = 0;
+    return r;
+}
+
+static ProbeSearch::Request xyRequest(ProbeSearchDir dir)
+{
+    ProbeSearch::Request r = zRequest();
+    r.dir = dir;
+    r.measured_center_z = 5.0f;
+    r.have_measured_center_z = true;
     return r;
 }
 
@@ -124,13 +133,14 @@ int main()
         Machine m;
         ProbeSearch search;
         ProbeSearch::Request r = zRequest();
-        r.reference = TestPoint{80.0f, 80.0f, 5.0f};
+        r.reference = TestPoint{80.0f, 80.0f, 15.0f};
         search.start(m, r);
         for (int i = 0; i < 800 && !search.isComplete() && !search.isError(); ++i)
         {
             tickNoDisc(m, search);
         }
-        if (!search.isError() || search.isComplete())
+        if (!search.isError() || search.isComplete() ||
+            search.errorReason() != ProbeSearch::ErrorReason::NoContact)
         {
             return 20;
         }
@@ -189,8 +199,7 @@ int main()
     {
         Machine m;
         ProbeSearch search;
-        ProbeSearch::Request r = zRequest();
-        r.dir = ProbeSearchDir::PosX;
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::PosX);
         r.num_fine_searches = 0;
         if (!search.start(m, r) || !runUntilDone(search, m, disc, 1200))
         {
@@ -203,50 +212,31 @@ int main()
         }
     }
 
-    // XY search without trigger stops at the inner radius, not the probe axis.
+    // XY search without trigger reaches the hub axis (timeout), not an inner radius.
     {
         Machine m;
         ProbeSearch search;
-        ProbeSearch::Request r = zRequest();
-        r.dir = ProbeSearchDir::PosX;
-        r.reference = TestPoint{40.0f, 40.0f, 10.0f};
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::PosX);
+        r.reference = TestPoint{40.0f, 40.0f, 20.0f};
+        r.measured_center_z = 10.0f;
         r.search_depth = 5.0f;
         r.num_fine_searches = 0;
         search.start(m, r);
-        float min_search_r = 1.0e9f;
         for (int i = 0; i < 800 && !search.isComplete() && !search.isError(); ++i)
         {
             tickNoDisc(m, search);
-            if (search.state() == ProbeSearch::State::FastSearch ||
-                search.state() == ProbeSearch::State::FineSearch)
-            {
-                const float dx = m.x() - r.reference.x;
-                const float dy = m.y() - r.reference.y;
-                const float dist = std::sqrt(dx * dx + dy * dy);
-                if (dist < min_search_r)
-                {
-                    min_search_r = dist;
-                }
-            }
         }
-        if (!search.isError() || search.isComplete())
+        if (!search.isError() || search.isComplete() ||
+            search.errorReason() != ProbeSearch::ErrorReason::NoContact)
         {
             return 70;
-        }
-        if (min_search_r + 0.05f < r.xy_inner_radius)
-        {
-            return 71;
         }
         const float dx = m.x() - r.reference.x;
         const float dy = m.y() - r.reference.y;
         const float end_r = std::sqrt(dx * dx + dy * dy);
-        if (end_r + 0.05f < r.xy_inner_radius)
+        if (end_r > 1.0f)
         {
             return 72;
-        }
-        if (end_r > r.xy_inner_radius + 1.0f)
-        {
-            return 73;
         }
     }
 
@@ -254,8 +244,7 @@ int main()
     {
         Machine m;
         ProbeSearch search;
-        ProbeSearch::Request r = zRequest();
-        r.dir = ProbeSearchDir::PosX;
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::PosX);
         r.approach_speed = 20.0f;
         r.fine_speed = 5.0f;
         r.num_fine_searches = 0;
@@ -290,8 +279,7 @@ int main()
     {
         Machine m;
         ProbeSearch search;
-        ProbeSearch::Request r = zRequest();
-        r.dir = ProbeSearchDir::PosX;
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::PosX);
         r.num_fine_searches = 0;
         if (!search.start(m, r) || !runUntilDone(search, m, disc, 1200))
         {
@@ -309,8 +297,7 @@ int main()
     {
         Machine m;
         ProbeSearch search;
-        ProbeSearch::Request r = zRequest();
-        r.dir = ProbeSearchDir::PosY;
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::PosY);
         r.num_fine_searches = 0;
         if (!search.start(m, r) || !runUntilDone(search, m, disc, 1200))
         {
@@ -328,8 +315,7 @@ int main()
     {
         Machine m;
         ProbeSearch search;
-        ProbeSearch::Request r = zRequest();
-        r.dir = ProbeSearchDir::PosX;
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::PosX);
         r.num_fine_searches = 0;
         if (!search.start(m, r))
         {
@@ -390,9 +376,9 @@ int main()
         m.setCurrentPose(0.0f, 0.0f, 14.0f);
         ProbeSearch search;
         ProbeSearch::Request r = zRequest();
-        r.reference = TestPoint{20.0f, 20.0f, 5.0f};
+        r.reference = TestPoint{20.0f, 20.0f, 15.0f};
         r.dir = ProbeSearchDir::NegZ;
-        r.approach_distance = 10.0f; // hub.z = 15
+        r.approach_distance = 10.0f;
         r.approach_speed = 10.0f;
         r.transfer_speed = 10.0f;
         r.num_fine_searches = 0;
@@ -441,6 +427,56 @@ int main()
                 }
                 break;
             }
+        }
+    }
+
+    // Offset disc: far-side search still contacts (no inner-radius abort).
+    {
+        Machine m;
+        ProbeSearch search;
+        const TestPoint offset_disc{4.0f, 0.0f, 5.0f};
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::NegX);
+        r.num_fine_searches = 0;
+        if (!search.start(m, r) || !runUntilDone(search, m, offset_disc, 2000))
+        {
+            return 120;
+        }
+        const float r_sum = expectedXyContactRadius(8.0f, 2.5f);
+        if (!nearEqual(search.result().x, offset_disc.x - r_sum, 0.8f))
+        {
+            return 121;
+        }
+    }
+
+    // One fine search: two contacts then retreat to hub.
+    {
+        Machine m;
+        ProbeSearch search;
+        ProbeSearch::Request r = xyRequest(ProbeSearchDir::PosX);
+        r.num_fine_searches = 1;
+        unsigned saw_fine = 0;
+        if (!search.start(m, r))
+        {
+            return 130;
+        }
+        for (int i = 0; i < 2000 && !search.isComplete() && !search.isError(); ++i)
+        {
+            if (search.state() == ProbeSearch::State::FineSearch)
+            {
+                ++saw_fine;
+            }
+            m.setHostInputs(withDiscTrigger(m, disc));
+            m.tick(0.05f);
+            search.tick(0.05f, m);
+        }
+        if (!search.isComplete() || saw_fine == 0)
+        {
+            return 131;
+        }
+        if (!nearEqual(m.x(), disc.x, 0.8f) || !nearEqual(m.y(), disc.y, 0.8f) ||
+            !nearEqual(m.z(), disc.z + r.approach_distance, 0.8f))
+        {
+            return 132;
         }
     }
 

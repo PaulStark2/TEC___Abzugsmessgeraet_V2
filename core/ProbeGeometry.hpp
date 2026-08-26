@@ -61,6 +61,26 @@ inline float xySearchInnerRadius(float measuring_head_diameter, float xy_search_
     return inner > 0.0f ? inner : 0.0f;
 }
 
+// XY work height after the Z measurement: TCP below the measured disc center so
+// the configured tool cylinder still overlaps the disc volume.
+inline bool xySearchWorkZ(float measured_center_z, float search_depth, float measuring_head_thickness,
+                          float tool_cylindrical_height, float& z_out)
+{
+    if (!std::isfinite(measured_center_z) || !std::isfinite(search_depth) ||
+        !std::isfinite(measuring_head_thickness) || !std::isfinite(tool_cylindrical_height) ||
+        search_depth <= 0.0f || measuring_head_thickness < 0.0f || tool_cylindrical_height <= 0.0f)
+    {
+        return false;
+    }
+    const float max_depth = tool_cylindrical_height - 0.5f * measuring_head_thickness;
+    if (!(search_depth < max_depth))
+    {
+        return false;
+    }
+    z_out = measured_center_z - search_depth;
+    return std::isfinite(z_out);
+}
+
 // TCP at contact → estimated probe-disc center contribution for one direction.
 // Z uses disc thickness (center is mid-plane), not a spherical head radius.
 inline bool contactToProbeCenter(const TestPoint& tcp, ProbeSearchDir dir, float measuring_head_diameter,

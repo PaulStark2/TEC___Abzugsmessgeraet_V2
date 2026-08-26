@@ -83,8 +83,8 @@ That is required: the XY work height is intentionally below `probe_center.z`.
 
 ## XY work height (do not change)
 
-After the Z measurement, `reference.z` becomes the measured disc-center Z.
-Each lateral search then uses:
+After the Z measurement, the **measured** disc-center Z is stored for the XY
+descend only. The hub pose is not rewritten. Each lateral search then uses:
 
 ```text
 XY search Z = measured probe_center.z − search_depth
@@ -97,52 +97,41 @@ disc mid-plane.
 The ~15 mm constant-diameter shaft starting at TCP is long enough to contact
 the 3 mm disc while the TCP sits 5 mm below the center.
 
-## XY search limit
+## XY start offset and search timeout
 
-`search_distance` remains the ABB-style extra XY **start** clearance:
-
-```text
-xy_start_offset = search_distance + R_probe + R_tool
-```
-
-It is **not** the maximum search travel and **not** the Phase-1 insert depth.
-
-The hard XY motion bound is the innermost commanded |TCP_xy − assumed probe axis|.
-The TCP must not be driven to the probe axis.
-
-Named quantity (tool radius is **not** added):
+`search_distance` is the ABB-style extra XY **start** clearance from the **hub**,
+not from a stored disc center:
 
 ```text
-max_xy_search_radius = measuring_head_diameter/2 + probe_xy_search_margin
-                     = 4 mm + 2 mm = 6 mm
+d_start = search_distance + R_probe + R_tool
+Start_xy = Hub_xy + direction * d_start
 ```
 
-Using that 6 mm value as the inner TCP radius would stop the search at 6 mm
-from the axis and miss geometric contact at 5.25 mm. The commanded inner
-radius is therefore the complementary inward stop:
+It is **not** a search destination and **not** the Phase-1 insert depth.
+
+After the Z measurement, each XY direction descends to
 
 ```text
-xy_search_inner_radius = max(0, R_probe − probe_xy_search_margin)
-                       = max(0, 4 mm − 2 mm) = 2 mm
+z_xy_start = measured_center_z − search_depth
 ```
 
-Meaning: the TCP may travel inward until it is `probe_xy_search_margin` past
-the disc radius toward the axis. Default path: start at ~15.25 mm from the
-axis, stop at 2 mm. Contact at 5.25 mm lies on that path. Reaching the axis
-(`r = 0`) is not commanded.
+`search_depth` must leave the tool cylinder overlapping the disc
+(`search_depth < tool_cylindrical_height − thickness/2`).
 
-`probe_xy_search_margin` is a process/calibration parameter (GUI + M12), not a
-GUI-editable `SafetyLimits` constant. It must stay strictly below `R_probe` so
-the inner radius stays positive.
+The search itself is **trigger-driven**: the axis moves toward the hub until the
+probe fires or a timeout (time and/or remaining travel to the hub) expires.
+The hub axis is a last-resort bound, not a planned contact pose.
 
-No trigger before the inner target is reached:
+No trigger before timeout:
 
-1. Search → Error
+1. Search → Error (`FaultReason::ProbeSearchNoContact`)
 2. ProbeCalibration → Error
 3. no new `probe_center` / `tool_offset` is stored
 4. previous valid calibration remains
+5. GUI shows a timeout / no-contact message
 
-This limit is a **motion target**, not a post-hoc validation.
+`probe_xy_search_margin` remains in config for compatibility. It no longer
+defines the planmässige Suchende.
 
 ## Insert depth vs search_distance
 
@@ -196,30 +185,33 @@ whole process (M18).
 
 Non-blocking FSMs: `ProbeSearch` (SearchL replacement) and `ProbeCalibration`.
 
-Hub pose **P_z** = `(reference.x, reference.y, reference.z + approach_distance)`.
-Every direction starts and ends at P_z. Transfer and search legs move **one axis
+Hub pose **P** is the TCP at protocol start (jogged, or after ProbeApproach).
+It is the only location reference. It is **not** an assumed disc center.
+Every direction starts and ends at P. Transfer and search legs move **one axis
 at a time** (never X+Y or X+Z together).
 
 ```text
-Measure Z from P_z (Z decreases, v_fast then optional fine)
-  → TCP hits disc top face
+Measure Z from hub P (Z decreases until trigger or timeout)
+  → TCP hits disc top face; latch that pose immediately; hard brake
   → probe_center.z = trigger_tcp_z − measuring_head_thickness/2
-  → return to P_z (updated hub Z from measured center)
+  → return to P (hub Z unchanged)
   → for each of −Y, +Y, −X, +X:
-       P_z → lateral at hub Z → descend to XY work height
-       → fast search → latch → backoff → optional fine searches
-       → clear along search axis → raise to hub Z → return to P_z
+       P → defined lateral offset at hub Z
+       → descend to z_xy_start from measured Z + geometry
+       → fast search toward hub until trigger or timeout → latch → hard brake
+       → backoff → one fine search until trigger or timeout → latch → hard brake
+       → clear to directional start → return to P
   → four TCP contacts → fitCircleCenterXY
   → Install: probeCenter = measured, toolOffset = 0
     OffsetOnly: toolOffset = storedProbeCenter − measured
   → setProbeCenter + setToolOffset only on success
 ```
 
-XY work height = measured `probe_center.z − search_depth` (default −5 mm).
+XY work height = measured `probe_center.z − search_depth` (default 5 mm below
+the **just measured** center).
 
-Each direction: approach (via P_z) → fast search → latch → backoff → optional
-fine searches (`num_fine_searches`, default 3, mean of valid hits) → retreat
-via P_z.
+Each direction: start from hub geometry → fast search → latch → backoff → one
+fine search (`num_fine_searches`, default 1) → retreat via P.
 
 Rx/Ry remain out of scope.
 
@@ -227,15 +219,16 @@ Rx/Ry remain out of scope.
 
 ### Manual — `CmdStartProbeCalib` (0x54)
 
-Operator jogs TCP to hub **P_z** above the disc. ProbeApproach is skipped.
-`search_ref.z = tcp.z − approach_distance` (assumed disc center). On Complete
-the process ends (`Completed`).
+Operator jogs TCP to hub **P** above the disc. ProbeApproach is skipped.
+No assumed disc center is derived (`tcp.z − approach_distance` is not used).
+FullCalib works without a stored `probe_center`. On Complete the process ends
+(`Completed`).
 
 ### Automatic — `CmdStart` (0x13)
 
 ```text
-ProbeApproach (Safe-Z → XY to probe_center → approach Z = P_z)
-  → ProbeCalibration (search_ref.z = probe_center.z)
+ProbeApproach (Safe-Z → XY to probe_center → approach Z = hub P)
+  → ProbeCalibration (hub = current TCP; probe_center not used as search target)
   → MoveSafePose
   → normal test/aging cycle
 ```
@@ -281,7 +274,7 @@ Writable via Parametereinstellungen. SafetyLimits are **not** GUI-editable.
 | `search_depth` | 5 mm (XY work height below measured center) |
 | `approach_distance` | 10 mm |
 | `fine_search_speed` | 1 mm/s |
-| `num_fine_searches` | 3 |
+| `num_fine_searches` | 1 |
 | `probe_offset_reference_{x,y,z}` | (40, 40, 10) mm |
 
 `MachineConfig` payload is **232 bytes** (was 220; adds `probe_center_x/y/z`
@@ -305,7 +298,7 @@ and `gui/server/protocol/m12Codec.js`.
 
 | Case | Result |
 |------|--------|
-| No trigger / XY inner limit / Z search_depth | Error, no new calib |
+| No trigger / timeout | Error, no new calib |
 | STOP / Abort / Fault during search | Abort, previous calib kept |
 | Degenerate 4-point fit / unrealistic radius | Error, previous calib kept |
 | Invalid config (NaN/Inf, out of SafetyLimits) | Rejected, previous config kept |

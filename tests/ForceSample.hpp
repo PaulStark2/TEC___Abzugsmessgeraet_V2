@@ -195,8 +195,7 @@ inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
     // after homing the TCP is at/near (0,0,...) when they start an automatic process.
     const TestPoint start_pose{machine.x(), machine.y(), machine.z()};
 
-    // Manual calibration: user jogs TCP to hub P_z above the disc; Core derives
-    // search_ref.z = tcp.z - approach_distance. Default disc = probe_offset_reference.
+    // Manual calibration: operator jogs TCP to the hub above the disc.
     const MachineConfig::Probe& probe_cfg = machine.machineConfig().probe;
     machine.moveTo(probe_cfg.probe_offset_reference.x, probe_cfg.probe_offset_reference.y,
                     probe_cfg.probe_offset_reference.z + probe_cfg.approach_distance);

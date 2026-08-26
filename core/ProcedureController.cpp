@@ -154,12 +154,11 @@ bool ProcedureController::startProbeCalibration()
     {
         return false;
     }
-    // Manual start: operator jogs TCP to hub P_z (above the disc). search_ref.z is the
-    // assumed disc-center Z so ProbeSearch hub = tcp.z = center + approach_distance.
-    const float standoff = machine_.machineConfig().probe.approach_distance;
-    const TestPoint search_ref{machine_.x(), machine_.y(), machine_.z() - standoff};
+    // Manual start: operator jogs TCP to the hub above the disc. That pose is the
+    // only location reference; no assumed disc center is derived from it.
+    const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
     // CmdStartProbeCalib / FullCalib / Geometry → Install (set probeCenter, toolOffset=0).
-    if (!probe_calib_.start(machine_, search_ref, ProbeCalibration::StorePolicy::Install))
+    if (!probe_calib_.start(machine_, hub, ProbeCalibration::StorePolicy::Install))
     {
         return false;
     }
@@ -744,16 +743,15 @@ void ProcedureController::handleProbeApproach()
         approach_leg_ = 2;
         return;
     }
-    // Start M19 with geometric Z = probe_center.z so ProbeSearch hub P_z is
-    // probe_center.z + approach_distance (TCP already there after coarse leg).
-    // ProbeSearch uses v_approach_probe / v_transfer_probe; search legs use v_search*.
+    // Start M19 at the hub TCP (standoff pose). probe_center was only used to
+    // drive ProbeApproach to this hub; the search itself does not use it as a target.
     std::fprintf(stderr,
-                 "[ProbeApproach] start M19 at standoff pose=(%.3f,%.3f,%.3f) search_ref.z=%.3f "
+                 "[ProbeApproach] start M19 at hub pose=(%.3f,%.3f,%.3f) "
                  "v_search=%.3f\n",
-                 machine_.x(), machine_.y(), machine_.z(), target.z, probe.v_search);
-    const TestPoint search_ref{machine_.x(), machine_.y(), target.z};
+                 machine_.x(), machine_.y(), machine_.z(), probe.v_search);
+    const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
     // Procedure ProbeApproach → OffsetOnly (keep probeCenter, update toolOffset only).
-    if (!probe_calib_.start(machine_, search_ref, ProbeCalibration::StorePolicy::OffsetOnly))
+    if (!probe_calib_.start(machine_, hub, ProbeCalibration::StorePolicy::OffsetOnly))
     {
         abortProcess();
         return;
@@ -784,7 +782,15 @@ void ProcedureController::handleProbeCalibrate(float dt)
     }
     else if (probe_calib_.isError())
     {
-        abortProcess();
+        if (probe_calib_.searchErrorReason() == ProbeSearch::ErrorReason::NoContact)
+        {
+            machine_.latchFaultReason(FaultReason::ProbeSearchNoContact);
+            abortProcess("probe search: no contact before timeout");
+        }
+        else
+        {
+            abortProcess("probe calibration error");
+        }
     }
 }
 

@@ -34,8 +34,7 @@ int main()
     {
         Machine machine;
         homeMachine(machine);
-        // Manual calibration: operator jogs TCP to hub P_z above the disc.
-        // startProbeCalibration derives search_ref.z = tcp.z - approach_distance.
+        // Manual calibration: operator jogs TCP to the hub above the disc.
         {
             const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
             const float standoff = machine.machineConfig().probe.approach_distance;

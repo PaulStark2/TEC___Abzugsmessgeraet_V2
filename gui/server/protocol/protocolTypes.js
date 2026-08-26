@@ -132,6 +132,7 @@ const FAULT_REASON_NAMES = Object.freeze([
   'ForceStale',
   'CommunicationTimeout',
   'ProcedureAbort',
+  'ProbeSearchNoContact',
 ]);
 
 const SPREADER_STATE_NAMES = Object.freeze([

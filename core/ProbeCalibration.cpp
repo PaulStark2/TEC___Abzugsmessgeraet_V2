@@ -4,7 +4,7 @@
 
 #include <cmath>
 
-bool ProbeCalibration::start(Machine& machine, const TestPoint& search_reference, StorePolicy policy)
+bool ProbeCalibration::start(Machine& machine, const TestPoint& hub, StorePolicy policy)
 {
     if (machine.machineState() == MachineState::Fault)
     {
@@ -18,7 +18,9 @@ bool ProbeCalibration::start(Machine& machine, const TestPoint& search_reference
     }
 
     policy_ = policy;
-    reference_ = search_reference;
+    hub_ = hub;
+    measured_center_z_ = 0.0f;
+    have_measured_center_z_ = false;
     result_ = TestPoint{};
     tool_offset_ = TestPoint{};
     contact_z_ = TestPoint{};
@@ -73,7 +75,17 @@ void ProbeCalibration::tick(float dt, Machine& machine)
                 enterError();
                 return;
             }
-            reference_.z = z_center.z;
+            measured_center_z_ = z_center.z;
+            have_measured_center_z_ = true;
+            float work_z = 0.0f;
+            if (!xySearchWorkZ(measured_center_z_, machine.machineConfig().probe.search_depth,
+                               machine.machineConfig().probe.measuring_head_thickness,
+                               machine.machineConfig().probe.tool_cylindrical_height, work_z))
+            {
+                enterError();
+                return;
+            }
+            (void)work_z;
         }
         if (!startDirection(machine, ProbeSearchDir::NegY, Step::MeasureNegY))
         {
@@ -159,20 +171,26 @@ ProbeCalibration::StorePolicy ProbeCalibration::storePolicy() const
     return policy_;
 }
 
+ProbeSearch::ErrorReason ProbeCalibration::searchErrorReason() const
+{
+    return search_.errorReason();
+}
+
 ProbeSearch::Request ProbeCalibration::makeRequest(const Machine& machine, ProbeSearchDir dir) const
 {
     const MachineConfig::Probe& probe = machine.machineConfig().probe;
     ProbeSearch::Request request{};
-    request.reference = reference_;
+    request.reference = hub_;
     request.dir = dir;
     request.approach_distance = probe.approach_distance;
     request.search_distance = probe.search_distance;
     request.search_depth = probe.search_depth;
+    request.measured_center_z = measured_center_z_;
+    request.have_measured_center_z = have_measured_center_z_;
     request.lateral_offset =
         xyStartOffset(probe.search_distance, probe.measuring_head_diameter, probe.tool_diameter);
-    request.xy_inner_radius = xySearchInnerRadius(probe.measuring_head_diameter, probe.xy_search_margin);
+    request.xy_keepout_radius = 0.0f;
     request.backoff = probe.backoff;
-    // Raise/align/descend: v_approach_probe; backoff/retreat/transfers: v_transfer_probe.
     request.approach_speed = probe.v_approach_probe;
     request.transfer_speed = probe.v_transfer_probe;
     request.fast_speed = probe.v_search;

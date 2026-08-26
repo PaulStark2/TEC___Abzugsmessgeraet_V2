@@ -14,6 +14,11 @@ static bool nearEqual(float a, float b, float eps = 0.6f)
     return std::fabs(a - b) <= eps;
 }
 
+static TestPoint hubForDisc(const Machine& machine, const TestPoint& disc)
+{
+    return TestPoint{disc.x, disc.y, disc.z + machine.machineConfig().probe.approach_distance};
+}
+
 static bool applyFastProbeConfig(Machine& machine)
 {
     MachineConfig cfg = machine.machineConfig();
@@ -91,7 +96,7 @@ int main()
             return 1;
         }
         ProbeCalibration calib;
-        if (!calib.start(m, m.machineConfig().probe.probe_offset_reference))
+        if (!calib.start(m, hubForDisc(m, m.machineConfig().probe.probe_offset_reference)))
         {
             return 2;
         }
@@ -120,7 +125,7 @@ int main()
         }
         const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration calib;
-        if (!calib.start(m, disc) || !runCalib(calib, m, disc, 4000))
+        if (!calib.start(m, hubForDisc(m, disc)) || !runCalib(calib, m, disc, 4000))
         {
             return 11;
         }
@@ -150,7 +155,7 @@ int main()
         const TestPoint nominal = m.machineConfig().probe.probe_offset_reference;
         const TestPoint disc{nominal.x + 1.0f, nominal.y - 2.0f, nominal.z + 1.0f};
         ProbeCalibration calib;
-        if (!calib.start(m, disc, ProbeCalibration::StorePolicy::Install) ||
+        if (!calib.start(m, hubForDisc(m, disc), ProbeCalibration::StorePolicy::Install) ||
             !runCalib(calib, m, disc, 4000))
         {
             return 21;
@@ -175,7 +180,7 @@ int main()
         }
 
         ProbeCalibration calib2;
-        if (!calib2.start(m, disc, ProbeCalibration::StorePolicy::Install) ||
+        if (!calib2.start(m, hubForDisc(m, disc), ProbeCalibration::StorePolicy::Install) ||
             !runCalib(calib2, m, disc, 4000))
         {
             return 25;
@@ -192,7 +197,7 @@ int main()
         Machine m;
         applyFastProbeConfig(m);
         ProbeCalibration calib;
-        calib.start(m, m.machineConfig().probe.probe_offset_reference);
+        calib.start(m, hubForDisc(m, m.machineConfig().probe.probe_offset_reference));
         calib.abort();
         if (!calib.isError() || calib.isComplete())
         {
@@ -210,7 +215,7 @@ int main()
         applyFastProbeConfig(m);
         const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration first;
-        if (!first.start(m, disc) || !runCalib(first, m, disc, 4000))
+        if (!first.start(m, hubForDisc(m, disc)) || !runCalib(first, m, disc, 4000))
         {
             return 40;
         }
@@ -218,7 +223,7 @@ int main()
         const TestPoint kept_offset = m.calibrationSet().tool_offset;
 
         ProbeCalibration calib;
-        calib.start(m, m.machineConfig().probe.probe_offset_reference);
+        calib.start(m, hubForDisc(m, m.machineConfig().probe.probe_offset_reference));
         HostInputs in{};
         in.e_stop = true;
         m.setHostInputs(withFreshForce(in));
@@ -245,14 +250,14 @@ int main()
         applyFastProbeConfig(m);
         const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration first;
-        if (!first.start(m, disc) || !runCalib(first, m, disc, 4000))
+        if (!first.start(m, hubForDisc(m, disc)) || !runCalib(first, m, disc, 4000))
         {
             return 50;
         }
         const TestPoint kept_center = m.calibrationSet().probe_center;
         const TestPoint kept = m.calibrationSet().tool_offset;
         ProbeCalibration fail;
-        fail.start(m, m.machineConfig().probe.probe_offset_reference);
+        fail.start(m, hubForDisc(m, m.machineConfig().probe.probe_offset_reference));
         for (int i = 0; i < 2500 && !fail.isComplete() && !fail.isError(); ++i)
         {
             m.setHostInputs(withFreshForce(HostInputs{}));
@@ -291,13 +296,15 @@ int main()
         const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeSearch search;
         ProbeSearch::Request r{};
-        r.reference = disc;
+        r.reference = hubForDisc(m, disc);
         r.dir = ProbeSearchDir::PosX;
         r.approach_distance = 10.0f;
         r.search_distance = m.machineConfig().probe.search_distance;
         r.search_depth = m.machineConfig().probe.search_depth;
+        r.measured_center_z = disc.z;
+        r.have_measured_center_z = true;
         r.lateral_offset = xyStartOffset(r.search_distance, 8.0f, 2.5f);
-        r.xy_inner_radius = xySearchInnerRadius(8.0f, 2.0f);
+        r.xy_keepout_radius = 0.0f;
         r.backoff = 1.0f;
         r.approach_speed = 25.0f;
         r.fast_speed = 15.0f;
@@ -333,7 +340,7 @@ int main()
         }
         const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         ProbeCalibration calib;
-        if (!calib.start(m, disc))
+        if (!calib.start(m, hubForDisc(m, disc)))
         {
             return 71;
         }
@@ -378,7 +385,7 @@ int main()
         const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
         const float standoff = m.machineConfig().probe.approach_distance;
         ProbeCalibration calib;
-        if (!calib.start(m, disc))
+        if (!calib.start(m, hubForDisc(m, disc)))
         {
             return 76;
         }
@@ -420,7 +427,7 @@ int main()
         }
         const TestPoint disc1 = m1.machineConfig().probe.probe_offset_reference;
         ProbeCalibration c1;
-        if (!c1.start(m1, disc1))
+        if (!c1.start(m1, hubForDisc(m1, disc1)))
         {
             return 81;
         }
@@ -453,7 +460,7 @@ int main()
             }
             const TestPoint disc0 = m0.machineConfig().probe.probe_offset_reference;
             ProbeCalibration c0;
-            if (!c0.start(m0, disc0))
+            if (!c0.start(m0, hubForDisc(m0, disc0)))
             {
                 return 85;
             }
@@ -497,7 +504,7 @@ int main()
             }
             const TestPoint disc2 = m2.machineConfig().probe.probe_offset_reference;
             ProbeCalibration c2;
-            if (!c2.start(m2, disc2))
+            if (!c2.start(m2, hubForDisc(m2, disc2)))
             {
                 return 91;
             }

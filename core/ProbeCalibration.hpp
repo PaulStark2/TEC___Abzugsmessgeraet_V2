@@ -43,10 +43,10 @@ public:
         OffsetOnly = 1
     };
 
-    // search_reference: current TCP pose used as origin for ProbeSearch moves.
-    // Must be provided by the caller so ProbeCalibration never assumes any
-    // configured probe position. probe_offset_reference is NOT used for offset math.
-    bool start(Machine& machine, const TestPoint& search_reference,
+    // hub: TCP pose at protocol start (operator jog or ProbeApproach). Used only
+    // as the hub; not an assumed disc center. probe_offset_reference is NOT used
+    // for offset math or search targets.
+    bool start(Machine& machine, const TestPoint& hub,
                StorePolicy policy = StorePolicy::Install);
     void tick(float dt, Machine& machine);
     void abort();
@@ -58,6 +58,7 @@ public:
     TestPoint result() const;
     TestPoint toolOffset() const;
     StorePolicy storePolicy() const;
+    ProbeSearch::ErrorReason searchErrorReason() const;
 
 private:
     ProbeSearch::Request makeRequest(const Machine& machine, ProbeSearchDir dir) const;
@@ -69,7 +70,9 @@ private:
     State state_ = State::Idle;
     Step step_ = Step::Idle;
     StorePolicy policy_ = StorePolicy::Install;
-    TestPoint reference_{};
+    TestPoint hub_{};
+    float measured_center_z_ = 0.0f;
+    bool have_measured_center_z_ = false;
     TestPoint result_{};
     TestPoint tool_offset_{};
     TestPoint contact_z_{};

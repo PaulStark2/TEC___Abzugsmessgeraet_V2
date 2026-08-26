@@ -1321,6 +1321,15 @@ FaultReason Machine::lastFaultReason() const
     return last_fault_reason_;
 }
 
+void Machine::latchFaultReason(FaultReason reason)
+{
+    if (machine_state_ == MachineState::Fault)
+    {
+        return;
+    }
+    last_fault_reason_ = reason;
+}
+
 float Machine::forceSampleAge() const
 {
     return force_sample_age_s_;
