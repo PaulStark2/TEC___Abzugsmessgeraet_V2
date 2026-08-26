@@ -60,6 +60,8 @@ std::size_t encodedPayloadSize(uint8_t message_id, const LoadProgramPayload* loa
         return kPlateOriginPayloadWireSize;
     case MessageId::CmdSetProbeCenter:
         return kPlateOriginPayloadWireSize;
+    case MessageId::CmdRestoreMcs:
+        return kPlateOriginPayloadWireSize;
     default:
         return 0;
     }
@@ -396,11 +398,13 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
 {
     std::size_t offset = 0;
     const bool ok =
-        writeF32LE(out, capacity, offset, payload.v_approach) &&
-        writeF32LE(out, capacity, offset, payload.v_slow) &&
-        writeF32LE(out, capacity, offset, payload.v_measure) &&
+        writeF32LE(out, capacity, offset, payload.v_approach_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.v_fine_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.v_unclamp) &&
         writeF32LE(out, capacity, offset, payload.v_homing) &&
-        writeF32LE(out, capacity, offset, payload.acceleration) &&
+        writeF32LE(out, capacity, offset, payload.a_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.corner_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.a_homing) &&
         writeF32LE(out, capacity, offset, payload.force_filter) &&
         writeF32LE(out, capacity, offset, payload.xy_tolerance_N) &&
         writeF32LE(out, capacity, offset, payload.xy_correction_step) &&
@@ -419,7 +423,7 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.z_correction_max) &&
         writeF32LE(out, capacity, offset, payload.minimum_correction) &&
         writeU16LE(out, capacity, offset, payload.max_optimization_iterations) &&
-        writeF32LE(out, capacity, offset, payload.probe_search_speed) &&
+        writeF32LE(out, capacity, offset, payload.v_search) &&
         writeF32LE(out, capacity, offset, payload.probe_search_distance) &&
         writeF32LE(out, capacity, offset, payload.probe_backoff) &&
         writeF32LE(out, capacity, offset, payload.home_offset_x) &&
@@ -438,7 +442,7 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.tool_diameter) &&
         writeF32LE(out, capacity, offset, payload.search_depth) &&
         writeF32LE(out, capacity, offset, payload.approach_distance) &&
-        writeF32LE(out, capacity, offset, payload.fine_search_speed) &&
+        writeF32LE(out, capacity, offset, payload.v_search_fine) &&
         writeF32LE(out, capacity, offset, payload.probe_offset_reference_x) &&
         writeF32LE(out, capacity, offset, payload.probe_offset_reference_y) &&
         writeF32LE(out, capacity, offset, payload.probe_offset_reference_z) &&
@@ -448,10 +452,25 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeU16LE(out, capacity, offset, payload.num_fine_searches) &&
         writeF32LE(out, capacity, offset, payload.phase1_v_extract) &&
         writeF32LE(out, capacity, offset, payload.phase1_v_insert) &&
+        writeF32LE(out, capacity, offset, payload.phase1_a) &&
+        writeF32LE(out, capacity, offset, payload.phase1_corner) &&
         writeF32LE(out, capacity, offset, payload.phase2_v_extract) &&
         writeF32LE(out, capacity, offset, payload.phase2_v_insert) &&
+        writeF32LE(out, capacity, offset, payload.phase2_a) &&
+        writeF32LE(out, capacity, offset, payload.phase2_corner) &&
         writeF32LE(out, capacity, offset, payload.phase3_v_extract) &&
-        writeF32LE(out, capacity, offset, payload.phase3_v_insert);
+        writeF32LE(out, capacity, offset, payload.phase3_v_insert) &&
+        writeF32LE(out, capacity, offset, payload.phase3_a) &&
+        writeF32LE(out, capacity, offset, payload.phase3_corner) &&
+        writeF32LE(out, capacity, offset, payload.v_approach_probe) &&
+        writeF32LE(out, capacity, offset, payload.v_transfer_probe) &&
+        writeF32LE(out, capacity, offset, payload.a_probe_transfer) &&
+        writeF32LE(out, capacity, offset, payload.corner_probe_transfer) &&
+        writeF32LE(out, capacity, offset, payload.a_probe_search) &&
+        writeF32LE(out, capacity, offset, payload.a_probe_brake) &&
+        writeF32LE(out, capacity, offset, payload.probe_center_x) &&
+        writeF32LE(out, capacity, offset, payload.probe_center_y) &&
+        writeF32LE(out, capacity, offset, payload.probe_center_z);
     return ok && offset == kMachineConfigPayloadWireSize;
 }
 
@@ -459,11 +478,13 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
 {
     std::size_t offset = 0;
     const bool ok =
-        readF32LE(data, length, offset, out.v_approach, true) &&
-        readF32LE(data, length, offset, out.v_slow, true) &&
-        readF32LE(data, length, offset, out.v_measure, true) &&
+        readF32LE(data, length, offset, out.v_approach_testpoints, true) &&
+        readF32LE(data, length, offset, out.v_fine_testpoints, true) &&
+        readF32LE(data, length, offset, out.v_unclamp, true) &&
         readF32LE(data, length, offset, out.v_homing, true) &&
-        readF32LE(data, length, offset, out.acceleration, true) &&
+        readF32LE(data, length, offset, out.a_testpoints, true) &&
+        readF32LE(data, length, offset, out.corner_testpoints, true) &&
+        readF32LE(data, length, offset, out.a_homing, true) &&
         readF32LE(data, length, offset, out.force_filter, true) &&
         readF32LE(data, length, offset, out.xy_tolerance_N, true) &&
         readF32LE(data, length, offset, out.xy_correction_step, true) &&
@@ -482,7 +503,7 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.z_correction_max, true) &&
         readF32LE(data, length, offset, out.minimum_correction, true) &&
         readU16LE(data, length, offset, out.max_optimization_iterations) &&
-        readF32LE(data, length, offset, out.probe_search_speed, true) &&
+        readF32LE(data, length, offset, out.v_search, true) &&
         readF32LE(data, length, offset, out.probe_search_distance, true) &&
         readF32LE(data, length, offset, out.probe_backoff, true) &&
         readF32LE(data, length, offset, out.home_offset_x, true) &&
@@ -501,7 +522,7 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.tool_diameter, true) &&
         readF32LE(data, length, offset, out.search_depth, true) &&
         readF32LE(data, length, offset, out.approach_distance, true) &&
-        readF32LE(data, length, offset, out.fine_search_speed, true) &&
+        readF32LE(data, length, offset, out.v_search_fine, true) &&
         readF32LE(data, length, offset, out.probe_offset_reference_x, true) &&
         readF32LE(data, length, offset, out.probe_offset_reference_y, true) &&
         readF32LE(data, length, offset, out.probe_offset_reference_z, true) &&
@@ -511,10 +532,25 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readU16LE(data, length, offset, out.num_fine_searches) &&
         readF32LE(data, length, offset, out.phase1_v_extract, true) &&
         readF32LE(data, length, offset, out.phase1_v_insert, true) &&
+        readF32LE(data, length, offset, out.phase1_a, true) &&
+        readF32LE(data, length, offset, out.phase1_corner, true) &&
         readF32LE(data, length, offset, out.phase2_v_extract, true) &&
         readF32LE(data, length, offset, out.phase2_v_insert, true) &&
+        readF32LE(data, length, offset, out.phase2_a, true) &&
+        readF32LE(data, length, offset, out.phase2_corner, true) &&
         readF32LE(data, length, offset, out.phase3_v_extract, true) &&
-        readF32LE(data, length, offset, out.phase3_v_insert, true);
+        readF32LE(data, length, offset, out.phase3_v_insert, true) &&
+        readF32LE(data, length, offset, out.phase3_a, true) &&
+        readF32LE(data, length, offset, out.phase3_corner, true) &&
+        readF32LE(data, length, offset, out.v_approach_probe, true) &&
+        readF32LE(data, length, offset, out.v_transfer_probe, true) &&
+        readF32LE(data, length, offset, out.a_probe_transfer, true) &&
+        readF32LE(data, length, offset, out.corner_probe_transfer, true) &&
+        readF32LE(data, length, offset, out.a_probe_search, true) &&
+        readF32LE(data, length, offset, out.a_probe_brake, true) &&
+        readF32LE(data, length, offset, out.probe_center_x, true) &&
+        readF32LE(data, length, offset, out.probe_center_y, true) &&
+        readF32LE(data, length, offset, out.probe_center_z, true);
     return ok && offset == length && length == kMachineConfigPayloadWireSize;
 }
 

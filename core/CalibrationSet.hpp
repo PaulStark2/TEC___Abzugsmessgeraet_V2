@@ -2,18 +2,20 @@
 
 #include "TestPoint.hpp"
 
-// Taught geometry. plateOrigin / probeCenter are overwritten on each teach/calib.
-// toolOffset is the fixed mechanical probe-tip → spreader-TCP offset (default 0).
+// Taught geometry.
+// plateOrigin: TCP pose at plate teach (plate frame origin).
+// probeCenter: durable installed measuring-disc reference (FullCalib Install only).
+// toolOffset: TCP/tool deviation vs probeCenter (Procedure OffsetOnly); 0 after Install.
 struct CalibrationSet
 {
     TestPoint plate_origin{0.0f, 0.0f, 0.0f}; // machine pose of the plate calibration point
     bool plate_origin_valid = false; // false until a teach command succeeds
 
-    TestPoint probe_center{0.0f, 0.0f, 0.0f}; // machine pose of the probe tip center
-    bool probe_center_valid = false; // false until ProbeCalibration completes
+    TestPoint probe_center{0.0f, 0.0f, 0.0f}; // installed probe reference (machine frame)
+    bool probe_center_valid = false; // false until FullCalib/Geometry Install completes
 
-    // TCP correction in machine coordinates. Replaced on each successful calib:
-    // tool_offset = probe_offset_reference - measured_probe. Never accumulated.
+    // tool_offset = probe_center - measured (OffsetOnly). Zero after Install. Never from
+    // legacy probe_offset_reference. Applied as: machine = plate + point + tool_offset.
     TestPoint tool_offset{0.0f, 0.0f, 0.0f};
 
     // Calibrated MCS home pose (machine frame) after defineMachineCoordinateSystem /

@@ -359,6 +359,38 @@ export async function setPlateOrigin(pose) {
   return result;
 }
 
+export async function defineMcs() {
+  const response = await fetch('/api/calibration/define-mcs', { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function persistMcs(pose) {
+  const response = await fetch('/api/calibration/mcs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(pose || {}),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+/** Abort Full Calibration before commit: re-push committed store into Core. */
+export async function rollbackFullCalibration() {
+  const response = await fetch('/api/calibration/rollback-full', { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
 export async function startProbeCalibration() {
   const response = await fetch('/api/calibration/probe-start', { method: 'POST' });
   const result = await response.json();
@@ -368,8 +400,13 @@ export async function startProbeCalibration() {
   return result;
 }
 
-export async function syncCalibrationFromController() {
-  const response = await fetch('/api/calibration/sync', { method: 'POST' });
+export async function syncCalibrationFromController(options = {}) {
+  const persistProbeCenter = options.persistProbeCenter === true;
+  const response = await fetch('/api/calibration/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ persistProbeCenter }),
+  });
   const result = await response.json();
   if (!response.ok || !result.ok) {
     throw new Error(result.error || `HTTP ${response.status}`);

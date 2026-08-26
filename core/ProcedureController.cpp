@@ -154,8 +154,12 @@ bool ProcedureController::startProbeCalibration()
     {
         return false;
     }
-    const TestPoint search_ref{machine_.x(), machine_.y(), machine_.z()};
-    if (!probe_calib_.start(machine_, search_ref))
+    // Manual start: operator jogs TCP to hub P_z (above the disc). search_ref.z is the
+    // assumed disc-center Z so ProbeSearch hub = tcp.z = center + approach_distance.
+    const float standoff = machine_.machineConfig().probe.approach_distance;
+    const TestPoint search_ref{machine_.x(), machine_.y(), machine_.z() - standoff};
+    // CmdStartProbeCalib / FullCalib / Geometry → Install (set probeCenter, toolOffset=0).
+    if (!probe_calib_.start(machine_, search_ref, ProbeCalibration::StorePolicy::Install))
     {
         return false;
     }
@@ -349,23 +353,28 @@ bool ProcedureController::zMinBlocked() const
 void ProcedureController::enterPhase(ProcedurePhase phase)
 {
     phase_ = phase;
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+    const MachineConfig::Probe& probe = machine_.machineConfig().probe;
     switch (phase)
     {
     case ProcedurePhase::MoveSafePose:
         machine_.setCollisionContext(CollisionContext::Approach);
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(motion.v_approach_testpoints, motion.a_testpoints,
+                                        motion.corner_testpoints);
         approach_leg_ = 0;
         commandRaiseSafeZ();
         break;
     case ProcedurePhase::ProbeApproach:
         machine_.setCollisionContext(CollisionContext::Approach);
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
+                                        probe.corner_probe_transfer);
         approach_leg_ = 0;
         commandRaiseSafeZ();
         break;
     case ProcedurePhase::MoveSafeEnd:
         machine_.setCollisionContext(CollisionContext::Approach);
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(motion.v_approach_testpoints, motion.a_testpoints,
+                                        motion.corner_testpoints);
         approach_leg_ = 0;
         std::fprintf(stderr,
                      "[MoveSafeEnd] raise Safe-Z then Machine::home() (not park measured home)\n");
@@ -374,7 +383,8 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
     case ProcedurePhase::PointApproach:
         machine_.setPreClampXyEnabled(false);
         machine_.setCollisionContext(CollisionContext::Approach);
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(motion.v_approach_testpoints, motion.a_testpoints,
+                                        motion.corner_testpoints);
         if (!resolveCurrentMachinePoint())
         {
             abortProcess();
@@ -385,7 +395,9 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         break;
     case ProcedurePhase::PreClampXyCorrect:
         machine_.setCollisionContext(CollisionContext::Contact);
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_slow);
+        // Fine XY corrections; corner applies to any multi-axis blend.
+        machine_.setActiveMotionProfile(motion.v_fine_testpoints, motion.a_testpoints,
+                                        motion.corner_testpoints);
         preclamp_elapsed_s_ = 0.0f;
         machine_.loadPreClampForceParams();
         machine_.setPreClampXyEnabled(true);
@@ -398,7 +410,8 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         break;
     case ProcedurePhase::InsertInitial:
         machine_.setCollisionContext(CollisionContext::Contact);
-        machine_.setActiveVelocity(machine_.machineConfig().motion.phase1_v_extract);
+        machine_.setActiveMotionProfile(motion.phase1_v_extract, motion.phase1_a,
+                                        motion.phase1_corner);
         point_x_ = machine_.x();
         point_y_ = machine_.y();
         // Phase 1 must start with extraction (+Z) immediately after spreader open.
@@ -413,7 +426,7 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
                          "v_extract=%.3f\n",
                          machine_.z(), machine_.hostInputs().force.fz,
                          machine_.testConfiguration().target_force_N, search,
-                         machine_.machineConfig().motion.phase1_v_extract);
+                         motion.phase1_v_extract);
             machine_.moveTo(point_x_, point_y_, machine_.z() + search);
         }
         break;
@@ -426,11 +439,12 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         phase2_motion_fz_ = 0.0f;
         machine_.setCollisionContext(CollisionContext::Contact);
         // Phase 1 ends at extraction_z; Phase 2 starts there and inserts to insertion_z.
-        machine_.setActiveVelocity(machine_.machineConfig().motion.phase2_v_insert);
+        machine_.setActiveMotionProfile(motion.phase2_v_insert, motion.phase2_a,
+                                        motion.phase2_corner);
         std::fprintf(stderr,
                      "[OptimizeInsert] Phase2 start at extraction_z=%.3f → insert to insertion_z=%.3f "
                      "v_insert=%.3f\n",
-                     extraction_z_, insertion_z_, machine_.machineConfig().motion.phase2_v_insert);
+                     extraction_z_, insertion_z_, motion.phase2_v_insert);
         machine_.moveTo(point_x_, point_y_, insertion_z_);
         break;
     case ProcedurePhase::TestOrAge:
@@ -439,14 +453,16 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         force_path_.reset();
         force_path_.setIteration(0);
         machine_.setCollisionContext(CollisionContext::Measure);
-        machine_.setActiveVelocity(machine_.machineConfig().motion.phase3_v_insert);
+        machine_.setActiveMotionProfile(motion.phase3_v_insert, motion.phase3_a,
+                                        motion.phase3_corner);
         machine_.moveTo(point_x_, point_y_, insertion_z_);
         break;
     case ProcedurePhase::Unclamp:
         machine_.setPreClampXyEnabled(false);
         machine_.setCollisionContext(CollisionContext::Unclamp);
         cycle_leg_ = 0;
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_measure);
+        machine_.setActiveMotionProfile(motion.v_unclamp, motion.a_testpoints,
+                                        motion.corner_testpoints);
         machine_.moveTo(point_x_, point_y_, insertion_z_);
         break;
     case ProcedurePhase::Completed:
@@ -592,6 +608,7 @@ void ProcedureController::handleMoveSafePose()
 
 void ProcedureController::handlePointApproach()
 {
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
     const float standoff = machine_.machineConfig().probe.approach_distance;
     const float coarse_z = target_machine_.z + standoff;
 
@@ -618,29 +635,38 @@ void ProcedureController::handlePointApproach()
             abortProcess();
             return;
         }
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(motion.v_approach_testpoints, motion.a_testpoints,
+                                        motion.corner_testpoints);
         machine_.setCollisionContext(CollisionContext::Approach);
         std::fprintf(stderr,
-                     "[PointApproach] XY v_approach=%.3f → (%.3f,%.3f) @ Safe-Z\n",
-                     machine_.machineConfig().motion.v_approach, target_machine_.x,
-                     target_machine_.y);
+                     "[PointApproach] XY v_approach_testpoints=%.3f → (%.3f,%.3f) @ Safe-Z\n",
+                     motion.v_approach_testpoints, target_machine_.x, target_machine_.y);
         commandTraverseXY(target_machine_.x, target_machine_.y);
         approach_leg_ = 1;
         return;
     }
     if (approach_leg_ == 1)
     {
+        // Do not descend if XY did not reach the programmed target (soft-limit hold).
+        const float xy_tol = 0.05f;
+        if (std::fabs(machine_.x() - target_machine_.x) > xy_tol ||
+            std::fabs(machine_.y() - target_machine_.y) > xy_tol)
+        {
+            abortProcess("PointApproach: XY not at programmed target before Z descent");
+            return;
+        }
         if (!atSafeZ())
         {
             abortProcess();
             return;
         }
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(motion.v_approach_testpoints, motion.a_testpoints,
+                                        motion.corner_testpoints);
         machine_.setCollisionContext(CollisionContext::Approach);
         std::fprintf(stderr,
-                     "[PointApproach] COARSE z=%.3f (target=%.3f + standoff=%.3f) v_approach=%.3f "
-                     "pose=(%.3f,%.3f,%.3f)\n",
-                     coarse_z, target_machine_.z, standoff, machine_.machineConfig().motion.v_approach,
+                     "[PointApproach] COARSE z=%.3f (target=%.3f + standoff=%.3f) "
+                     "v_approach_testpoints=%.3f pose=(%.3f,%.3f,%.3f)\n",
+                     coarse_z, target_machine_.z, standoff, motion.v_approach_testpoints,
                      machine_.x(), machine_.y(), machine_.z());
         commandLowerToZ(coarse_z);
         approach_leg_ = 2;
@@ -648,12 +674,15 @@ void ProcedureController::handlePointApproach()
     }
     if (approach_leg_ == 2)
     {
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_slow);
+        // Fine Z is single-axis; corner unused but kept for profile consistency.
+        machine_.setActiveMotionProfile(motion.v_fine_testpoints, motion.a_testpoints,
+                                        motion.corner_testpoints);
         machine_.setCollisionContext(CollisionContext::Contact);
         std::fprintf(stderr,
-                     "[PointApproach] FINE z=%.3f v_slow=%.3f pose=(%.3f,%.3f,%.3f) fz=%.3f\n",
-                     target_machine_.z, machine_.machineConfig().motion.v_slow, machine_.x(),
-                     machine_.y(), machine_.z(), machine_.hostInputs().force.fz);
+                     "[PointApproach] FINE z=%.3f v_fine_testpoints=%.3f pose=(%.3f,%.3f,%.3f) "
+                     "fz=%.3f\n",
+                     target_machine_.z, motion.v_fine_testpoints, machine_.x(), machine_.y(),
+                     machine_.z(), machine_.hostInputs().force.fz);
         commandLowerToZ(target_machine_.z);
         approach_leg_ = 3;
         return;
@@ -668,8 +697,9 @@ void ProcedureController::handleProbeApproach()
         return;
     }
     const CalibrationSet& calib = machine_.calibrationSet();
+    const MachineConfig::Probe& probe = machine_.machineConfig().probe;
     const TestPoint target = calib.probe_center;
-    const float standoff = machine_.machineConfig().probe.approach_distance;
+    const float standoff = probe.approach_distance;
     const float coarse_z = target.z + standoff;
     if (approach_leg_ == 0)
     {
@@ -678,43 +708,52 @@ void ProcedureController::handleProbeApproach()
             abortProcess("ProbeApproach leg0: Raise Safe-Z did not reach (soft-limit or blocked)");
             return;
         }
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
+                                        probe.corner_probe_transfer);
         machine_.setCollisionContext(CollisionContext::Approach);
         std::fprintf(stderr,
-                     "[ProbeApproach] XY v_approach=%.3f → (%.3f,%.3f) @ Safe-Z\n",
-                     machine_.machineConfig().motion.v_approach, target.x, target.y);
+                     "[ProbeApproach] XY v_approach_probe=%.3f → (%.3f,%.3f) @ Safe-Z\n",
+                     probe.v_approach_probe, target.x, target.y);
         commandTraverseXY(target.x, target.y);
         approach_leg_ = 1;
         return;
     }
     if (approach_leg_ == 1)
     {
+        const float xy_tol = 0.05f;
+        if (std::fabs(machine_.x() - target.x) > xy_tol ||
+            std::fabs(machine_.y() - target.y) > xy_tol)
+        {
+            abortProcess("ProbeApproach: XY not at probe center before Z descent");
+            return;
+        }
         if (!atSafeZ())
         {
             abortProcess("ProbeApproach leg1: left Safe-Z before coarse Z");
             return;
         }
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_approach);
+        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
+                                        probe.corner_probe_transfer);
         machine_.setCollisionContext(CollisionContext::Approach);
         std::fprintf(stderr,
-                     "[ProbeApproach] COARSE z=%.3f (probe.z=%.3f + standoff=%.3f) v_approach=%.3f "
-                     "pose=(%.3f,%.3f,%.3f)\n",
-                     coarse_z, target.z, standoff, machine_.machineConfig().motion.v_approach,
-                     machine_.x(), machine_.y(), machine_.z());
+                     "[ProbeApproach] COARSE z=%.3f (probe.z=%.3f + standoff=%.3f) "
+                     "v_approach_probe=%.3f pose=(%.3f,%.3f,%.3f)\n",
+                     coarse_z, target.z, standoff, probe.v_approach_probe, machine_.x(),
+                     machine_.y(), machine_.z());
         commandLowerToZ(coarse_z);
         approach_leg_ = 2;
         return;
     }
-    // Start M19 with geometric Z = probe_center.z so ProbeSearch raises to
+    // Start M19 with geometric Z = probe_center.z so ProbeSearch hub P_z is
     // probe_center.z + approach_distance (TCP already there after coarse leg).
-    // M19 Z-descend uses fine_search_speed (ProbeSearch::commandDescend).
+    // ProbeSearch uses v_approach_probe / v_transfer_probe; search legs use v_search*.
     std::fprintf(stderr,
                  "[ProbeApproach] start M19 at standoff pose=(%.3f,%.3f,%.3f) search_ref.z=%.3f "
-                 "fine_speed=%.3f\n",
-                 machine_.x(), machine_.y(), machine_.z(), target.z,
-                 machine_.machineConfig().probe.fine_search_speed);
+                 "v_search=%.3f\n",
+                 machine_.x(), machine_.y(), machine_.z(), target.z, probe.v_search);
     const TestPoint search_ref{machine_.x(), machine_.y(), target.z};
-    if (!probe_calib_.start(machine_, search_ref))
+    // Procedure ProbeApproach → OffsetOnly (keep probeCenter, update toolOffset only).
+    if (!probe_calib_.start(machine_, search_ref, ProbeCalibration::StorePolicy::OffsetOnly))
     {
         abortProcess();
         return;
@@ -779,6 +818,7 @@ void ProcedureController::handleClamp()
 
 void ProcedureController::handleInsertInitial()
 {
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
     const float target = machine_.testConfiguration().target_force_N;
     const float fz = machine_.hostInputs().force.fz;
     const float free_tol = machine_.machineConfig().phase2.force_tolerance_N;
@@ -810,7 +850,8 @@ void ProcedureController::handleInsertInitial()
                      "[InsertInitial] at extraction_z=%.3f → IN dive to force_free-search=%.3f\n",
                      extraction_z_, force_free_z_ - search);
         cycle_leg_ = 2;
-        machine_.setActiveVelocity(machine_.machineConfig().motion.phase1_v_insert);
+        machine_.setActiveMotionProfile(motion.phase1_v_insert, motion.phase1_a,
+                                        motion.phase1_corner);
         machine_.setCollisionContext(CollisionContext::Contact);
         machine_.moveTo(point_x_, point_y_, force_free_z_ - search);
         return;
@@ -824,7 +865,8 @@ void ProcedureController::handleInsertInitial()
             force_free_z_ = machine_.z();
             extraction_z_ = force_free_z_ + buffer;
             cycle_leg_ = 1;
-            machine_.setActiveVelocity(machine_.machineConfig().motion.phase1_v_extract);
+            machine_.setActiveMotionProfile(motion.phase1_v_extract, motion.phase1_a,
+                                            motion.phase1_corner);
             std::fprintf(stderr,
                          "[InsertInitial] force-free z=%.3f fz=%.3f → reserve to extraction_z=%.3f\n",
                          force_free_z_, fz, extraction_z_);
@@ -850,7 +892,8 @@ void ProcedureController::handleInsertInitial()
                      "[InsertInitial] contact ok fz=%.3f target=%.3f insertion_z=%.3f → OUT to extraction_z=%.3f\n",
                      fz, target, insertion_z_, extraction_z_);
         cycle_leg_ = 3;
-        machine_.setActiveVelocity(machine_.machineConfig().motion.phase1_v_extract);
+        machine_.setActiveMotionProfile(motion.phase1_v_extract, motion.phase1_a,
+                                        motion.phase1_corner);
         machine_.moveTo(point_x_, point_y_, extraction_z_);
         return;
     }
@@ -890,7 +933,8 @@ void ProcedureController::handleOptimizeInsert()
                      "target=%.3f → extract to %.3f v_extract=%.3f\n",
                      optimize_attempts_ + 1u, machine_.z(), phase2_motion_fz_, phase2_measured_fz_,
                      target, extraction_z_, motion.phase2_v_extract);
-        machine_.setActiveVelocity(motion.phase2_v_extract);
+        machine_.setActiveMotionProfile(motion.phase2_v_extract, motion.phase2_a,
+                                        motion.phase2_corner);
         machine_.setCollisionContext(CollisionContext::Retract);
         machine_.moveTo(point_x_, point_y_, extraction_z_);
         cycle_leg_ = 1;
@@ -961,7 +1005,7 @@ void ProcedureController::handleOptimizeInsert()
         return;
     }
 
-    machine_.setActiveVelocity(motion.phase2_v_insert);
+    machine_.setActiveMotionProfile(motion.phase2_v_insert, motion.phase2_a, motion.phase2_corner);
     machine_.setCollisionContext(CollisionContext::Contact);
     std::fprintf(stderr,
                  "[OptimizeInsert] next iter insert to %.3f v_insert=%.3f\n", insertion_z_,
@@ -981,9 +1025,11 @@ void ProcedureController::handleTestOrAge()
     {
         return;
     }
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
     if (cycle_leg_ == 0)
     {
-        machine_.setActiveVelocity(machine_.machineConfig().motion.phase3_v_extract);
+        machine_.setActiveMotionProfile(motion.phase3_v_extract, motion.phase3_a,
+                                        motion.phase3_corner);
         machine_.setCollisionContext(CollisionContext::Retract);
         machine_.moveTo(point_x_, point_y_, extraction_z_);
         cycle_leg_ = 1;
@@ -1000,7 +1046,7 @@ void ProcedureController::handleTestOrAge()
         return;
     }
     force_path_.setIteration(static_cast<std::uint16_t>(cycle_iteration_));
-    machine_.setActiveVelocity(machine_.machineConfig().motion.phase3_v_insert);
+    machine_.setActiveMotionProfile(motion.phase3_v_insert, motion.phase3_a, motion.phase3_corner);
     machine_.setCollisionContext(CollisionContext::Contact);
     machine_.moveTo(point_x_, point_y_, insertion_z_);
     cycle_leg_ = 0;
@@ -1026,7 +1072,9 @@ void ProcedureController::handleUnclamp()
         {
             return;
         }
-        machine_.setActiveVelocity(machine_.machineConfig().motion.v_slow);
+        const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+        machine_.setActiveMotionProfile(motion.v_unclamp, motion.a_testpoints,
+                                        motion.corner_testpoints);
         machine_.setCollisionContext(CollisionContext::Retract);
         commandLowerToZ(target_machine_.z + standoff);
         cycle_leg_ = 2;

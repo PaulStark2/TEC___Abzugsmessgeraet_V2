@@ -25,6 +25,7 @@ Machine::Machine()
     , machine_state_(MachineState::Idle)
     , default_max_velocity_(10.0f)
     , default_acceleration_(0.0f)
+    , default_corner_radius_(0.0f)
     , stored_target_x_(0.0f)
     , stored_target_y_(0.0f)
     , stored_target_z_(0.0f)
@@ -60,7 +61,8 @@ Machine::Machine()
     , prev_probe_triggered_(false)
     , last_probe_trigger_sequence_(0)
 {
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
 }
 
 Machine::Machine(const ForceControlParams& params)
@@ -68,6 +70,7 @@ Machine::Machine(const ForceControlParams& params)
     , machine_state_(MachineState::Idle)
     , default_max_velocity_(10.0f)
     , default_acceleration_(0.0f)
+    , default_corner_radius_(0.0f)
     , stored_target_x_(0.0f)
     , stored_target_y_(0.0f)
     , stored_target_z_(0.0f)
@@ -103,7 +106,8 @@ Machine::Machine(const ForceControlParams& params)
     , prev_probe_triggered_(false)
     , last_probe_trigger_sequence_(0)
 {
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
 }
 
 MachineState Machine::machineState() const
@@ -404,12 +408,12 @@ void Machine::clearFault()
 
 bool Machine::home()
 {
-    if (calibration_set_.machine_coordinate_system_valid)
+    // Reference-only: never auto-define MCS (use defineMachineCoordinateSystem).
+    if (!calibration_set_.machine_coordinate_system_valid)
     {
-        return startHomingSequence(HomingMode::Reference);
+        return false;
     }
-    // First reference establishes the MCS (same Z→X→Y SM).
-    return startHomingSequence(HomingMode::DefineMcs);
+    return startHomingSequence(HomingMode::Reference);
 }
 
 bool Machine::defineMachineCoordinateSystem()
@@ -417,9 +421,55 @@ bool Machine::defineMachineCoordinateSystem()
     return startHomingSequence(HomingMode::DefineMcs);
 }
 
+bool Machine::restoreMachineCoordinateSystem(const TestPoint& home_position)
+{
+    if (machine_state_ == MachineState::Fault || machine_state_ == MachineState::Homing)
+    {
+        return false;
+    }
+    if (machine_state_ == MachineState::Active || machine_state_ == MachineState::Paused)
+    {
+        return false;
+    }
+    calibration_set_.home_offset = home_position;
+    calibration_set_.machine_coordinate_system_valid = true;
+    return true;
+}
+
 bool Machine::machineCoordinateSystemValid() const
 {
     return calibration_set_.machine_coordinate_system_valid;
+}
+
+bool Machine::confirmHomedIfAtHome(float tolerance_mm)
+{
+    if (!calibration_set_.machine_coordinate_system_valid)
+    {
+        return false;
+    }
+    if (machine_state_ == MachineState::Fault || machine_state_ == MachineState::Homing)
+    {
+        return false;
+    }
+    const TestPoint& home = calibration_set_.home_offset;
+    const float tol = (tolerance_mm > 0.0f) ? tolerance_mm : 0.5f;
+    if (std::fabs(motion_planner_.x() - home.x) > tol ||
+        std::fabs(motion_planner_.y() - home.y) > tol ||
+        std::fabs(motion_planner_.z() - home.z) > tol)
+    {
+        return false;
+    }
+    motion_planner_.stopMotion();
+    stored_target_x_ = home.x;
+    stored_target_y_ = home.y;
+    stored_target_z_ = home.z;
+    commanded_target_x_ = home.x;
+    commanded_target_y_ = home.y;
+    homing_state_ = HomingState::Homed;
+    is_homed_ = true;
+    homing_retracting_ = false;
+    machine_state_ = MachineState::Idle;
+    return true;
 }
 
 void Machine::shiftRawPose(float dx, float dy, float dz)
@@ -440,7 +490,8 @@ bool Machine::startHomingSequence(HomingMode mode)
     homing_state_ = HomingState::HomingZ;
     machine_state_ = MachineState::Homing;
 
-    motion_planner_.setMotionParams(machine_config_.motion.v_homing, default_acceleration_);
+    motion_planner_.setMotionParams(machine_config_.motion.v_homing, machine_config_.motion.a_homing,
+                                    0.0f);
     beginHomingPhase(HomingState::HomingZ);
     return true;
 }
@@ -482,7 +533,8 @@ void Machine::beginHomingPhase(HomingState phase)
     x_force_correction_active_ = false;
     y_force_correction_active_ = false;
 
-    motion_planner_.setMotionParams(machine_config_.motion.v_homing, default_acceleration_);
+    motion_planner_.setMotionParams(machine_config_.motion.v_homing, machine_config_.motion.a_homing,
+                                    0.0f);
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
 }
 
@@ -574,7 +626,8 @@ void Machine::beginHomingRetract(HomingState phase)
         break;
     }
 
-    motion_planner_.setMotionParams(machine_config_.motion.v_homing, default_acceleration_);
+    motion_planner_.setMotionParams(machine_config_.motion.v_homing, machine_config_.motion.a_homing,
+                                    0.0f);
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
 }
 
@@ -604,12 +657,14 @@ void Machine::finishHomingSuccess()
     if (homing_mode_ == HomingMode::DefineMcs)
     {
         // Latch calibrated home pose. Intentional MCS (re)definition requires re-teach
-        // of plate/probe in the new frame — normal home() never takes this path.
+        // of plate/probe in the new frame — home() never takes this path.
         calibration_set_.home_offset =
             TestPoint{motion_planner_.x(), motion_planner_.y(), motion_planner_.z()};
         calibration_set_.machine_coordinate_system_valid = true;
         calibration_set_.plate_origin_valid = false;
         calibration_set_.probe_center_valid = false;
+        calibration_set_.tool_offset = TestPoint{0.0f, 0.0f, 0.0f};
+        machine_config_.calibration.tool_offset = calibration_set_.tool_offset;
     }
     // Reference mode: home_offset / plate / probe / tool_offset unchanged.
 
@@ -618,7 +673,8 @@ void Machine::finishHomingSuccess()
     stored_target_z_ = motion_planner_.z();
     commanded_target_x_ = stored_target_x_;
     commanded_target_y_ = stored_target_y_;
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
     blocked_directions_ = 0;
 }
 
@@ -626,7 +682,8 @@ void Machine::finishHomingError()
 {
     homing_state_ = HomingState::HomingError;
     homing_retracting_ = false;
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
     motion_planner_.stopMotion();
 }
 
@@ -739,7 +796,8 @@ void Machine::moveTo(float x, float y, float z)
     x_force_correction_active_ = false;
     y_force_correction_active_ = false;
 
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
 
     const bool started_motion = motion_planner_.motionState() != MotionState::AtTarget;
@@ -998,7 +1056,8 @@ void Machine::resume()
         return;
     }
 
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
     machine_state_ = (motion_planner_.motionState() == MotionState::AtTarget) ? MachineState::Idle
                                                                                : MachineState::Active;
@@ -1016,7 +1075,8 @@ void Machine::stop()
     }
 
     motion_planner_.stopMotion();
-    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_);
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
     applySpreaderSafeState();
 
     if (machine_state_ == MachineState::Homing)
@@ -1118,8 +1178,9 @@ bool Machine::trySetMachineConfig(const MachineConfig& incoming, ConfigValidatio
     // Never overwrite the measured pose when applying machine config (e.g. CmdSetMachineConfig
     // at procedure start would otherwise park Safe-End at (0,0) / retract defaults).
     calibration_set_.tool_offset = machine_config_.calibration.tool_offset;
-    default_max_velocity_ = machine_config_.motion.v_approach;
-    default_acceleration_ = machine_config_.motion.acceleration;
+    default_max_velocity_ = machine_config_.motion.v_approach_testpoints;
+    default_acceleration_ = machine_config_.motion.a_testpoints;
+    default_corner_radius_ = machine_config_.motion.corner_testpoints;
     return true;
 }
 
@@ -1170,10 +1231,34 @@ const CalibrationSet& Machine::calibrationSet() const
 
 void Machine::setActiveVelocity(float velocity)
 {
-    const float v = (velocity > 0.0f) ? velocity : machine_config_.motion.v_approach;
+    const float v = (velocity > 0.0f) ? velocity : machine_config_.motion.v_approach_testpoints;
+    setActiveMotionProfile(v, default_acceleration_, default_corner_radius_);
+}
+
+void Machine::setActiveMotionProfile(float velocity, float acceleration, float corner_radius)
+{
+    const float v = (velocity > 0.0f) ? velocity : machine_config_.motion.v_approach_testpoints;
     default_max_velocity_ = v;
-    default_acceleration_ = machine_config_.motion.acceleration;
-    motion_planner_.setMotionParams(v, default_acceleration_);
+    default_acceleration_ = (acceleration < 0.0f) ? 0.0f : acceleration;
+    default_corner_radius_ = (corner_radius < 0.0f) ? 0.0f : corner_radius;
+    motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
+                                    default_corner_radius_);
+}
+
+void Machine::brakeToStop(float acceleration)
+{
+    // Snap commanded goals to the current pose so tickActiveMotion does not
+    // re-drive the previous search/traverse target while decelerating.
+    stored_target_x_ = motion_planner_.x();
+    stored_target_y_ = motion_planner_.y();
+    stored_target_z_ = motion_planner_.z();
+    commanded_target_x_ = stored_target_x_;
+    commanded_target_y_ = stored_target_y_;
+    motion_planner_.brakeToStop(acceleration);
+    if (machine_state_ != MachineState::Fault && machine_state_ != MachineState::Homing)
+    {
+        machine_state_ = MachineState::Active;
+    }
 }
 
 void Machine::setPreClampXyEnabled(bool enabled)

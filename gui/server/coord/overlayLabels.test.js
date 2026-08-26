@@ -25,22 +25,23 @@ function testSegmentLabelsMatchPlannedPath() {
     approachStandoffMm: 15,
     includeFine: true,
   });
-  const config = { v_approach: 12, v_slow: 2, v_measure: 1 };
+  const config = { v_approach_testpoints: 12, v_fine_testpoints: 2, v_unclamp: 1 };
   const labels = buildSegmentLabels(segs, config);
   assert.strictEqual(labels.length, segs.length);
   assert.strictEqual(labels[0].type, 'SafeZ');
-  assert.ok(labels[0].speedText.includes('v_approach'));
+  assert.ok(labels[0].speedText.includes('v_approach_testpoints'));
   assert.ok(labels[0].speedText.includes('12'));
   assert.strictEqual(labels[0].direction, '+Z');
-  assert.strictEqual(labels[1].type, 'XY');
+  assert.strictEqual(labels[1].type, 'X');
   assert.ok(labels[1].direction.includes('+10.0'));
-  assert.ok(labels[1].direction.includes('+5.0'));
-  assert.strictEqual(labels[2].type, 'ZCoarse');
-  assert.ok(labels[2].speedText.includes('v_approach'));
-  assert.strictEqual(labels[3].type, 'ZFine');
-  assert.strictEqual(labels[3].direction, '−Z');
-  assert.ok(labels[3].speedText.includes('v_slow'));
-  assert.ok(labels[3].speedText.includes('2'));
+  assert.strictEqual(labels[2].type, 'Y');
+  assert.ok(labels[2].direction.includes('+5.0'));
+  assert.strictEqual(labels[3].type, 'ZCoarse');
+  assert.ok(labels[3].speedText.includes('v_approach_testpoints'));
+  assert.strictEqual(labels[4].type, 'ZFine');
+  assert.strictEqual(labels[4].direction, '−Z');
+  assert.ok(labels[4].speedText.includes('v_fine_testpoints'));
+  assert.ok(labels[4].speedText.includes('2'));
 }
 
 function testToggleHidesLabels() {
@@ -53,7 +54,7 @@ function testToggleHidesLabels() {
   const hidden = collectOverlayLabels({
     points: [{ sequenceNumber: 1, x: 20, y: 0, z: 1 }],
     segments: path.segments,
-    machineConfig: { v_approach: 10, v_slow: 2, v_measure: 1 },
+    machineConfig: { v_approach_testpoints: 10, v_fine_testpoints: 2, v_unclamp: 1 },
     showPointLabels: false,
     showSegmentLabels: false,
   });
@@ -62,7 +63,7 @@ function testToggleHidesLabels() {
   const pointsOnly = collectOverlayLabels({
     points: [{ sequenceNumber: 1, x: 20, y: 0, z: 1 }],
     segments: path.segments,
-    machineConfig: { v_approach: 10, v_slow: 2, v_measure: 1 },
+    machineConfig: { v_approach_testpoints: 10, v_fine_testpoints: 2, v_unclamp: 1 },
     showPointLabels: true,
     showSegmentLabels: false,
   });
@@ -72,7 +73,7 @@ function testToggleHidesLabels() {
   const both = collectOverlayLabels({
     points: [{ sequenceNumber: 1, x: 20, y: 0, z: 1 }],
     segments: path.segments,
-    machineConfig: { v_approach: 10, v_slow: 2, v_measure: 1 },
+    machineConfig: { v_approach_testpoints: 10, v_fine_testpoints: 2, v_unclamp: 1 },
     showPointLabels: true,
     showSegmentLabels: true,
   });

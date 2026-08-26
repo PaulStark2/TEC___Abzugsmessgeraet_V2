@@ -153,20 +153,24 @@ int main()
         }
     }
 
-    // Homing itself is allowed without a prior home.
+    // DefineMcs is allowed without a prior home; plain home() is not.
     {
         Machine machine;
         if (machine.isHomed())
         {
             return 50;
         }
-        if (!machine.home())
+        if (machine.home())
         {
-            return 51;
+            return 51; // must reject without MCS
+        }
+        if (!machine.defineMachineCoordinateSystem())
+        {
+            return 52;
         }
         if (machine.machineState() != MachineState::Homing)
         {
-            return 52;
+            return 53;
         }
     }
 

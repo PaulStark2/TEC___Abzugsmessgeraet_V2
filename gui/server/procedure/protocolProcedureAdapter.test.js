@@ -8,12 +8,17 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const programStore = require('../program/programStore');
 const selectionStore = require('../program/selectionStore');
 const resultsStore = require('../results/resultsStore');
 const procedureStore = require('./procedureStore');
 const calibrationStore = require('../config/calibrationStore');
+const machineConfigStore = require('../config/machineConfigStore');
 const { createProtocolProcedureAdapter } = require('./protocolProcedureAdapter');
+
+const cfgFile = path.join(__dirname, '..', 'data', 'machine-config.json');
 
 function createMockClient(initialStatus) {
   let status = {
@@ -40,6 +45,14 @@ function createMockClient(initialStatus) {
   };
 
   const sent = [];
+  let machineConfig = {
+    tool_offset_x: 0,
+    tool_offset_y: 0,
+    tool_offset_z: 0,
+    probe_center_x: 40,
+    probe_center_y: 40,
+    probe_center_z: 10,
+  };
 
   return {
     sent,
@@ -47,8 +60,19 @@ function createMockClient(initialStatus) {
     setStatus(partial) {
       status = { ...status, ...partial };
     },
+    setMachineConfigPayload(partial) {
+      machineConfig = { ...machineConfig, ...partial };
+    },
+    async getMachineConfig() {
+      sent.push('CmdGetMachineConfig');
+      return { ok: true, config: { ...machineConfig } };
+    },
     async setMachineConfig() {
       sent.push('CmdSetMachineConfig');
+      return { ok: true, resultCode: 0 };
+    },
+    async restoreMcs() {
+      sent.push('CmdRestoreMcs');
       return { ok: true, resultCode: 0 };
     },
     async setPlateOrigin() {
@@ -95,13 +119,27 @@ function withPreparedStores(fn) {
     procedureStore.reset();
 
     const previousCalib = calibrationStore.load();
+    const previousCfg = fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, 'utf8') : null;
     calibrationStore.save({
       ...previousCalib,
+      machineCoordinateSystem: {
+        valid: true,
+        homePosition: { x: 98, y: 98, z: 48 },
+      },
       plateOrigin: { x: 0, y: 0, z: 0 },
       plateOriginValid: true,
-      probeCenter: { x: 40, y: 40, z: 10 },
+      probeCenter: { x: 100, y: 120, z: 40 },
       probeCenterValid: true,
       toolOffset: { x: 0, y: 0, z: 0 },
+    });
+    machineConfigStore.save({
+      ...machineConfigStore.load(),
+      probe_offset_reference_x: 40,
+      probe_offset_reference_y: 40,
+      probe_offset_reference_z: 10,
+      tool_offset_x: 0,
+      tool_offset_y: 0,
+      tool_offset_z: 0,
     });
 
     try {
@@ -115,6 +153,11 @@ function withPreparedStores(fn) {
       await fn();
     } finally {
       calibrationStore.save(previousCalib);
+      if (previousCfg !== null) {
+        fs.writeFileSync(cfgFile, previousCfg, 'utf8');
+      } else if (fs.existsSync(cfgFile)) {
+        fs.unlinkSync(cfgFile);
+      }
       programStore.clearProgram();
       selectionStore.clear();
       resultsStore.clear();
@@ -171,6 +214,7 @@ async function testStartWhileIdleSendsFullChain() {
     assert.strictEqual(started.ok, true);
     assert.deepStrictEqual(client.sent, [
       'CmdSetMachineConfig',
+      'CmdRestoreMcs',
       'CmdSetPlateOrigin',
       'CmdSetProbeCenter',
       'CmdSetTestConfiguration',
@@ -216,11 +260,53 @@ async function testStartDuringM19SendsNoCommands() {
   })();
 }
 
+async function testOffsetOnlyCompletionPersistsToolOnly() {
+  await withPreparedStores(async () => {
+    const client = createMockClient({ processState: 'Idle', procedurePhase: 'Idle' });
+    client.setMachineConfigPayload({
+      tool_offset_x: -0.2,
+      tool_offset_y: 0.1,
+      tool_offset_z: -0.1,
+      probe_center_x: 100.2,
+      probe_center_y: 119.9,
+      probe_center_z: 40.1,
+    });
+    const adapter = createProtocolProcedureAdapter(client);
+    const started = await adapter.start({ mode: 'test', insertionForce: 10, iterations: 1 });
+    assert.strictEqual(started.ok, true);
+
+    client.setStatus({ processState: 'Running', procedurePhase: 'ProbeCalibrate' });
+    adapter.getStatus();
+
+    client.setStatus({ processState: 'Running', procedurePhase: 'MoveSafePose' });
+    adapter.getStatus();
+
+    // Allow async tool-only sync to finish.
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.ok(client.sent.includes('CmdGetMachineConfig'), 'OffsetOnly must GetMachineConfig');
+    const calib = calibrationStore.load();
+    const cfg = machineConfigStore.load();
+    assert.strictEqual(calib.probeCenter.x, 100);
+    assert.strictEqual(calib.probeCenter.y, 120);
+    assert.strictEqual(calib.probeCenter.z, 40);
+    assert.ok(Math.abs(calib.toolOffset.x - -0.2) < 1e-9);
+    assert.ok(Math.abs(calib.toolOffset.y - 0.1) < 1e-9);
+    assert.ok(Math.abs(calib.toolOffset.z - -0.1) < 1e-9);
+    assert.ok(Math.abs(cfg.tool_offset_x - -0.2) < 1e-9);
+    // Legacy reference still present but unused for reconstruction.
+    assert.strictEqual(cfg.probe_offset_reference_x, 40);
+
+    adapter.dispose();
+  })();
+}
+
 async function main() {
   await testStaleCompletedDoesNotFinishNewStart();
   await testStartWhileIdleSendsFullChain();
   await testStartAfterM19CompletedSendsFullChain();
   await testStartDuringM19SendsNoCommands();
+  await testOffsetOnlyCompletionPersistsToolOnly();
   console.log('protocolProcedureAdapter.test.js: PASS');
 }
 

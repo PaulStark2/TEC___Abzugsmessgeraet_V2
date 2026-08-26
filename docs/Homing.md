@@ -19,11 +19,14 @@ Plate (Programmpunkte)
 | `machine_coordinate_system_valid` | Flag | MCS wurde einmal definiert |
 | `probe_center` / `plate_origin` / `tool_offset` | Machine | Geometrie; unverändert bei normalem `home()` |
 
-## Zwei Vorgänge (gleiche Z→X→Y State Machine)
+## Drei getrennte Operationen
 
-### A. `defineMachineCoordinateSystem()` / erster `home()` ohne MCS
+### 1. MCS definieren — `defineMachineCoordinateSystem()` / `CmdDefineMcs`
 
-Definiert das MCS **einmalig**:
+Nur über die GUI-Funktion **„MCS und Bauplatte/Messtaster definieren und kalibrieren“** (oder explizites Protocol).
+
+`CmdDefineMcs` ändert nur den **Core**. Die committed `calibration.json` wird erst bei **persistMcs / Commit** ersetzt.
+Abbruch vor Commit: Core wird aus dem committed Store zurückgespielt (`pushCommittedCalibration`).
 
 ```text
 Seek +Max → Stop (raw bleibt)
@@ -31,13 +34,15 @@ Seek +Max → Stop (raw bleibt)
 → Retract um R
 → nach Z/X/Y: home_offset = aktuelle Machine-Pose
 → machine_coordinate_system_valid = true
+→ plate_origin_valid / probe_center_valid = false
+→ tool_offset = 0
 ```
 
-Plate/Probe-Validität wird bei bewusster MCS-(Neu-)Definition gelöscht (neu einmessen).
+### 2. Reference Homing — `home()` / `CmdHome`
 
-### B. Normales `home()` (MCS bereits gültig)
+**Normales Homing definiert niemals das MCS neu.**
 
-**Definiert das MCS nicht neu.**
+Voraussetzung: `mcs_valid == true`, sonst Rejected.
 
 ```text
 Seek +Max → Stop (raw bleibt)
@@ -50,8 +55,26 @@ Seek +Max → Stop (raw bleibt)
 
 Korrigiert Schrittverlust: Software-Pose wird am realen Schalter wieder an die kalibrierte Machine-Koordinate gebunden.
 
+### 3. Restore nach Neustart — `restoreMachineCoordinateSystem()` / `CmdRestoreMcs`
+
+Lädt persistiertes `home_offset` + `mcs_valid` **ohne Bewegung** und **ohne** Geometrie zu invalidieren.
+`reference_offset` wird **nicht** persistiert; er entsteht wieder beim nächsten Reference-Home.
+
+## Persistenz
+
+Host speichert in `calibration.json`:
+
+- `machineCoordinateSystem.valid`
+- `machineCoordinateSystem.homePosition` (= `CalibrationSet.home_offset`)
+- plate / probe / tool (+ Valid-Flags)
+
+Connect-Reihenfolge: Restore MCS → ggf. Plate/Probe push.
+
+Alte Dateien ohne MCS-Block → `mcs_valid = false` (kein Auto-Define).
+
 ## Simulation
 
 - Gantry / Plant: **raw** (kontinuierlich, kein Teleport am Schalter).
 - Statuszahlen: **Machine**.
 - Plant-Limits gegen raw.
+- StatusFlag `McsValid` (Bit 6).

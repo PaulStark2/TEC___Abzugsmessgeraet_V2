@@ -36,10 +36,17 @@ M12 Encoder (communication/)
 
 ```bash
 cmake -S . -B build
-cmake --build build
+cmake --build build --target simulation_protocol
 ./build/simulation_protocol/simulation_protocol.exe      # default port 8766
 ./build/simulation_protocol/simulation_protocol.exe 9000  # custom port
 ```
+
+After Core motion / planner changes, always rebuild **`simulation_protocol`**
+(not only unit-test targets) and **restart** the host process so it links the
+new `libcore.a`. The GUI blue planned path is JS-only and can look correct
+while a stale host still drives the green traveled path with old kinematics.
+
+GUI: set `MACHINE_CLIENT=protocol` (default `mock` does not use Core motion).
 
 ## Wire format
 
@@ -76,6 +83,7 @@ For automated tests, see `tests/bridge_*_tests.cpp`.
   `MsgForcePathChunk`. See [`docs/M17_Procedure.md`](M17_Procedure.md).
 - **M18:** Safety hardening. StatusReport 41 bytes; MachineConfig was 142 bytes. See
   [`docs/M18_Procedure.md`](M18_Procedure.md). **No hardware release.**
-- **M19.0:** Probe calibration protocol. MachineConfig **196 bytes**. See
+- **M19.0:** Probe calibration protocol. MachineConfig **232 bytes** (was 220 / 196;
+  adds `probe_center_*` on Get). See
   [`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md). STM32 UART hosting
   is later; transport mapping stays the same. **No hardware release.**

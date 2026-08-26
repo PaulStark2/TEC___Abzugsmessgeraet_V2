@@ -31,8 +31,10 @@ static bool nearEqual(float a, float b, float eps = 5.0e-2f)
 static bool homeViaPlant(simbridge::SimProtocolBridge& bridge, int max_ticks = 20000)
 {
     std::vector<simbridge::OutboundFrame> out;
-    bridge.handleFrame(makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdHome)),
-                       tecomm::DecodeResult::Ok, out);
+    const uint8_t cmd = bridge.machine().machineCoordinateSystemValid()
+                            ? static_cast<uint8_t>(tecomm::MessageId::CmdHome)
+                            : static_cast<uint8_t>(tecomm::MessageId::CmdDefineMcs);
+    bridge.handleFrame(makeDecoded(cmd), tecomm::DecodeResult::Ok, out);
     for (int i = 0; i < max_ticks; ++i)
     {
         bridge.tick(0.05f);

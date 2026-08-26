@@ -1,6 +1,7 @@
 'use strict';
 
 import { sendCommand } from '../api.js';
+import { MCS_REQUIRED_MESSAGE } from '../homingGate.js';
 
 const SPEED_OPTIONS = [5, 10, 15, 25, 40];
 
@@ -121,6 +122,18 @@ export function mountManualControls(container) {
 
   const onHome = async () => {
     try {
+      let mcsValid = false;
+      try {
+        const response = await fetch('/api/machine');
+        const result = await response.json();
+        mcsValid = Boolean(result && result.status && result.status.mcsValid === true);
+      } catch {
+        mcsValid = false;
+      }
+      if (!mcsValid) {
+        setFeedback(MCS_REQUIRED_MESSAGE, true);
+        return;
+      }
       await sendCommand({ command: 'home' });
       setFeedback('HOME-Befehl gesendet', false);
     } catch (err) {

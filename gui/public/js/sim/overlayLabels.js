@@ -68,20 +68,20 @@ export function formatSpeed(seg, config) {
   if (!config) {
     return label;
   }
-  if (label === 'v_approach' && Number.isFinite(Number(config.v_approach))) {
-    return `v_approach ${Number(config.v_approach)} mm/s`;
+  if (label === 'v_approach_testpoints' && Number.isFinite(Number(config.v_approach_testpoints))) {
+    return `v_approach_testpoints ${Number(config.v_approach_testpoints)} mm/s`;
   }
-  if (label === 'v_slow' && Number.isFinite(Number(config.v_slow))) {
-    return `v_slow ${Number(config.v_slow)} mm/s`;
+  if (label === 'v_fine_testpoints' && Number.isFinite(Number(config.v_fine_testpoints))) {
+    return `v_fine_testpoints ${Number(config.v_fine_testpoints)} mm/s`;
   }
-  if (label === 'v_measure' && Number.isFinite(Number(config.v_measure))) {
-    return `v_measure ${Number(config.v_measure)} mm/s`;
+  if (label === 'v_unclamp' && Number.isFinite(Number(config.v_unclamp))) {
+    return `v_unclamp ${Number(config.v_unclamp)} mm/s`;
   }
-  if (label === 'v_slow/v_measure') {
-    const slow = Number(config.v_slow);
-    const measure = Number(config.v_measure);
-    if (Number.isFinite(slow) && Number.isFinite(measure)) {
-      return `v_slow ${slow} / v_measure ${measure} mm/s`;
+  if (label === 'v_fine_testpoints/v_unclamp') {
+    const fine = Number(config.v_fine_testpoints);
+    const unclamp = Number(config.v_unclamp);
+    if (Number.isFinite(fine) && Number.isFinite(unclamp)) {
+      return `v_fine_testpoints ${fine} / v_unclamp ${unclamp} mm/s`;
     }
   }
   return label;

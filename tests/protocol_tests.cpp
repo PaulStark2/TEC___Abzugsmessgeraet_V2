@@ -546,11 +546,13 @@ int main()
     // M17.2 MachineConfig / TestConfiguration / PlateOrigin roundtrip.
     {
         tecomm::MachineConfigPayload cfg{};
-        cfg.v_approach = 10.0f;
-        cfg.v_slow = 2.0f;
-        cfg.v_measure = 1.0f;
+        cfg.v_approach_testpoints = 10.0f;
+        cfg.v_fine_testpoints = 2.0f;
+        cfg.v_unclamp = 1.0f;
         cfg.v_homing = 5.0f;
-        cfg.acceleration = 0.0f;
+        cfg.a_testpoints = 0.0f;
+        cfg.corner_testpoints = 0.0f;
+        cfg.a_homing = 0.0f;
         cfg.force_filter = 0.0f;
         cfg.xy_tolerance_N = 0.5f;
         cfg.xy_correction_step = 0.05f;
@@ -569,7 +571,7 @@ int main()
         cfg.z_correction_max = 1.0f;
         cfg.minimum_correction = 0.01f;
         cfg.max_optimization_iterations = 10;
-        cfg.probe_search_speed = 2.0f;
+        cfg.v_search = 2.0f;
         cfg.probe_search_distance = 10.0f;
         cfg.probe_backoff = 1.0f;
         cfg.home_offset_x = 0.0f;
@@ -588,7 +590,7 @@ int main()
         cfg.tool_diameter = 2.5f;
         cfg.search_depth = 5.0f;
         cfg.approach_distance = 10.0f;
-        cfg.fine_search_speed = 1.0f;
+        cfg.v_search_fine = 1.0f;
         cfg.probe_offset_reference_x = 0.0f;
         cfg.probe_offset_reference_y = 0.0f;
         cfg.probe_offset_reference_z = 5.0f;
@@ -598,10 +600,22 @@ int main()
         cfg.num_fine_searches = 3;
         cfg.phase1_v_extract = 1.0f;
         cfg.phase1_v_insert = 1.0f;
+        cfg.phase1_a = 0.0f;
+        cfg.phase1_corner = 0.0f;
         cfg.phase2_v_extract = 2.0f;
         cfg.phase2_v_insert = 3.0f;
+        cfg.phase2_a = 0.0f;
+        cfg.phase2_corner = 0.0f;
         cfg.phase3_v_extract = 2.0f;
         cfg.phase3_v_insert = 2.0f;
+        cfg.phase3_a = 0.0f;
+        cfg.phase3_corner = 0.0f;
+        cfg.v_approach_probe = 10.0f;
+        cfg.v_transfer_probe = 10.0f;
+        cfg.a_probe_transfer = 0.0f;
+        cfg.corner_probe_transfer = 0.0f;
+        cfg.a_probe_search = 0.0f;
+        cfg.a_probe_brake = 500.0f;
 
         uint8_t wire[tecomm::kMachineConfigPayloadWireSize];
         if (!tecomm::encodeMachineConfigPayload(cfg, wire, sizeof(wire)))
@@ -621,7 +635,9 @@ int main()
             parsed.tool_cylindrical_height != cfg.tool_cylindrical_height ||
             parsed.probe_xy_search_margin != cfg.probe_xy_search_margin ||
             parsed.insert_search_distance != cfg.insert_search_distance ||
-            parsed.phase2_v_insert != cfg.phase2_v_insert)
+            parsed.phase2_v_insert != cfg.phase2_v_insert ||
+            parsed.v_approach_probe != cfg.v_approach_probe ||
+            parsed.a_probe_brake != cfg.a_probe_brake)
         {
             return 92;
         }
@@ -651,7 +667,7 @@ int main()
             return 96;
         }
 
-        cfg.v_approach = std::numeric_limits<float>::infinity();
+        cfg.v_approach_testpoints = std::numeric_limits<float>::infinity();
         if (tecomm::encodeMachineConfigPayload(cfg, wire, sizeof(wire)))
         {
             return 97;

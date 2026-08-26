@@ -236,6 +236,48 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdDefineMcs:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.defineMachineCoordinateSystem())
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
+        break;
+    }
+
+    case tecomm::MessageId::CmdRestoreMcs:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        tecomm::MoveToPayload pose{};
+        if (!tecomm::decodeMoveToPayload(frame.payload, frame.payload_length, pose))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        if (machine_.restoreMachineCoordinateSystem(TestPoint{pose.x, pose.y, pose.z}))
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
+        break;
+    }
+
     case tecomm::MessageId::CmdMoveTo:
     {
         if (executor_.processState() == ProcessState::Running)
@@ -352,10 +394,18 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
     {
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         {
+            tecomm::MachineConfigPayload payload = toMachineConfigPayload(machine_.machineConfig());
+            const CalibrationSet& calib = machine_.calibrationSet();
+            if (calib.probe_center_valid)
+            {
+                payload.probe_center_x = calib.probe_center.x;
+                payload.probe_center_y = calib.probe_center.y;
+                payload.probe_center_z = calib.probe_center.z;
+            }
             OutboundFrame frame_out{};
             const tecomm::EncodeResult encoded = tecomm::encodeMessage(
-                static_cast<uint8_t>(tecomm::MessageId::MsgMachineConfig),
-                toMachineConfigPayload(machine_.machineConfig()), frame_out.data, sizeof(frame_out.data));
+                static_cast<uint8_t>(tecomm::MessageId::MsgMachineConfig), payload, frame_out.data,
+                sizeof(frame_out.data));
             if (encoded.ok)
             {
                 frame_out.length = encoded.bytes_written;

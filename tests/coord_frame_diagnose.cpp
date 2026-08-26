@@ -52,8 +52,10 @@ static void dump(const char* tag, const Machine& m)
 static bool homeViaPlant(simbridge::SimProtocolBridge& bridge)
 {
     std::vector<simbridge::OutboundFrame> out;
-    bridge.handleFrame(makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdHome)),
-                       tecomm::DecodeResult::Ok, out);
+    const uint8_t cmd = bridge.machine().machineCoordinateSystemValid()
+                            ? static_cast<uint8_t>(tecomm::MessageId::CmdHome)
+                            : static_cast<uint8_t>(tecomm::MessageId::CmdDefineMcs);
+    bridge.handleFrame(makeDecoded(cmd), tecomm::DecodeResult::Ok, out);
     HomingState last = HomingState::None;
     for (int i = 0; i < 25000; ++i)
     {

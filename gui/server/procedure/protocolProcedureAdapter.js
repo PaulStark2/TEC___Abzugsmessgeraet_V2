@@ -21,6 +21,7 @@ const forcePathStore = require('../results/forcePathStore');
 const procedureStore = require('./procedureStore');
 const calibrationStore = require('../config/calibrationStore');
 const machineConfigStore = require('../config/machineConfigStore');
+const { syncCalibrationFromController } = require('../config/syncCalibrationFromController');
 const { validateProcedureStartPreconditions } = require('./startPreconditions');
 const { validateCoreNotRunningForProcedureStart } = require('./coreProcessGuard');
 const { derivePointProgress } = require('./procedureProgress');
@@ -36,6 +37,10 @@ function createProtocolProcedureAdapter(machineClient) {
   // After CmdStart, ignore residual Completed/Aborted/Idle from a prior run
   // (e.g. manual M19 calib) until StatusReport shows Running for this process.
   let seenRunningSinceStart = false;
+  // Last observed Core procedurePhase (for OffsetOnly completion edge).
+  let lastProcedurePhase = null;
+  let toolOffsetSyncInFlight = false;
+  let toolOffsetSyncedForRun = false;
 
   function capabilities() {
     return {
@@ -140,6 +145,40 @@ function createProtocolProcedureAdapter(machineClient) {
     ) {
       processState = 'Running';
     }
+
+    // OffsetOnly (Procedure M19): when ProbeCalibrate finishes, Core continues
+    // Running into MoveSafePose / later phases. Persist toolOffset only — never
+    // rewrite probeCenter (persistProbeCenter=false).
+    const currentPhase = machineStatus.procedurePhase || null;
+    if (
+      connected &&
+      seenRunningSinceStart &&
+      processState === 'Running' &&
+      lastProcedurePhase === 'ProbeCalibrate' &&
+      currentPhase &&
+      currentPhase !== 'ProbeCalibrate' &&
+      !toolOffsetSyncedForRun &&
+      !toolOffsetSyncInFlight
+    ) {
+      toolOffsetSyncedForRun = true;
+      toolOffsetSyncInFlight = true;
+      syncCalibrationFromController(machineClient, { persistProbeCenter: false })
+        .then((result) => {
+          if (!result || !result.ok) {
+            console.warn(
+              '[Procedure] OffsetOnly tool-offset sync failed:',
+              (result && result.error) || 'unknown'
+            );
+          }
+        })
+        .catch((err) => {
+          console.warn('[Procedure] OffsetOnly tool-offset sync error:', err && err.message);
+        })
+        .finally(() => {
+          toolOffsetSyncInFlight = false;
+        });
+    }
+    lastProcedurePhase = currentPhase;
 
     const totalPoints = points.length || Number(machineStatus.programPointCount) || 0;
     let currentPointIndex =
@@ -430,6 +469,26 @@ function createProtocolProcedureAdapter(machineClient) {
       }
     }
 
+    const mcs = calib.machineCoordinateSystem;
+    if (
+      mcs &&
+      mcs.valid &&
+      mcs.homePosition &&
+      typeof machineClient.restoreMcs === 'function'
+    ) {
+      const restored = await runStartCommand('CmdRestoreMcs', () =>
+        machineClient.restoreMcs(mcs.homePosition.x, mcs.homePosition.y, mcs.homePosition.z)
+      );
+      if (!restored || !restored.ok) {
+        const detail = (restored && restored.error) || 'CmdRestoreMcs failed';
+        return {
+          ok: false,
+          error: `CmdRestoreMcs: ${detail}`,
+          status: procedureStore.getStatus(),
+        };
+      }
+    }
+
     if (typeof machineClient.setPlateOrigin === 'function') {
       const origin = await runStartCommand('CmdSetPlateOrigin', () =>
         machineClient.setPlateOrigin(calib.plateOrigin.x, calib.plateOrigin.y, calib.plateOrigin.z)
@@ -502,6 +561,9 @@ function createProtocolProcedureAdapter(machineClient) {
     console.log('[ProcedureStart] chain complete Ok', snapshotProcess());
 
     seenRunningSinceStart = false;
+    lastProcedurePhase = null;
+    toolOffsetSyncedForRun = false;
+    toolOffsetSyncInFlight = false;
     procedureStore.patch({
       state: 'running',
       backend: 'protocol',

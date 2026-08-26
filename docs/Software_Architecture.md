@@ -44,6 +44,36 @@ Initially the simulation shall model:
 - machine state
 - test points
 
+### Motion semantics (Core MotionPlanner)
+
+`MotionPlanner::moveTo` executes goals as **sequential single-axis legs**
+(Safe-Z compatible order):
+
+1. Z-up if `target.z > current.z`
+2. X
+3. Y
+4. Z-down if `target.z < current.z`
+
+When `corner_radius > 0` and the next leg uses a **different** axis, the
+planner starts the next axis once the remaining distance on the active axis
+is ≤ `corner_radius` (both axes tick during the blend). Same-axis reversals
+never blend. `corner_radius == 0` restores full-stop handoff between legs.
+
+Re-issuing the same goal while Moving/AtTarget is a no-op (Machine may call
+`moveTo` every tick). STOP clears the leg queue.
+
+**Host rebuild:** After any Core motion change, rebuild and **restart** the
+protocol host — unit tests alone do not update a running process:
+
+```bash
+cmake --build build --target simulation_protocol
+# stop the old simulation_protocol.exe, then start the new one
+```
+
+Confirm `build/simulation_protocol/simulation_protocol.exe` is newer than
+`build/core/libcore.a`. In the Sim-UI, `machineClientMode` must be `protocol`
+(not `mock`, which still lerps XYZ simultaneously in JS).
+
 Later the simulation shall model:
 
 - force sensor
@@ -71,9 +101,11 @@ plant channel on port 8767, and the hierarchical gantry visualization.
 
 End stops block only the affected axis direction. Homing is Z+ → X+ → Y+.
 At each +max switch the software axis pose is re-referenced (open-loop); after
-retract the axis is at machine home (0). See [`docs/Homing.md`](Homing.md).
+retract the axis is at the calibrated MCS home. **`CmdHome` (`0x15`) never
+defines MCS** — use `CmdDefineMcs` (`0x56`) / `CmdRestoreMcs` (`0x57`). See
+[`docs/Homing.md`](Homing.md) and [`docs/Calibration.md`](Calibration.md).
 The M12 StatusReport is 41 bytes (`homingState`, `blockedDirections`, `flags`,
-`procedurePhase`, `faultReason`, `spreaderState`); `CmdHome` is `0x15`. See
+`procedurePhase`, `faultReason`, `spreaderState`); StatusFlag bit 6 = McsValid. See
 [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md),
 [`docs/M17_Procedure.md`](M17_Procedure.md), and [`docs/M18_Procedure.md`](M18_Procedure.md).
 Probe calibration on the 3-axis Core is **M19.0**

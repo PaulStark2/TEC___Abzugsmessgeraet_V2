@@ -4,15 +4,20 @@
 
 #include <cmath>
 
-bool ProbeCalibration::start(Machine& machine, const TestPoint& search_reference)
+bool ProbeCalibration::start(Machine& machine, const TestPoint& search_reference, StorePolicy policy)
 {
     if (machine.machineState() == MachineState::Fault)
     {
         enterError();
         return false;
     }
+    if (policy == StorePolicy::OffsetOnly && !machine.calibrationSet().probe_center_valid)
+    {
+        enterError();
+        return false;
+    }
 
-    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    policy_ = policy;
     reference_ = search_reference;
     result_ = TestPoint{};
     tool_offset_ = TestPoint{};
@@ -149,6 +154,11 @@ TestPoint ProbeCalibration::toolOffset() const
     return tool_offset_;
 }
 
+ProbeCalibration::StorePolicy ProbeCalibration::storePolicy() const
+{
+    return policy_;
+}
+
 ProbeSearch::Request ProbeCalibration::makeRequest(const Machine& machine, ProbeSearchDir dir) const
 {
     const MachineConfig::Probe& probe = machine.machineConfig().probe;
@@ -162,11 +172,11 @@ ProbeSearch::Request ProbeCalibration::makeRequest(const Machine& machine, Probe
         xyStartOffset(probe.search_distance, probe.measuring_head_diameter, probe.tool_diameter);
     request.xy_inner_radius = xySearchInnerRadius(probe.measuring_head_diameter, probe.xy_search_margin);
     request.backoff = probe.backoff;
-    // Raise/traverse may use approach speed; Z descend into search uses fine_speed
-    // (ProbeSearch::commandDescend) so post-standoff M19 is not a rapid dive.
-    request.approach_speed = machine.machineConfig().motion.v_approach;
-    request.fast_speed = probe.search_speed;
-    request.fine_speed = probe.fine_search_speed;
+    // Raise/align/descend: v_approach_probe; backoff/retreat/transfers: v_transfer_probe.
+    request.approach_speed = probe.v_approach_probe;
+    request.transfer_speed = probe.v_transfer_probe;
+    request.fast_speed = probe.v_search;
+    request.fine_speed = probe.v_search_fine;
     request.num_fine_searches = probe.num_fine_searches;
     return request;
 }
@@ -207,14 +217,32 @@ bool ProbeCalibration::finishAndStore(Machine& machine)
     result_.x = xy_center.x;
     result_.y = xy_center.y;
     result_.z = z_center.z;
-    if (!computeToolOffset(probe.probe_offset_reference, result_, tool_offset_))
+
+    if (policy_ == StorePolicy::Install)
     {
-        enterError();
-        return false;
+        // FullCalib / Geometry: durable plant probe reference; no tool offset yet.
+        tool_offset_ = TestPoint{0.0f, 0.0f, 0.0f};
+        machine.setProbeCenter(result_);
+        machine.setToolOffset(tool_offset_);
+    }
+    else
+    {
+        // Procedure OffsetOnly: keep installed probeCenter; update tool offset only.
+        // toolOffset = storedProbeCenter - measured (not probe_offset_reference).
+        const CalibrationSet& calib = machine.calibrationSet();
+        if (!calib.probe_center_valid)
+        {
+            enterError();
+            return false;
+        }
+        if (!computeToolOffset(calib.probe_center, result_, tool_offset_))
+        {
+            enterError();
+            return false;
+        }
+        machine.setToolOffset(tool_offset_);
     }
 
-    machine.setProbeCenter(result_);
-    machine.setToolOffset(tool_offset_);
     step_ = Step::Complete;
     state_ = State::Complete;
     return true;

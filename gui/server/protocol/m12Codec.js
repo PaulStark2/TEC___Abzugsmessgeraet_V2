@@ -76,94 +76,101 @@ function decodeMoveToPayload(payload) {
   return { x: x.value, y: y.value, z: z.value };
 }
 
-const MACHINE_CONFIG_FLOAT_KEYS = [
-  'v_approach',
-  'v_slow',
-  'v_measure',
-  'v_homing',
-  'acceleration',
-  'force_filter',
-  'xy_tolerance_N',
-  'xy_correction_step',
-  'xy_max_correction',
-  'insertion_buffer',
-  'collision_approach_N',
-  'collision_retract_N',
-  'collision_clamp_N',
-  'collision_unclamp_N',
-  'collision_contact_N',
-  'collision_measure_N',
-  'spreader_extend_time_s',
-  'spreader_retract_time_s',
-  'force_tolerance_N',
-  'z_correction_gain',
-  'z_correction_max',
-  'minimum_correction',
+/** Field order must match communication/PayloadCodec.cpp encodeMachineConfigPayload. */
+const MACHINE_CONFIG_FIELDS = [
+  { key: 'v_approach_testpoints', type: 'f32' },
+  { key: 'v_fine_testpoints', type: 'f32' },
+  { key: 'v_unclamp', type: 'f32' },
+  { key: 'v_homing', type: 'f32' },
+  { key: 'a_testpoints', type: 'f32' },
+  { key: 'corner_testpoints', type: 'f32' },
+  { key: 'a_homing', type: 'f32' },
+  { key: 'force_filter', type: 'f32' },
+  { key: 'xy_tolerance_N', type: 'f32' },
+  { key: 'xy_correction_step', type: 'f32' },
+  { key: 'xy_max_correction', type: 'f32' },
+  { key: 'insertion_buffer', type: 'f32' },
+  { key: 'collision_approach_N', type: 'f32' },
+  { key: 'collision_retract_N', type: 'f32' },
+  { key: 'collision_clamp_N', type: 'f32' },
+  { key: 'collision_unclamp_N', type: 'f32' },
+  { key: 'collision_contact_N', type: 'f32' },
+  { key: 'collision_measure_N', type: 'f32' },
+  { key: 'spreader_extend_time_s', type: 'f32' },
+  { key: 'spreader_retract_time_s', type: 'f32' },
+  { key: 'force_tolerance_N', type: 'f32' },
+  { key: 'z_correction_gain', type: 'f32' },
+  { key: 'z_correction_max', type: 'f32' },
+  { key: 'minimum_correction', type: 'f32' },
+  { key: 'max_optimization_iterations', type: 'u16' },
+  { key: 'v_search', type: 'f32' },
+  { key: 'probe_search_distance', type: 'f32' },
+  { key: 'probe_backoff', type: 'f32' },
+  { key: 'home_offset_x', type: 'f32' },
+  { key: 'home_offset_y', type: 'f32' },
+  { key: 'home_offset_z', type: 'f32' },
+  { key: 'tool_offset_x', type: 'f32' },
+  { key: 'tool_offset_y', type: 'f32' },
+  { key: 'tool_offset_z', type: 'f32' },
+  { key: 'safe_z_buffer', type: 'f32' },
+  { key: 'sample_timeout_s', type: 'f32' },
+  { key: 'heartbeat_timeout_s', type: 'f32' },
+  { key: 'xy_correct_timeout_s', type: 'f32' },
+  { key: 'head_diameter', type: 'f32' },
+  { key: 'measuring_head_diameter', type: 'f32' },
+  { key: 'measuring_head_thickness', type: 'f32' },
+  { key: 'tool_diameter', type: 'f32' },
+  { key: 'search_depth', type: 'f32' },
+  { key: 'approach_distance', type: 'f32' },
+  { key: 'v_search_fine', type: 'f32' },
+  { key: 'probe_offset_reference_x', type: 'f32' },
+  { key: 'probe_offset_reference_y', type: 'f32' },
+  { key: 'probe_offset_reference_z', type: 'f32' },
+  { key: 'tool_cylindrical_height', type: 'f32' },
+  { key: 'probe_xy_search_margin', type: 'f32' },
+  { key: 'insert_search_distance', type: 'f32' },
+  { key: 'num_fine_searches', type: 'u16' },
+  { key: 'phase1_v_extract', type: 'f32' },
+  { key: 'phase1_v_insert', type: 'f32' },
+  { key: 'phase1_a', type: 'f32' },
+  { key: 'phase1_corner', type: 'f32' },
+  { key: 'phase2_v_extract', type: 'f32' },
+  { key: 'phase2_v_insert', type: 'f32' },
+  { key: 'phase2_a', type: 'f32' },
+  { key: 'phase2_corner', type: 'f32' },
+  { key: 'phase3_v_extract', type: 'f32' },
+  { key: 'phase3_v_insert', type: 'f32' },
+  { key: 'phase3_a', type: 'f32' },
+  { key: 'phase3_corner', type: 'f32' },
+  { key: 'v_approach_probe', type: 'f32' },
+  { key: 'v_transfer_probe', type: 'f32' },
+  { key: 'a_probe_transfer', type: 'f32' },
+  { key: 'corner_probe_transfer', type: 'f32' },
+  { key: 'a_probe_search', type: 'f32' },
+  { key: 'a_probe_brake', type: 'f32' },
+  { key: 'probe_center_x', type: 'f32', optionalZero: true },
+  { key: 'probe_center_y', type: 'f32', optionalZero: true },
+  { key: 'probe_center_z', type: 'f32', optionalZero: true },
 ];
 
 function encodeMachineConfigPayload(cfg) {
   const out = Buffer.alloc(MACHINE_CONFIG_PAYLOAD_WIRE_SIZE);
   let offset = 0;
-  for (const key of MACHINE_CONFIG_FLOAT_KEYS) {
-    if (!writeF32LE(out, offset, cfg[key])) {
-      return null;
+  for (const field of MACHINE_CONFIG_FIELDS) {
+    if (field.type === 'u16') {
+      const value = cfg[field.key];
+      if (!Number.isInteger(value) || value < 0) {
+        return null;
+      }
+      out.writeUInt16LE(value & 0xffff, offset);
+      offset += 2;
+      continue;
     }
-    offset += 4;
-  }
-  if (!Number.isInteger(cfg.max_optimization_iterations) || cfg.max_optimization_iterations < 0) {
-    return null;
-  }
-  out.writeUInt16LE(cfg.max_optimization_iterations & 0xffff, offset);
-  offset += 2;
-  const tail = [
-    'probe_search_speed',
-    'probe_search_distance',
-    'probe_backoff',
-    'home_offset_x',
-    'home_offset_y',
-    'home_offset_z',
-    'tool_offset_x',
-    'tool_offset_y',
-    'tool_offset_z',
-    'safe_z_buffer',
-    'sample_timeout_s',
-    'heartbeat_timeout_s',
-    'xy_correct_timeout_s',
-    'head_diameter',
-    'measuring_head_diameter',
-    'measuring_head_thickness',
-    'tool_diameter',
-    'search_depth',
-    'approach_distance',
-    'fine_search_speed',
-    'probe_offset_reference_x',
-    'probe_offset_reference_y',
-    'probe_offset_reference_z',
-    'tool_cylindrical_height',
-    'probe_xy_search_margin',
-    'insert_search_distance',
-  ];
-  for (const key of tail) {
-    if (!writeF32LE(out, offset, cfg[key])) {
-      return null;
+    let value = cfg[field.key];
+    if (field.optionalZero && !Number.isFinite(value)) {
+      value = 0;
     }
-    offset += 4;
-  }
-  if (!Number.isInteger(cfg.num_fine_searches) || cfg.num_fine_searches < 0) {
-    return null;
-  }
-  out.writeUInt16LE(cfg.num_fine_searches & 0xffff, offset);
-  offset += 2;
-  const phaseSpeeds = [
-    'phase1_v_extract',
-    'phase1_v_insert',
-    'phase2_v_extract',
-    'phase2_v_insert',
-    'phase3_v_extract',
-    'phase3_v_insert',
-  ];
-  for (const key of phaseSpeeds) {
-    if (!writeF32LE(out, offset, cfg[key])) {
+    if (!writeF32LE(out, offset, value)) {
       return null;
     }
     offset += 4;
@@ -177,68 +184,17 @@ function decodeMachineConfigPayload(payload) {
   }
   const out = {};
   let offset = 0;
-  for (const key of MACHINE_CONFIG_FLOAT_KEYS) {
+  for (const field of MACHINE_CONFIG_FIELDS) {
+    if (field.type === 'u16') {
+      out[field.key] = payload.readUInt16LE(offset);
+      offset += 2;
+      continue;
+    }
     const value = readF32LE(payload, offset);
     if (!value.ok) {
       return null;
     }
-    out[key] = value.value;
-    offset += 4;
-  }
-  out.max_optimization_iterations = payload.readUInt16LE(offset);
-  offset += 2;
-  const tail = [
-    'probe_search_speed',
-    'probe_search_distance',
-    'probe_backoff',
-    'home_offset_x',
-    'home_offset_y',
-    'home_offset_z',
-    'tool_offset_x',
-    'tool_offset_y',
-    'tool_offset_z',
-    'safe_z_buffer',
-    'sample_timeout_s',
-    'heartbeat_timeout_s',
-    'xy_correct_timeout_s',
-    'head_diameter',
-    'measuring_head_diameter',
-    'measuring_head_thickness',
-    'tool_diameter',
-    'search_depth',
-    'approach_distance',
-    'fine_search_speed',
-    'probe_offset_reference_x',
-    'probe_offset_reference_y',
-    'probe_offset_reference_z',
-    'tool_cylindrical_height',
-    'probe_xy_search_margin',
-    'insert_search_distance',
-  ];
-  for (const key of tail) {
-    const value = readF32LE(payload, offset);
-    if (!value.ok) {
-      return null;
-    }
-    out[key] = value.value;
-    offset += 4;
-  }
-  out.num_fine_searches = payload.readUInt16LE(offset);
-  offset += 2;
-  const phaseSpeeds = [
-    'phase1_v_extract',
-    'phase1_v_insert',
-    'phase2_v_extract',
-    'phase2_v_insert',
-    'phase3_v_extract',
-    'phase3_v_insert',
-  ];
-  for (const key of phaseSpeeds) {
-    const value = readF32LE(payload, offset);
-    if (!value.ok) {
-      return null;
-    }
-    out[key] = value.value;
+    out[field.key] = value.value;
     offset += 4;
   }
   return offset === MACHINE_CONFIG_PAYLOAD_WIRE_SIZE ? out : null;
@@ -450,6 +406,7 @@ function statusReportToGuiStatus(decoded, connected = true) {
     forceSampleFresh: flagBit(StatusFlag.ForceFresh),
     plateOriginValid: flagBit(StatusFlag.PlateOriginValid),
     probeCenterValid: flagBit(StatusFlag.ProbeCenterValid),
+    mcsValid: flagBit(StatusFlag.McsValid),
     limitWarning,
     x: decoded.x,
     y: decoded.y,
@@ -489,6 +446,7 @@ function isEmptyCommandId(messageId) {
     case MessageId.CmdHome:
     case MessageId.CmdGetMachineConfig:
     case MessageId.CmdStartProbeCalib:
+    case MessageId.CmdDefineMcs:
     case MessageId.CmdRequestStatus:
       return true;
     default:
@@ -534,6 +492,8 @@ function validatePayloadForMessage(messageId, payload) {
     case MessageId.CmdSetPlateOrigin:
       return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
     case MessageId.CmdSetProbeCenter:
+      return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
+    case MessageId.CmdRestoreMcs:
       return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
     case MessageId.MsgForcePathChunk:
       return decodeForcePathChunkPayload(payload) !== null;
@@ -651,6 +611,14 @@ function encodeProbeCenterMessage(x, y, z) {
     return { ok: false, error: 'InvalidPayload' };
   }
   return encodeFrame(MessageId.CmdSetProbeCenter, payload);
+}
+
+function encodeRestoreMcsMessage(x, y, z) {
+  const payload = encodeMoveToPayload({ x, y, z });
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdRestoreMcs, payload);
 }
 
 function encodeForcePathChunkPayload(chunk) {
@@ -776,6 +744,7 @@ module.exports = {
   encodeTestConfigurationMessage,
   encodePlateOriginMessage,
   encodeProbeCenterMessage,
+  encodeRestoreMcsMessage,
   encodeMoveToPayload,
   decodeMoveToPayload,
   encodeBoolPayload,

@@ -20,7 +20,7 @@ const NACK_PAYLOAD_WIRE_SIZE = 3;
 const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 41;
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
-const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 220;
+const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 288;
 const TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE = 8;
 const PLATE_ORIGIN_PAYLOAD_WIRE_SIZE = 12;
 const FORCE_PATH_CHUNK_MAX_SAMPLES = 32;
@@ -46,6 +46,8 @@ const MessageId = Object.freeze({
   CmdSetPlateOrigin: 0x53,
   CmdStartProbeCalib: 0x54,
   CmdSetProbeCenter: 0x55,
+  CmdDefineMcs: 0x56,
+  CmdRestoreMcs: 0x57,
   CmdRequestStatus: 0x7f,
   RspAck: 0x80,
   RspNack: 0x81,
@@ -80,6 +82,7 @@ const StatusFlag = Object.freeze({
   ForceFresh: 3,
   PlateOriginValid: 4,
   ProbeCenterValid: 5,
+  McsValid: 6,
 });
 
 const MotionState = Object.freeze({

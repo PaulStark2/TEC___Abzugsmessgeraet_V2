@@ -115,5 +115,6 @@ constexpr uint8_t kStatusFlagCommWatchdog = 2;
 constexpr uint8_t kStatusFlagForceFresh = 3;
 constexpr uint8_t kStatusFlagPlateOriginValid = 4;
 constexpr uint8_t kStatusFlagProbeCenterValid = 5;
+constexpr uint8_t kStatusFlagMcsValid = 6;
 
 } // namespace tecomm

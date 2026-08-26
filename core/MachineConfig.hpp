@@ -10,21 +10,32 @@ struct MachineConfig
 {
     struct Motion
     {
-        float v_approach = 10.0f; // approach speed [units/s]
-        float v_slow = 2.0f; // slow approach / XY-correct [units/s]
-        float v_measure = 1.0f; // legacy measure speed (Unclamp / fallback)
-        float v_homing = 5.0f; // homing speed [units/s]
-        float acceleration = 0.0f; // 0 = constant velocity (existing Core default)
+        // Test-point / Safe-Z traverse (not used by M19).
+        float v_approach_testpoints = 10.0f;
+        float v_fine_testpoints = 2.0f; // fine Z approach + PreClamp XY
+        float v_unclamp = 1.0f;
+        float a_testpoints = 0.0f; // 0 = constant velocity
+        float corner_testpoints = 0.0f; // 0 = full stop between axes
+
+        float v_homing = 5.0f;
+        float a_homing = 0.0f; // seek/retract only; endstop hit is hard stop
+
         // Clearance above the highest plate-frame program point (mm).
-        // safe_z_plate = max(point.z) + safe_z_buffer; machine Z via plate_origin + tool_offset.
         float safe_z_buffer = 30.0f;
-        // Procedure phase extract (+Z) / insert (−Z) speeds [units/s].
+
+        // Procedure phase extract (+Z) / insert (−Z) speeds and path profile.
         float phase1_v_extract = 1.0f;
         float phase1_v_insert = 1.0f;
+        float phase1_a = 0.0f;
+        float phase1_corner = 0.0f;
         float phase2_v_extract = 2.0f;
-        float phase2_v_insert = 3.0f; // intentionally faster than Phase 1
+        float phase2_v_insert = 3.0f;
+        float phase2_a = 0.0f;
+        float phase2_corner = 0.0f;
         float phase3_v_extract = 2.0f;
         float phase3_v_insert = 2.0f;
+        float phase3_a = 0.0f;
+        float phase3_corner = 0.0f;
     };
 
     struct Force
@@ -68,14 +79,19 @@ struct MachineConfig
 
     struct Probe
     {
-        float search_speed = 2.0f; // fast search speed [units/s]
+        float v_approach_probe = 10.0f; // raise / align / descend to search start
+        float v_transfer_probe = 10.0f; // backoff, retreat, hub transfers
+        float v_search = 2.0f; // coarse contact search
+        float v_search_fine = 1.0f; // fine contact search
+        float a_probe_transfer = 0.0f;
+        float corner_probe_transfer = 0.0f;
+        float a_probe_search = 0.0f; // trapezoid during search (no blend)
+        float a_probe_brake = 500.0f; // emergency stop accel on trigger
+
         float search_distance = 10.0f; // ABB-style extra XY start clearance (not insert depth)
         float backoff = 1.0f; // backoff after trigger [units]
         float search_depth = 5.0f; // XY work height = measured center Z − search_depth; Z search end
-        // Coarse approach stand-off above probe_center.z / program-point Z [mm].
-        // Used by ProcedureController ProbeApproach/PointApproach and by ProbeSearch raise.
         float approach_distance = 15.0f;
-        float fine_search_speed = 1.0f;
         float head_diameter = 0.0f; // reserved; unused by the current protocol
         float measuring_head_diameter = 8.0f;
         float measuring_head_thickness = 3.0f;
@@ -83,9 +99,8 @@ struct MachineConfig
         float tool_cylindrical_height = 15.0f; // vertical tool cylinder from TCP in +Z
         float xy_search_margin = 2.0f; // extra inward XY travel past probe radius; not tool radius
         unsigned num_fine_searches = 3u;
-        // Fixed reference point used exclusively for tool_offset definition:
-        // tool_offset = probe_offset_reference - measured_probe.
-        // This is NOT the real/expected probe center and must never be used as a motion/search target.
+        // Legacy field only (older builds used it for tool_offset math). Not the durable
+        // probe position; not a motion/search target. Current M19 uses CalibrationSet.probe_center.
         TestPoint probe_offset_reference{40.0f, 40.0f, 10.0f};
     };
 

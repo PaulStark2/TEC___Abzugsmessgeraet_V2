@@ -7,8 +7,12 @@
 
 #include <cstdint>
 
-// Non-blocking probe-disc calibration: Z, four XY contacts, circle fit, tool_offset.
+// Non-blocking probe-disc calibration: Z, four XY contacts, circle fit.
 // ProcedureController talks only to this interface.
+//
+// StorePolicy separates the two calibration cases:
+//   Install    — FullCalib / Geometry: set probeCenter = measured, toolOffset = 0
+//   OffsetOnly — Procedure: keep probeCenter, toolOffset = storedCenter - measured
 class ProbeCalibration
 {
 public:
@@ -33,10 +37,17 @@ public:
         Error = 8
     };
 
+    enum class StorePolicy : uint8_t
+    {
+        Install = 0,
+        OffsetOnly = 1
+    };
+
     // search_reference: current TCP pose used as origin for ProbeSearch moves.
-    // IMPORTANT: must be provided by the caller so ProbeCalibration never assumes any
-    // configured probe position. The probe_offset_reference is used ONLY for tool_offset math.
-    bool start(Machine& machine, const TestPoint& search_reference);
+    // Must be provided by the caller so ProbeCalibration never assumes any
+    // configured probe position. probe_offset_reference is NOT used for offset math.
+    bool start(Machine& machine, const TestPoint& search_reference,
+               StorePolicy policy = StorePolicy::Install);
     void tick(float dt, Machine& machine);
     void abort();
 
@@ -44,8 +55,9 @@ public:
     bool isError() const;
     State state() const;
     Step step() const;
-    TestPoint result() const; // probe_center after Complete
+    TestPoint result() const;
     TestPoint toolOffset() const;
+    StorePolicy storePolicy() const;
 
 private:
     ProbeSearch::Request makeRequest(const Machine& machine, ProbeSearchDir dir) const;
@@ -53,12 +65,13 @@ private:
     bool finishAndStore(Machine& machine);
     void enterError();
 
+    ProbeSearch search_{};
     State state_ = State::Idle;
     Step step_ = Step::Idle;
-    ProbeSearch search_{};
+    StorePolicy policy_ = StorePolicy::Install;
+    TestPoint reference_{};
     TestPoint result_{};
     TestPoint tool_offset_{};
-    TestPoint reference_{};
     TestPoint contact_z_{};
     TestPoint contact_neg_y_{};
     TestPoint contact_pos_y_{};

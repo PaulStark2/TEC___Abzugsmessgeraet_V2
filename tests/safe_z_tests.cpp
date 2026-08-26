@@ -168,7 +168,7 @@ int main()
         prepare(machine);
         MachineConfig mcfg = machine.machineConfig();
         mcfg.motion.safe_z_buffer = 5.0f;
-        mcfg.motion.v_approach = 20.0f;
+        mcfg.motion.v_approach_testpoints = 20.0f;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
         {
@@ -239,7 +239,7 @@ int main()
         prepare(machine);
         MachineConfig mcfg = machine.machineConfig();
         mcfg.motion.safe_z_buffer = 5.0f;
-        mcfg.motion.v_approach = 20.0f;
+        mcfg.motion.v_approach_testpoints = 20.0f;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
         {

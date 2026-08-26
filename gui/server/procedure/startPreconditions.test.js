@@ -36,14 +36,23 @@ function testD_bufferChange() {
   assert.strictEqual(b.safeZPlate, 60);
 }
 
+function validCalib(extra = {}) {
+  return {
+    machineCoordinateSystem: {
+      valid: true,
+      homePosition: { x: 98, y: 98, z: 48 },
+    },
+    plateOriginValid: true,
+    plateOrigin: { x: 0, y: 0, z: 0 },
+    probeCenterValid: true,
+    probeCenter: { x: 1, y: 1, z: 1 },
+    ...extra,
+  };
+}
+
 function testE_noProgram() {
   const r = validateProcedureStartPreconditions({
-    calibration: {
-      plateOriginValid: true,
-      plateOrigin: { x: 0, y: 0, z: 0 },
-      probeCenterValid: true,
-      probeCenter: { x: 1, y: 1, z: 1 },
-    },
+    calibration: validCalib(),
     machineConfig: { safe_z_buffer: 30 },
     points: [],
   });
@@ -82,12 +91,10 @@ function testG_toolOffset() {
 
 function testRejectsMissingProbe() {
   const result = validateProcedureStartPreconditions({
-    calibration: {
-      plateOriginValid: true,
-      plateOrigin: { x: 0, y: 0, z: 0 },
+    calibration: validCalib({
       probeCenterValid: false,
       probeCenter: null,
-    },
+    }),
     machineConfig: { safe_z_buffer: 30 },
     points: [{ sequenceNumber: 1, x: 0, y: 0, z: 0 }],
   });
@@ -95,15 +102,29 @@ function testRejectsMissingProbe() {
   assert.strictEqual(result.code, 'probe_center');
 }
 
-function testAcceptsValidProgram() {
+function testRejectsMissingMcs() {
   const result = validateProcedureStartPreconditions({
     calibration: {
+      machineCoordinateSystem: { valid: false, homePosition: null },
       plateOriginValid: true,
-      plateOrigin: { x: 55, y: 57, z: 17 },
+      plateOrigin: { x: 0, y: 0, z: 0 },
       probeCenterValid: true,
+      probeCenter: { x: 1, y: 1, z: 1 },
+    },
+    machineConfig: { safe_z_buffer: 30 },
+    points: [{ sequenceNumber: 1, x: 0, y: 0, z: 0 }],
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.code, 'mcs');
+}
+
+function testAcceptsValidProgram() {
+  const result = validateProcedureStartPreconditions({
+    calibration: validCalib({
+      plateOrigin: { x: 55, y: 57, z: 17 },
       probeCenter: { x: 40, y: 40, z: 10 },
       toolOffset: { x: 0, y: 0, z: 0 },
-    },
+    }),
     machineConfig: { safe_z_buffer: 30 },
     points: [{ sequenceNumber: 1, x: 0, y: 0, z: 0 }],
   });
@@ -120,5 +141,6 @@ testE_noProgram();
 testF_plateOriginDoesNotChangePlateSafeZ();
 testG_toolOffset();
 testRejectsMissingProbe();
+testRejectsMissingMcs();
 testAcceptsValidProgram();
 console.log('startPreconditions.test.js: PASS');

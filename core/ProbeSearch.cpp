@@ -16,7 +16,8 @@ bool finiteRequest(const ProbeSearch::Request& request)
           std::isfinite(request.reference.z) && request.approach_distance > 0.0f &&
           request.search_distance > 0.0f && request.search_depth > 0.0f &&
           request.lateral_offset > 0.0f && request.xy_inner_radius >= 0.0f && request.backoff >= 0.0f &&
-          request.approach_speed > 0.0f && request.fast_speed > 0.0f && request.fine_speed > 0.0f))
+          request.approach_speed > 0.0f && request.transfer_speed > 0.0f &&
+          request.fast_speed > 0.0f && request.fine_speed > 0.0f))
     {
         return false;
     }
@@ -40,12 +41,16 @@ bool ProbeSearch::start(Machine& machine, const Request& request)
     request_ = request;
     result_ = TestPoint{};
     fine_sum_ = TestPoint{};
+    brake_trigger_ = TestPoint{};
     fine_done_ = 0;
     have_fast_ = false;
+    braking_ = false;
+    retreat_after_brake_ = false;
     machine.consumeProbeTrigger();
     machine.setCollisionContext(CollisionContext::Approach);
-    commandApproachRaise(machine);
-    state_ = State::RaiseApproach;
+    // One multi-axis move to hub (Z then X/Y) so corner_probe_transfer can blend.
+    commandAlignHub(machine);
+    state_ = State::AlignHub;
     if (motionSettled(machine))
     {
         tick(0.0f, machine);
@@ -68,26 +73,24 @@ void ProbeSearch::tick(float dt, Machine& machine)
 
     switch (state_)
     {
-    case State::RaiseApproach:
+    case State::AlignHub:
         if (motionSettled(machine))
         {
-            commandTraverseStart(machine);
-            state_ = State::TraverseStart;
+            advanceAfterHubAligned(machine);
+            if (motionSettled(machine) && state_ != State::Complete && state_ != State::Error)
+            {
+                tick(0.0f, machine);
+            }
         }
         break;
     case State::TraverseStart:
         if (motionSettled(machine))
         {
-            if (request_.dir == ProbeSearchDir::NegZ)
+            commandDescend(machine);
+            state_ = State::Descend;
+            if (motionSettled(machine))
             {
-                machine.consumeProbeTrigger();
-                commandSearch(machine, request_.fast_speed);
-                state_ = State::FastSearch;
-            }
-            else
-            {
-                commandDescend(machine);
-                state_ = State::Descend;
+                tick(0.0f, machine);
             }
         }
         break;
@@ -102,49 +105,29 @@ void ProbeSearch::tick(float dt, Machine& machine)
     case State::FastSearch:
     case State::FineSearch:
     {
-        TestPoint trigger{};
-        if (consumeTrigger(machine, trigger))
+        // After trigger: brakeToStop then wait for settle before backoff/retreat.
+        if (braking_)
         {
-            if (state_ == State::FastSearch)
+            if (!motionSettled(machine))
             {
-                // Fast trigger is used as the "wake-up" contact to enter the
-                // backoff/fine-search sequence. If fine searches are enabled,
-                // the final result is the mean of fine-search hits (below),
-                // not the fast trigger alone.
-                have_fast_ = true;
-                result_ = trigger;
-                if (request_.num_fine_searches == 0)
-                {
-                    commandRetreat(machine);
-                    state_ = State::Retreat;
-                }
-                else
-                {
-                    commandBackoff(machine, trigger);
-                    state_ = State::Backoff;
-                }
+                break;
+            }
+            braking_ = false;
+            if (retreat_after_brake_)
+            {
+                beginRetreat(machine);
             }
             else
             {
-                fine_sum_.x += trigger.x;
-                fine_sum_.y += trigger.y;
-                fine_sum_.z += trigger.z;
-                ++fine_done_;
-                if (fine_done_ >= request_.num_fine_searches)
-                {
-                    const float n = static_cast<float>(fine_done_);
-                    result_.x = fine_sum_.x / n;
-                    result_.y = fine_sum_.y / n;
-                    result_.z = fine_sum_.z / n;
-                    commandRetreat(machine);
-                    state_ = State::Retreat;
-                }
-                else
-                {
-                    commandBackoff(machine, trigger);
-                    state_ = State::Backoff;
-                }
+                commandBackoff(machine, brake_trigger_);
+                state_ = State::Backoff;
             }
+            break;
+        }
+        TestPoint trigger{};
+        if (consumeTrigger(machine, trigger))
+        {
+            onProbeTrigger(machine, trigger);
         }
         else if (motionSettled(machine))
         {
@@ -170,7 +153,29 @@ void ProbeSearch::tick(float dt, Machine& machine)
             state_ = State::FineSearch;
         }
         break;
-    case State::Retreat:
+    case State::RetreatClear:
+        if (motionSettled(machine))
+        {
+            if (!isXySearch(request_.dir))
+            {
+                if (!have_fast_ && fine_done_ == 0)
+                {
+                    enterError();
+                    return;
+                }
+                state_ = State::Complete;
+                return;
+            }
+            // Raise to hub Z and return XY in one moveTo (blend-capable).
+            commandRetreatToHub(machine);
+            state_ = State::RetreatToHub;
+            if (motionSettled(machine))
+            {
+                tick(0.0f, machine);
+            }
+        }
+        break;
+    case State::RetreatToHub:
         if (motionSettled(machine))
         {
             if (!have_fast_ && fine_done_ == 0)
@@ -214,58 +219,199 @@ TestPoint ProbeSearch::result() const
     return result_;
 }
 
-void ProbeSearch::commandApproachRaise(Machine& machine)
+void ProbeSearch::commandAlignHub(Machine& machine)
 {
-    const float approach_z = request_.reference.z + request_.approach_distance;
-    machine.setActiveVelocity(request_.approach_speed);
-    machine.moveTo(machine.x(), machine.y(), approach_z);
+    const TestPoint hub = hubPose();
+    applyApproachProfile(machine);
+    machine.moveTo(hub.x, hub.y, hub.z);
 }
 
 void ProbeSearch::commandTraverseStart(Machine& machine)
 {
+    // Single-axis lateral move at hub Z to this direction's outer start.
     const TestPoint start = startPose();
-    machine.setActiveVelocity(request_.approach_speed);
-    machine.moveTo(start.x, start.y, start.z);
+    applyTransferProfile(machine);
+    switch (request_.dir)
+    {
+    case ProbeSearchDir::NegX:
+    case ProbeSearchDir::PosX:
+        machine.moveTo(start.x, machine.y(), machine.z());
+        break;
+    case ProbeSearchDir::NegY:
+    case ProbeSearchDir::PosY:
+        machine.moveTo(machine.x(), start.y, machine.z());
+        break;
+    case ProbeSearchDir::NegZ:
+        break;
+    }
 }
 
 void ProbeSearch::commandDescend(Machine& machine)
 {
-    const TestPoint start = startPose();
     const TestPoint target = searchTarget();
     // Prep Z into the search plane is still outside contact risk along the search
     // axis — use approach speed. Slow speeds apply only in FastSearch/FineSearch.
-    machine.setActiveVelocity(request_.approach_speed);
+    applyApproachProfile(machine);
     machine.setCollisionContext(CollisionContext::Contact);
-    machine.moveTo(start.x, start.y, target.z);
+    machine.moveTo(machine.x(), machine.y(), target.z);
 }
 
 void ProbeSearch::commandSearch(Machine& machine, float speed)
 {
     const TestPoint target = searchTarget();
     machine.setCollisionContext(CollisionContext::Contact);
-    machine.setActiveVelocity(speed);
-    machine.moveTo(target.x, target.y, target.z);
+    applySearchProfile(machine, speed);
+    switch (request_.dir)
+    {
+    case ProbeSearchDir::NegX:
+    case ProbeSearchDir::PosX:
+        machine.moveTo(target.x, machine.y(), machine.z());
+        break;
+    case ProbeSearchDir::NegY:
+    case ProbeSearchDir::PosY:
+        machine.moveTo(machine.x(), target.y, machine.z());
+        break;
+    case ProbeSearchDir::NegZ:
+        machine.moveTo(machine.x(), machine.y(), target.z);
+        break;
+    }
 }
 
 void ProbeSearch::commandBackoff(Machine& machine, const TestPoint& trigger_pose)
 {
     const TestPoint back = backoffPose(trigger_pose);
-    machine.setActiveVelocity(request_.approach_speed);
-    machine.moveTo(back.x, back.y, back.z);
+    applyTransferProfile(machine);
+    switch (request_.dir)
+    {
+    case ProbeSearchDir::NegX:
+    case ProbeSearchDir::PosX:
+        machine.moveTo(back.x, machine.y(), machine.z());
+        break;
+    case ProbeSearchDir::NegY:
+    case ProbeSearchDir::PosY:
+        machine.moveTo(machine.x(), back.y, machine.z());
+        break;
+    case ProbeSearchDir::NegZ:
+        machine.moveTo(machine.x(), machine.y(), back.z);
+        break;
+    }
 }
 
-void ProbeSearch::commandRetreat(Machine& machine)
+void ProbeSearch::commandRetreatClear(Machine& machine)
 {
-    // Clear laterally to this direction's start pose (outer offset @ approach_z)
-    // before Complete, so the next direction does not skim past the disc.
-    const TestPoint clear = startPose();
+    // Along the search axis back to the direction start at current (work) Z.
+    // For NegZ this is hub Z (P_z height) at hub XY.
     machine.setCollisionContext(CollisionContext::Approach);
-    machine.setActiveVelocity(request_.approach_speed);
-    machine.moveTo(clear.x, clear.y, clear.z);
+    applyTransferProfile(machine);
+    if (!isXySearch(request_.dir))
+    {
+        const TestPoint hub = hubPose();
+        machine.moveTo(machine.x(), machine.y(), hub.z);
+        return;
+    }
+    const TestPoint start = startPose();
+    switch (request_.dir)
+    {
+    case ProbeSearchDir::NegX:
+    case ProbeSearchDir::PosX:
+        machine.moveTo(start.x, machine.y(), machine.z());
+        break;
+    case ProbeSearchDir::NegY:
+    case ProbeSearchDir::PosY:
+        machine.moveTo(machine.x(), start.y, machine.z());
+        break;
+    default:
+        break;
+    }
+}
+
+void ProbeSearch::commandRetreatToHub(Machine& machine)
+{
+    const TestPoint hub = hubPose();
+    machine.setCollisionContext(CollisionContext::Approach);
+    applyTransferProfile(machine);
+    machine.moveTo(hub.x, hub.y, hub.z);
+}
+
+void ProbeSearch::beginRetreat(Machine& machine)
+{
+    commandRetreatClear(machine);
+    state_ = State::RetreatClear;
+    if (motionSettled(machine))
+    {
+        tick(0.0f, machine);
+    }
+}
+
+void ProbeSearch::advanceAfterHubAligned(Machine& machine)
+{
+    if (!isXySearch(request_.dir))
+    {
+        machine.consumeProbeTrigger();
+        commandSearch(machine, request_.fast_speed);
+        state_ = State::FastSearch;
+        return;
+    }
+    commandTraverseStart(machine);
+    state_ = State::TraverseStart;
+}
+
+void ProbeSearch::applyApproachProfile(Machine& machine) const
+{
+    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    machine.setActiveMotionProfile(request_.approach_speed, probe.a_probe_transfer,
+                                   probe.corner_probe_transfer);
+}
+
+void ProbeSearch::applyTransferProfile(Machine& machine) const
+{
+    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    machine.setActiveMotionProfile(request_.transfer_speed, probe.a_probe_transfer,
+                                   probe.corner_probe_transfer);
+}
+
+void ProbeSearch::applySearchProfile(Machine& machine, float speed) const
+{
+    // No corner blend during contact search (single-axis legs).
+    const MachineConfig::Probe& probe = machine.machineConfig().probe;
+    machine.setActiveMotionProfile(speed, probe.a_probe_search, 0.0f);
+}
+
+void ProbeSearch::onProbeTrigger(Machine& machine, const TestPoint& trigger)
+{
+    brake_trigger_ = trigger;
+    if (state_ == State::FastSearch)
+    {
+        have_fast_ = true;
+        result_ = trigger;
+        retreat_after_brake_ = (request_.num_fine_searches == 0);
+    }
+    else
+    {
+        fine_sum_.x += trigger.x;
+        fine_sum_.y += trigger.y;
+        fine_sum_.z += trigger.z;
+        ++fine_done_;
+        if (fine_done_ >= request_.num_fine_searches)
+        {
+            const float n = static_cast<float>(fine_done_);
+            result_.x = fine_sum_.x / n;
+            result_.y = fine_sum_.y / n;
+            result_.z = fine_sum_.z / n;
+            retreat_after_brake_ = true;
+        }
+        else
+        {
+            retreat_after_brake_ = false;
+        }
+    }
+    machine.brakeToStop(machine.machineConfig().probe.a_probe_brake);
+    braking_ = true;
 }
 
 void ProbeSearch::enterError()
 {
+    braking_ = false;
     state_ = State::Error;
 }
 
@@ -281,10 +427,16 @@ bool ProbeSearch::faulted(const Machine& machine) const
            machine.machineState() == MachineState::Stopped;
 }
 
-TestPoint ProbeSearch::startPose() const
+TestPoint ProbeSearch::hubPose() const
 {
     TestPoint p = request_.reference;
     p.z = request_.reference.z + request_.approach_distance;
+    return p;
+}
+
+TestPoint ProbeSearch::startPose() const
+{
+    TestPoint p = hubPose();
     switch (request_.dir)
     {
     case ProbeSearchDir::NegX:

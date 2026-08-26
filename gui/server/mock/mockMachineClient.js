@@ -118,6 +118,14 @@ function createMockMachineClient() {
     return beginMotion({ x: 0, y: 0, z: 0 }, 'Homing');
   }
 
+  function defineMcs() {
+    return beginMotion({ x: 0, y: 0, z: 0 }, 'Homing');
+  }
+
+  function restoreMcs() {
+    return { ok: true, status: getStatus() };
+  }
+
   function clearFault() {
     return {
       ok: false,
@@ -201,6 +209,8 @@ function createMockMachineClient() {
     pneumaticOpen,
     pneumaticClose,
     home,
+    defineMcs,
+    restoreMcs,
     clearFault,
     pause,
     resume,

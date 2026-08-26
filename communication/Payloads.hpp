@@ -89,11 +89,13 @@ struct NackPayload
 // Mirrors Core MachineConfig field order. Communication has no Core dependency.
 struct MachineConfigPayload
 {
-    float v_approach;
-    float v_slow;
-    float v_measure;
+    float v_approach_testpoints;
+    float v_fine_testpoints;
+    float v_unclamp;
     float v_homing;
-    float acceleration;
+    float a_testpoints;
+    float corner_testpoints;
+    float a_homing;
     float force_filter;
     float xy_tolerance_N;
     float xy_correction_step;
@@ -112,7 +114,7 @@ struct MachineConfigPayload
     float z_correction_max;
     float minimum_correction;
     uint16_t max_optimization_iterations;
-    float probe_search_speed;
+    float v_search;
     float probe_search_distance;
     float probe_backoff;
     float home_offset_x;
@@ -131,10 +133,9 @@ struct MachineConfigPayload
     float tool_diameter;
     float search_depth;
     float approach_distance;
-    float fine_search_speed;
-    // Fixed reference used exclusively for tool_offset definition:
-    // tool_offset = probe_offset_reference - measured_probe.
-    // Must never be used as a motion/search target.
+    float v_search_fine;
+    // Fixed reference used exclusively for legacy tool_offset definition in older builds.
+    // Must never be used as a motion/search target or durable probe position.
     float probe_offset_reference_x;
     float probe_offset_reference_y;
     float probe_offset_reference_z;
@@ -142,13 +143,28 @@ struct MachineConfigPayload
     float probe_xy_search_margin;
     float insert_search_distance;
     uint16_t num_fine_searches;
-    // Phase-specific extract/insert speeds (independent of approach/probe speeds).
     float phase1_v_extract;
     float phase1_v_insert;
+    float phase1_a;
+    float phase1_corner;
     float phase2_v_extract;
     float phase2_v_insert;
+    float phase2_a;
+    float phase2_corner;
     float phase3_v_extract;
     float phase3_v_insert;
+    float phase3_a;
+    float phase3_corner;
+    float v_approach_probe;
+    float v_transfer_probe;
+    float a_probe_transfer;
+    float corner_probe_transfer;
+    float a_probe_search;
+    float a_probe_brake;
+    // Mirrored from CalibrationSet on GetMachineConfig (Install reference). Ignored on Set.
+    float probe_center_x;
+    float probe_center_y;
+    float probe_center_z;
 };
 
 struct TestConfigurationPayload

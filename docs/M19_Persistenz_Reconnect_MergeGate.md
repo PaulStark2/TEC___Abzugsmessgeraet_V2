@@ -84,8 +84,11 @@ Damit wird der Lückennachweis geschlossen:
 - `npm run test:protocol` → **PASS**
 
 ## Architektur-Invarianten (Regression-Schutz)
-- `probe_offset_reference` bleibt ausschließlich Offset-Mathematik (`tool_offset = probe_offset_reference - measured_probe`).
-  Keine Kopplung an Such-/Bewegungslogik als Zielkoordinate.
+- `probe_offset_reference` ist **Legacy** und darf nicht mehr die M19-Offset-Mathematik
+  treiben. Install: `probeCenter = measured`, `toolOffset = 0`.
+  OffsetOnly: `toolOffset = storedProbeCenter − measured` (probeCenter unverändert).
 - SimPlant `ProbeDisc.center` gelangt nicht als produktiver Pfad in den Core:
-  `probe_center` wird nur durch M19 (ProbeCalibration) oder durch `CmdSetProbeCenter` (Rehydrierung) gesetzt.
+  `probe_center` wird nur durch M19 Install oder durch `CmdSetProbeCenter` (Rehydrierung) gesetzt.
+- Persistenz rekonstruiert `probeCenter` **nicht** als `probe_offset_reference − tool_offset`.
+  FullCalib-Sync nutzt `probe_center_*` aus `MsgMachineConfig` (232 B).
 

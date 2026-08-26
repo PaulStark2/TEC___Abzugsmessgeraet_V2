@@ -20,6 +20,16 @@ function validateProcedureStartPreconditions(input) {
   const cfg = input.machineConfig || {};
   const points = Array.isArray(input.points) ? input.points : [];
 
+  const mcs = calib.machineCoordinateSystem;
+  if (!mcs || mcs.valid !== true || !mcs.homePosition) {
+    return {
+      ok: false,
+      code: 'mcs',
+      error:
+        'Kein gültiges Maschinenkoordinatensystem — bitte unter Kalibrieren „MCS und Bauplatte/Messtaster definieren und kalibrieren“ durchführen',
+    };
+  }
+
   if (!calib.plateOriginValid || !calib.plateOrigin) {
     return {
       ok: false,

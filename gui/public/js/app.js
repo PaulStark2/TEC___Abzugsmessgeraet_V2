@@ -4,8 +4,8 @@ import { setupTcpView } from './tcpView.js';
 import { connectStatus, sendCommand } from './api.js';
 import { applyStatus, setConnectionStatus, wireGlobalStop } from './statusBar.js';
 import { wireFaultPanel } from './components/faultPanel.js';
-import { startRouter } from './router.js';
-import { createStartupHomingController } from './homingGate.js';
+import { startRouter, navigate } from './router.js';
+import { createStartupHomingController, MCS_REQUIRED_MESSAGE } from './homingGate.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   setConnectionStatus('GUI läuft — verbinde Live-Status…', false);
@@ -16,6 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const startupHoming = createStartupHomingController({
     startHoming: () => sendCommand({ command: 'home' }),
+    onNeedFullCalibration: async () => {
+      setConnectionStatus(MCS_REQUIRED_MESSAGE, true);
+      navigate('calibrate');
+    },
   });
 
   connectStatus(

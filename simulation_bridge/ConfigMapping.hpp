@@ -8,17 +8,25 @@
 inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
 {
     MachineConfig cfg{};
-    cfg.motion.v_approach = p.v_approach;
-    cfg.motion.v_slow = p.v_slow;
-    cfg.motion.v_measure = p.v_measure;
+    cfg.motion.v_approach_testpoints = p.v_approach_testpoints;
+    cfg.motion.v_fine_testpoints = p.v_fine_testpoints;
+    cfg.motion.v_unclamp = p.v_unclamp;
     cfg.motion.v_homing = p.v_homing;
-    cfg.motion.acceleration = p.acceleration;
+    cfg.motion.a_testpoints = p.a_testpoints;
+    cfg.motion.corner_testpoints = p.corner_testpoints;
+    cfg.motion.a_homing = p.a_homing;
     cfg.motion.phase1_v_extract = p.phase1_v_extract;
     cfg.motion.phase1_v_insert = p.phase1_v_insert;
+    cfg.motion.phase1_a = p.phase1_a;
+    cfg.motion.phase1_corner = p.phase1_corner;
     cfg.motion.phase2_v_extract = p.phase2_v_extract;
     cfg.motion.phase2_v_insert = p.phase2_v_insert;
+    cfg.motion.phase2_a = p.phase2_a;
+    cfg.motion.phase2_corner = p.phase2_corner;
     cfg.motion.phase3_v_extract = p.phase3_v_extract;
     cfg.motion.phase3_v_insert = p.phase3_v_insert;
+    cfg.motion.phase3_a = p.phase3_a;
+    cfg.motion.phase3_corner = p.phase3_corner;
     cfg.force.force_filter = p.force_filter;
     cfg.force.xy_tolerance_N = p.xy_tolerance_N;
     cfg.force.xy_correction_step = p.xy_correction_step;
@@ -37,7 +45,7 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.phase2.z_correction_max = p.z_correction_max;
     cfg.phase2.minimum_correction = p.minimum_correction;
     cfg.phase2.max_optimization_iterations = p.max_optimization_iterations;
-    cfg.probe.search_speed = p.probe_search_speed;
+    cfg.probe.v_search = p.v_search;
     cfg.probe.search_distance = p.probe_search_distance;
     cfg.probe.backoff = p.probe_backoff;
     cfg.probe.head_diameter = p.head_diameter;
@@ -49,7 +57,13 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.force.insert_search_distance = p.insert_search_distance;
     cfg.probe.search_depth = p.search_depth;
     cfg.probe.approach_distance = p.approach_distance;
-    cfg.probe.fine_search_speed = p.fine_search_speed;
+    cfg.probe.v_search_fine = p.v_search_fine;
+    cfg.probe.v_approach_probe = p.v_approach_probe;
+    cfg.probe.v_transfer_probe = p.v_transfer_probe;
+    cfg.probe.a_probe_transfer = p.a_probe_transfer;
+    cfg.probe.corner_probe_transfer = p.corner_probe_transfer;
+    cfg.probe.a_probe_search = p.a_probe_search;
+    cfg.probe.a_probe_brake = p.a_probe_brake;
     cfg.probe.probe_offset_reference = TestPoint{p.probe_offset_reference_x, p.probe_offset_reference_y,
                                                   p.probe_offset_reference_z};
     cfg.probe.num_fine_searches = p.num_fine_searches;
@@ -65,17 +79,25 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
 inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& cfg)
 {
     tecomm::MachineConfigPayload p{};
-    p.v_approach = cfg.motion.v_approach;
-    p.v_slow = cfg.motion.v_slow;
-    p.v_measure = cfg.motion.v_measure;
+    p.v_approach_testpoints = cfg.motion.v_approach_testpoints;
+    p.v_fine_testpoints = cfg.motion.v_fine_testpoints;
+    p.v_unclamp = cfg.motion.v_unclamp;
     p.v_homing = cfg.motion.v_homing;
-    p.acceleration = cfg.motion.acceleration;
+    p.a_testpoints = cfg.motion.a_testpoints;
+    p.corner_testpoints = cfg.motion.corner_testpoints;
+    p.a_homing = cfg.motion.a_homing;
     p.phase1_v_extract = cfg.motion.phase1_v_extract;
     p.phase1_v_insert = cfg.motion.phase1_v_insert;
+    p.phase1_a = cfg.motion.phase1_a;
+    p.phase1_corner = cfg.motion.phase1_corner;
     p.phase2_v_extract = cfg.motion.phase2_v_extract;
     p.phase2_v_insert = cfg.motion.phase2_v_insert;
+    p.phase2_a = cfg.motion.phase2_a;
+    p.phase2_corner = cfg.motion.phase2_corner;
     p.phase3_v_extract = cfg.motion.phase3_v_extract;
     p.phase3_v_insert = cfg.motion.phase3_v_insert;
+    p.phase3_a = cfg.motion.phase3_a;
+    p.phase3_corner = cfg.motion.phase3_corner;
     p.force_filter = cfg.force.force_filter;
     p.xy_tolerance_N = cfg.force.xy_tolerance_N;
     p.xy_correction_step = cfg.force.xy_correction_step;
@@ -95,7 +117,7 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.minimum_correction = cfg.phase2.minimum_correction;
     p.max_optimization_iterations =
         static_cast<uint16_t>(cfg.phase2.max_optimization_iterations);
-    p.probe_search_speed = cfg.probe.search_speed;
+    p.v_search = cfg.probe.v_search;
     p.probe_search_distance = cfg.probe.search_distance;
     p.probe_backoff = cfg.probe.backoff;
     p.home_offset_x = cfg.calibration.home_offset.x;
@@ -117,11 +139,21 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.insert_search_distance = cfg.force.insert_search_distance;
     p.search_depth = cfg.probe.search_depth;
     p.approach_distance = cfg.probe.approach_distance;
-    p.fine_search_speed = cfg.probe.fine_search_speed;
+    p.v_search_fine = cfg.probe.v_search_fine;
+    p.v_approach_probe = cfg.probe.v_approach_probe;
+    p.v_transfer_probe = cfg.probe.v_transfer_probe;
+    p.a_probe_transfer = cfg.probe.a_probe_transfer;
+    p.corner_probe_transfer = cfg.probe.corner_probe_transfer;
+    p.a_probe_search = cfg.probe.a_probe_search;
+    p.a_probe_brake = cfg.probe.a_probe_brake;
     p.probe_offset_reference_x = cfg.probe.probe_offset_reference.x;
     p.probe_offset_reference_y = cfg.probe.probe_offset_reference.y;
     p.probe_offset_reference_z = cfg.probe.probe_offset_reference.z;
     p.num_fine_searches = static_cast<uint16_t>(cfg.probe.num_fine_searches);
+    // probe_center_* filled by GetMachineConfig from CalibrationSet (not MachineConfig).
+    p.probe_center_x = 0.0f;
+    p.probe_center_y = 0.0f;
+    p.probe_center_z = 0.0f;
     return p;
 }
 

@@ -203,6 +203,12 @@ int main()
             return 21;
         }
 
+        // MOVE_TO / STOP above clear isHomed — re-home before CmdStart.
+        if (!homeMachine(machine))
+        {
+            return 215;
+        }
+
         out.clear();
         if (!dispatchEmpty(dispatcher, tecomm::MessageId::CmdStart, tecomm::AckResultCode::Ok, out))
         {

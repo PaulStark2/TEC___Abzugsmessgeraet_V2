@@ -9,25 +9,28 @@ protocol after transfer onto the Cartesian Core. ABB RAPID, joint motion,
 
 ## Goal
 
-1. Measure the geometric center of the **one** fixed measuring disc.
-2. Replace `tool_offset` so later TCP targets compensate the deviation between
-   the configured nominal probe position and the measured center.
+1. Measure the geometric center of the **one** measuring disc (SimPlant / hardware).
+2. Store that center according to calibration mode:
 
 ```text
-P_TCP_target =
-    P_TCP_nominal +
-    (P_probe_nominal - P_probe_measured)
+Install (FullCalib / Geometry, CmdStartProbeCalib):
+  probeCenter = measured
+  toolOffset  = (0,0,0)
+
+OffsetOnly (Procedure after ProbeApproach):
+  probeCenter unchanged (durable plant reference)
+  toolOffset  = storedProbeCenter − measured
 ```
 
-Equivalently:
+Equivalently for motion:
 
 ```text
-tool_offset = P_probe_nominal - P_probe_measured
-machine     = plateOrigin + platePoint + tool_offset
+machine = plateOrigin + platePoint + toolOffset
 ```
 
-The offset is **replaced** on every successful run. It is never accumulated.
+`probe_offset_reference` is **legacy** and must not drive Install/OffsetOnly math.
 
+The offset is **replaced** on OffsetOnly runs. It is never accumulated.
 Failed, aborted or STOPped runs leave the previous valid `probe_center` and
 `tool_offset` unchanged.
 
@@ -193,19 +196,30 @@ whole process (M18).
 
 Non-blocking FSMs: `ProbeSearch` (SearchL replacement) and `ProbeCalibration`.
 
+Hub pose **P_z** = `(reference.x, reference.y, reference.z + approach_distance)`.
+Every direction starts and ends at P_z. Transfer and search legs move **one axis
+at a time** (never X+Y or X+Z together).
+
 ```text
-Measure Z (Z decreases)
+Measure Z from P_z (Z decreases, v_fast then optional fine)
   → TCP hits disc top face
   → probe_center.z = trigger_tcp_z − measuring_head_thickness/2
-  → XY height = that Z − search_depth   (default −5 mm, intentional)
-  → −Y, +Y, −X, +X
+  → return to P_z (updated hub Z from measured center)
+  → for each of −Y, +Y, −X, +X:
+       P_z → lateral at hub Z → descend to XY work height
+       → fast search → latch → backoff → optional fine searches
+       → clear along search axis → raise to hub Z → return to P_z
   → four TCP contacts → fitCircleCenterXY
-  → tool_offset = nominal − measured   (replace, not accumulate)
+  → Install: probeCenter = measured, toolOffset = 0
+    OffsetOnly: toolOffset = storedProbeCenter − measured
   → setProbeCenter + setToolOffset only on success
 ```
 
-Each direction: approach → fast search → latch → backoff → optional fine
-searches (`num_fine_searches`, default 3, mean of valid hits) → retreat.
+XY work height = measured `probe_center.z − search_depth` (default −5 mm).
+
+Each direction: approach (via P_z) → fast search → latch → backoff → optional
+fine searches (`num_fine_searches`, default 3, mean of valid hits) → retreat
+via P_z.
 
 Rx/Ry remain out of scope.
 
@@ -213,14 +227,15 @@ Rx/Ry remain out of scope.
 
 ### Manual — `CmdStartProbeCalib` (0x54)
 
-Operator jogs near the disc. ProbeApproach is skipped. On Complete the process
-ends (`Completed`).
+Operator jogs TCP to hub **P_z** above the disc. ProbeApproach is skipped.
+`search_ref.z = tcp.z − approach_distance` (assumed disc center). On Complete
+the process ends (`Completed`).
 
 ### Automatic — `CmdStart` (0x13)
 
 ```text
-ProbeApproach (Safe-Z → XY to probe_center → approach Z)
-  → ProbeCalibration
+ProbeApproach (Safe-Z → XY to probe_center → approach Z = P_z)
+  → ProbeCalibration (search_ref.z = probe_center.z)
   → MoveSafePose
   → normal test/aging cycle
 ```
@@ -269,19 +284,22 @@ Writable via Parametereinstellungen. SafetyLimits are **not** GUI-editable.
 | `num_fine_searches` | 3 |
 | `probe_offset_reference_{x,y,z}` | (40, 40, 10) mm |
 
-`MachineConfig` payload is **196 bytes** (was 184 after the first M19.0 cut,
-142 in M18): 48 × float32 + `max_optimization_iterations` u16 +
-`num_fine_searches` u16. Codec: `communication/PayloadCodec.cpp` and
-`gui/server/protocol/m12Codec.js`.
+`MachineConfig` payload is **232 bytes** (was 220; adds `probe_center_x/y/z`
+mirrored from `CalibrationSet` on Get). Codec: `communication/PayloadCodec.cpp`
+and `gui/server/protocol/m12Codec.js`.
 
 ## Persistence
 
 - Runtime source of truth: `CalibrationSet` in Core RAM.
 - `tool_offset` is also written into `MachineConfig.calibration.tool_offset` so
   `CmdGetMachineConfig` returns the replaced value.
-- After a successful manual calib the GUI can `POST /api/calibration/sync`:
-  store `tool_offset` in `machine-config.json` and reconstruct
-  `probe_center = probe_offset_reference − tool_offset` in `calibration.json`.
+- After a successful **Install** (FullCalib) the GUI `POST /api/calibration/sync`
+  with `{ persistProbeCenter: true }` stores `probe_center_*` from
+  `MsgMachineConfig` and `tool_offset = 0`.
+- After **OffsetOnly** sync with `persistProbeCenter: false` updates only
+  `tool_offset_*` and must not rewrite `probeCenter`.
+- Do **not** reconstruct `probeCenter` as `probe_offset_reference − tool_offset`.
+- `probe_offset_reference` remains in config as legacy only.
 
 ## Failure modes
 

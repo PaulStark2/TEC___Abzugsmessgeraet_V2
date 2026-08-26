@@ -264,15 +264,17 @@ export function renderProcedure(container) {
 
         const machine = await fetchMachineStatus();
         const isHomed = machine.isHomed === true;
+        const mcsValid = machine.mcsValid === true;
 
         const gate = await runWithHomingGate({
-          status: { connected: machine.connected !== false, isHomed },
+          status: { connected: machine.connected !== false, isHomed, mcsValid },
           startHoming: () => sendCommand({ command: 'home' }),
           getStatus: async () => {
             const st = await fetchMachineStatus();
             return {
               connected: st.connected !== false,
               isHomed: st.isHomed === true,
+              mcsValid: st.mcsValid === true,
               homingState: st.homingState,
               machineState: st.machineState,
               eStop: st.eStop === true,
@@ -284,6 +286,13 @@ export function renderProcedure(container) {
           action: () => startProcedure({ mode, insertionForce, iterations }),
         });
 
+        if (gate.result === 'mcs_required') {
+          setFeedback(
+            'Kein gültiges Maschinenkoordinatensystem — bitte unter Kalibrieren „MCS und Bauplatte/Messtaster definieren und kalibrieren“ durchführen.',
+            true
+          );
+          return;
+        }
         if (gate.result === 'cancelled') {
           setFeedback('Start abgebrochen — Homing erforderlich.', false);
           return;

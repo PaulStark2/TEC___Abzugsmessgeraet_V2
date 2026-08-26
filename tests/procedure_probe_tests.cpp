@@ -34,11 +34,12 @@ int main()
     {
         Machine machine;
         homeMachine(machine);
-        // Manual calibration requires user-jogged TCP near the probe:
-        // ProbeCalibration starts from current TCP pose as search_reference.
+        // Manual calibration: operator jogs TCP to hub P_z above the disc.
+        // startProbeCalibration derives search_ref.z = tcp.z - approach_distance.
         {
             const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
-            machine.moveTo(disc.x, disc.y, disc.z);
+            const float standoff = machine.machineConfig().probe.approach_distance;
+            machine.moveTo(disc.x, disc.y, disc.z + standoff);
             for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
             {
                 machine.setHostInputs(withFreshForce(HostInputs{}));
@@ -90,7 +91,8 @@ int main()
         {
             TestExecutor ex(machine);
             const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
-            machine.moveTo(disc.x, disc.y, disc.z);
+            const float standoff = machine.machineConfig().probe.approach_distance;
+            machine.moveTo(disc.x, disc.y, disc.z + standoff);
             for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
             {
                 machine.setHostInputs(withFreshForce(HostInputs{}));
@@ -113,6 +115,15 @@ int main()
             }
         }
 
+        // M19 leaves the home pose — re-home before automatic start.
+        if (!homeMachine(machine))
+        {
+            return 13;
+        }
+
+        const TestPoint stored_center = machine.calibrationSet().probe_center;
+        const TestPoint tool_before = machine.calibrationSet().tool_offset;
+
         // Now start the automatic procedure (raises to dynamic Safe-Z on approach).
         TestExecutor ex(machine);
         TestProgram program;
@@ -120,12 +131,12 @@ int main()
         ex.setProgram(program);
         if (!ex.start())
         {
-            return 13;
+            return 14;
         }
         if (ex.procedurePhase() != ProcedurePhase::ProbeApproach &&
             ex.procedurePhase() != ProcedurePhase::ProbeCalibrate)
         {
-            return 14;
+            return 15;
         }
         bool saw_approach = ex.procedurePhase() == ProcedurePhase::ProbeApproach;
         bool saw_calib = ex.procedurePhase() == ProcedurePhase::ProbeCalibrate;
@@ -150,21 +161,29 @@ int main()
         }
         if (!saw_calib)
         {
-            return 15;
+            return 16;
         }
         if (!runUntil(ex, machine, ProcedurePhase::Clamp, 8000))
         {
-            return 16;
-        }
-
-        // After calibration, probe_center.xy should match the configured virtual disc center
-        // used by withPlantInputs() (disc == probe_offset_reference by default).
-        const TestPoint nominal = machine.machineConfig().probe.probe_offset_reference;
-        if (!nearEqual(machine.calibrationSet().probe_center.x, nominal.x) ||
-            !nearEqual(machine.calibrationSet().probe_center.y, nominal.y))
-        {
             return 17;
         }
+
+        // OffsetOnly: probeCenter must stay the Install reference; toolOffset ≈ 0 when
+        // plant disc matches that reference (not reconstructed from probe_offset_reference).
+        if (!nearEqual(machine.calibrationSet().probe_center.x, stored_center.x) ||
+            !nearEqual(machine.calibrationSet().probe_center.y, stored_center.y) ||
+            !nearEqual(machine.calibrationSet().probe_center.z, stored_center.z))
+        {
+            return 18;
+        }
+        const TestPoint tool_after = machine.calibrationSet().tool_offset;
+        if (!nearEqual(tool_after.x, 0.0f) || !nearEqual(tool_after.y, 0.0f) ||
+            !nearEqual(tool_after.z, 0.0f))
+        {
+            return 19;
+        }
+        (void)tool_before;
+        (void)saw_approach;
     }
 
     return 0;

@@ -21,6 +21,40 @@ static bool velocityOk(float value)
     return value <= SafetyLimits::kMaxVelocity;
 }
 
+static bool accelerationOk(float value)
+{
+    if (value < 0.0f)
+    {
+        return false;
+    }
+    return value <= SafetyLimits::kMaxAcceleration;
+}
+
+static bool cornerOk(float value)
+{
+    if (value < 0.0f)
+    {
+        return false;
+    }
+    return value <= SafetyLimits::kMaxCornerRadius;
+}
+
+// Blend requires enough distance to decelerate/accelerate inside the corner: R >= v^2/(2a).
+// a == 0 or R == 0 → no blending; any R > 0 with a == 0 is inconsistent.
+static bool blendProfileOk(float velocity, float acceleration, float corner_radius)
+{
+    if (corner_radius <= 0.0f)
+    {
+        return true;
+    }
+    if (acceleration <= 0.0f)
+    {
+        return false;
+    }
+    const float min_radius = (velocity * velocity) / (2.0f * acceleration);
+    return corner_radius + 1.0e-6f >= min_radius;
+}
+
 float MachineConfig::collisionThreshold(CollisionContext context) const
 {
     switch (context)
@@ -44,32 +78,78 @@ float MachineConfig::collisionThreshold(CollisionContext context) const
 
 ConfigValidationError validateMachineConfig(const MachineConfig& config)
 {
-    if (!velocityOk(config.motion.v_approach) || !velocityOk(config.motion.v_slow) ||
-        !velocityOk(config.motion.v_measure) || !velocityOk(config.motion.v_homing) ||
+    if (!velocityOk(config.motion.v_approach_testpoints) || !velocityOk(config.motion.v_fine_testpoints) ||
+        !velocityOk(config.motion.v_unclamp) || !velocityOk(config.motion.v_homing) ||
         !velocityOk(config.motion.phase1_v_extract) || !velocityOk(config.motion.phase1_v_insert) ||
         !velocityOk(config.motion.phase2_v_extract) || !velocityOk(config.motion.phase2_v_insert) ||
         !velocityOk(config.motion.phase3_v_extract) || !velocityOk(config.motion.phase3_v_insert) ||
-        !velocityOk(config.probe.search_speed) || !velocityOk(config.probe.fine_search_speed))
+        !velocityOk(config.probe.v_approach_probe) || !velocityOk(config.probe.v_transfer_probe) ||
+        !velocityOk(config.probe.v_search) || !velocityOk(config.probe.v_search_fine))
     {
-        if (config.motion.v_approach <= 0.0f || config.motion.v_slow <= 0.0f ||
-            config.motion.v_measure <= 0.0f || config.motion.v_homing <= 0.0f ||
+        if (config.motion.v_approach_testpoints <= 0.0f || config.motion.v_fine_testpoints <= 0.0f ||
+            config.motion.v_unclamp <= 0.0f || config.motion.v_homing <= 0.0f ||
             config.motion.phase1_v_extract <= 0.0f || config.motion.phase1_v_insert <= 0.0f ||
             config.motion.phase2_v_extract <= 0.0f || config.motion.phase2_v_insert <= 0.0f ||
             config.motion.phase3_v_extract <= 0.0f || config.motion.phase3_v_insert <= 0.0f ||
-            config.probe.search_speed <= 0.0f || config.probe.fine_search_speed <= 0.0f)
+            config.probe.v_approach_probe <= 0.0f || config.probe.v_transfer_probe <= 0.0f ||
+            config.probe.v_search <= 0.0f || config.probe.v_search_fine <= 0.0f)
         {
             return ConfigValidationError::VelocityNotPositive;
         }
         return ConfigValidationError::VelocityExceedsSafety;
     }
 
-    if (config.motion.acceleration < 0.0f)
+    if (!accelerationOk(config.motion.a_testpoints) || !accelerationOk(config.motion.a_homing) ||
+        !accelerationOk(config.motion.phase1_a) || !accelerationOk(config.motion.phase2_a) ||
+        !accelerationOk(config.motion.phase3_a) || !accelerationOk(config.probe.a_probe_transfer) ||
+        !accelerationOk(config.probe.a_probe_search) || !accelerationOk(config.probe.a_probe_brake))
     {
-        return ConfigValidationError::AccelerationNegative;
-    }
-    if (config.motion.acceleration > SafetyLimits::kMaxAcceleration)
-    {
+        if (config.motion.a_testpoints < 0.0f || config.motion.a_homing < 0.0f ||
+            config.motion.phase1_a < 0.0f || config.motion.phase2_a < 0.0f ||
+            config.motion.phase3_a < 0.0f || config.probe.a_probe_transfer < 0.0f ||
+            config.probe.a_probe_search < 0.0f || config.probe.a_probe_brake < 0.0f)
+        {
+            return ConfigValidationError::AccelerationNegative;
+        }
         return ConfigValidationError::AccelerationExceedsSafety;
+    }
+
+    if (!cornerOk(config.motion.corner_testpoints) || !cornerOk(config.motion.phase1_corner) ||
+        !cornerOk(config.motion.phase2_corner) || !cornerOk(config.motion.phase3_corner) ||
+        !cornerOk(config.probe.corner_probe_transfer))
+    {
+        if (config.motion.corner_testpoints < 0.0f || config.motion.phase1_corner < 0.0f ||
+            config.motion.phase2_corner < 0.0f || config.motion.phase3_corner < 0.0f ||
+            config.probe.corner_probe_transfer < 0.0f)
+        {
+            return ConfigValidationError::CornerNegative;
+        }
+        return ConfigValidationError::CornerExceedsSafety;
+    }
+
+    // Use the higher of insert/extract speed per phase for corner consistency.
+    const float phase1_v =
+        (config.motion.phase1_v_extract > config.motion.phase1_v_insert) ? config.motion.phase1_v_extract
+                                                                         : config.motion.phase1_v_insert;
+    const float phase2_v =
+        (config.motion.phase2_v_extract > config.motion.phase2_v_insert) ? config.motion.phase2_v_extract
+                                                                         : config.motion.phase2_v_insert;
+    const float phase3_v =
+        (config.motion.phase3_v_extract > config.motion.phase3_v_insert) ? config.motion.phase3_v_extract
+                                                                         : config.motion.phase3_v_insert;
+    const float probe_transfer_v = (config.probe.v_approach_probe > config.probe.v_transfer_probe)
+                                       ? config.probe.v_approach_probe
+                                       : config.probe.v_transfer_probe;
+
+    if (!blendProfileOk(config.motion.v_approach_testpoints, config.motion.a_testpoints,
+                        config.motion.corner_testpoints) ||
+        !blendProfileOk(phase1_v, config.motion.phase1_a, config.motion.phase1_corner) ||
+        !blendProfileOk(phase2_v, config.motion.phase2_a, config.motion.phase2_corner) ||
+        !blendProfileOk(phase3_v, config.motion.phase3_a, config.motion.phase3_corner) ||
+        !blendProfileOk(probe_transfer_v, config.probe.a_probe_transfer,
+                        config.probe.corner_probe_transfer))
+    {
+        return ConfigValidationError::CornerInconsistent;
     }
 
     // Buffer must be strictly positive so every plate point stays below safe_z_plate.

@@ -131,8 +131,8 @@ int main(int argc, char** argv)
 
     // Unique banner so GUI/dev scripts can prove which binary is running.
     // Bump the tag whenever procedure/force semantics change in SimProtocolBridge/Core.
-    std::cout << "[SIM_BUILD] mcs-define-vs-home-reference 2026-08-24" << std::endl;
-    std::cerr << "[SIM_BUILD] mcs-define-vs-home-reference 2026-08-24" << std::endl;
+    std::cout << "[SIM_BUILD] mcs-define-cmd-home-reference-only 2026-08-25" << std::endl;
+    std::cerr << "[SIM_BUILD] mcs-define-cmd-home-reference-only 2026-08-25" << std::endl;
     std::cout << "simulation_protocol (M13 M12 binary TCP host)" << std::endl;
     std::cout << "Listening on 127.0.0.1:" << port << std::endl;
 

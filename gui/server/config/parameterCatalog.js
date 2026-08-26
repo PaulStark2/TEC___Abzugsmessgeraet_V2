@@ -6,50 +6,59 @@
  * min/max mirror core/SafetyLimits.hpp and MachineConfig validation (reject, no clamp).
  */
 
+const CORNER_INFO =
+  'Eckenradius für Achsblendung innerhalb eines Multi-Axis-moveTo. 0 = voller Stopp zwischen Achsen. ' +
+  'Bei Corner > 0 muss R ≥ v²/(2a) für die höchste beteiligte Geschwindigkeit gelten. ' +
+  'Sim-Pfadvorschau: „Vorschau ohne Kurvenradius“.';
+
 const GROUPS = [
   {
-    id: 'motion',
-    title: 'Motion',
+    id: 'verfahren',
+    title: 'Verfahren/Prüfpunkte',
     fields: [
       {
-        key: 'v_approach',
-        label: 'vApproach',
+        key: 'v_approach_testpoints',
+        label: 'vApproach (Prüfpunkte)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
         info: 'Geschwindigkeit der Anfahrbewegungen zur Safe-Z-Höhe und zum Prüfpunkt (Core MotionPlanner).',
       },
       {
-        key: 'v_slow',
-        label: 'vSlow',
+        key: 'v_fine_testpoints',
+        label: 'vFine (Prüfpunkte)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
-        info: 'Geschwindigkeit langsamer Anfahr- und Messbewegungen. Wirkt auf PreClamp-XY und langsame Z-Absenkung.',
+        info: 'Feine Z-Anfahrt und PreClamp-XY. Langsamere Prüfpunkt-Annäherung.',
       },
       {
-        key: 'v_measure',
-        label: 'vMeasure',
+        key: 'v_unclamp',
+        label: 'vUnclamp',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
-        info: 'Legacy-Messgeschwindigkeit (z. B. Unclamp). Die Prüfphasen nutzen die separaten Phase-1/2/3-Geschwindigkeiten.',
+        info: 'Geschwindigkeit beim Ausspannen (Unclamp). Die Prüfphasen nutzen die separaten Phase-1/2/3-Geschwindigkeiten.',
       },
       {
-        key: 'v_homing',
-        label: 'vHoming',
-        unit: 'mm/s',
-        minExclusive: 0,
-        max: 50,
-        info: 'Homing-Geschwindigkeit der Core-Referenzfahrt Z+ → X+ → Y+.',
-      },
-      {
-        key: 'acceleration',
-        label: 'acceleration',
+        key: 'a_testpoints',
+        label: 'a (Prüfpunkte)',
         unit: 'mm/s²',
         min: 0,
         max: 500,
-        info: 'Achsbeschleunigung. 0 = konstante Geschwindigkeit (bestehendes Core-Verhalten).',
+        info: 'Achsbeschleunigung für Prüfpunkt-/Safe-Z-Verfahren. 0 = konstante Geschwindigkeit.',
+      },
+      {
+        key: 'corner_testpoints',
+        label: 'Corner (Prüfpunkte)',
+        unit: 'mm',
+        min: 0,
+        max: 50,
+        cornerWith: {
+          accelKey: 'a_testpoints',
+          speedKeys: ['v_approach_testpoints', 'v_fine_testpoints', 'v_unclamp'],
+        },
+        info: CORNER_INFO,
       },
       {
         key: 'safe_z_buffer',
@@ -59,9 +68,15 @@ const GROUPS = [
         max: 500,
         info: 'Abstand, den die Maschine oberhalb des höchsten Prüfpunkts beim Verfahren zwischen Prüfpunkten einhält. Safe-Z (Bauplatte) = max(Punkt.z) + Puffer.',
       },
+    ],
+  },
+  {
+    id: 'phase1',
+    title: 'Phase 1',
+    fields: [
       {
         key: 'phase1_v_extract',
-        label: 'Phase 1 – Ausgliedergeschwindigkeit',
+        label: 'Ausgliedergeschwindigkeit',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -69,15 +84,41 @@ const GROUPS = [
       },
       {
         key: 'phase1_v_insert',
-        label: 'Phase 1 – Eingliedergeschwindigkeit',
+        label: 'Eingliedergeschwindigkeit',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
         info: 'Geschwindigkeit beim Eingliedern (−Z) in Phase 1.',
       },
       {
+        key: 'phase1_a',
+        label: 'Beschleunigung',
+        unit: 'mm/s²',
+        min: 0,
+        max: 500,
+        info: 'Beschleunigung für Phase-1-Bahnen. 0 = konstante Geschwindigkeit.',
+      },
+      {
+        key: 'phase1_corner',
+        label: 'Corner',
+        unit: 'mm',
+        min: 0,
+        max: 50,
+        cornerWith: {
+          accelKey: 'phase1_a',
+          speedKeys: ['phase1_v_extract', 'phase1_v_insert'],
+        },
+        info: CORNER_INFO,
+      },
+    ],
+  },
+  {
+    id: 'phase2',
+    title: 'Phase 2',
+    fields: [
+      {
         key: 'phase2_v_extract',
-        label: 'Phase 2 – Ausgliedergeschwindigkeit',
+        label: 'Ausgliedergeschwindigkeit',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -85,15 +126,80 @@ const GROUPS = [
       },
       {
         key: 'phase2_v_insert',
-        label: 'Phase 2 – Eingliedergeschwindigkeit',
+        label: 'Eingliedergeschwindigkeit',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
         info: 'Geschwindigkeit beim Eingliedern (−Z) in Phase 2. Typisch höher als Phase 1.',
       },
       {
+        key: 'phase2_a',
+        label: 'Beschleunigung',
+        unit: 'mm/s²',
+        min: 0,
+        max: 500,
+        info: 'Beschleunigung für Phase-2-Bahnen. 0 = konstante Geschwindigkeit.',
+      },
+      {
+        key: 'phase2_corner',
+        label: 'Corner',
+        unit: 'mm',
+        min: 0,
+        max: 50,
+        cornerWith: {
+          accelKey: 'phase2_a',
+          speedKeys: ['phase2_v_extract', 'phase2_v_insert'],
+        },
+        info: CORNER_INFO,
+      },
+      {
+        key: 'force_tolerance_N',
+        label: 'forceTolerance',
+        unit: 'N',
+        minExclusive: 0,
+        max: 50,
+        info: 'Totzone |Fz − Sollkraft| für die iterative Einfügepunkt-Korrektur.',
+      },
+      {
+        key: 'z_correction_gain',
+        label: 'zCorrectionGain',
+        unit: 'mm/N',
+        minExclusive: 0,
+        info: 'ΔZ = K · (Fz − Sollkraft). Zu große Kraft → +Z weg vom Prüfkörper. Keine PID-Regelung.',
+      },
+      {
+        key: 'z_correction_max',
+        label: 'zCorrectionMax',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 20,
+        info: 'Betragsgrenze der Z-Korrektur pro Versuch.',
+      },
+      {
+        key: 'minimum_correction',
+        label: 'minimumCorrection',
+        unit: 'mm',
+        minExclusive: 0,
+        info: 'Kleinere Korrekturen werden ignoriert.',
+      },
+      {
+        key: 'max_optimization_iterations',
+        label: 'maxOptimizationIterations',
+        unit: '—',
+        integer: true,
+        min: 1,
+        max: 10000,
+        info: 'Abbruch, wenn die Sollkraft nach dieser Anzahl Versuche nicht in der Totzone liegt.',
+      },
+    ],
+  },
+  {
+    id: 'phase3',
+    title: 'Phase 3',
+    fields: [
+      {
         key: 'phase3_v_extract',
-        label: 'Phase 3 – Ausgliedergeschwindigkeit',
+        label: 'Ausgliedergeschwindigkeit',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -101,11 +207,71 @@ const GROUPS = [
       },
       {
         key: 'phase3_v_insert',
-        label: 'Phase 3 – Eingliedergeschwindigkeit',
+        label: 'Eingliedergeschwindigkeit',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
         info: 'Geschwindigkeit beim Eingliedern (−Z) in den Prüf-/Alterungszyklen.',
+      },
+      {
+        key: 'phase3_a',
+        label: 'Beschleunigung',
+        unit: 'mm/s²',
+        min: 0,
+        max: 500,
+        info: 'Beschleunigung für Phase-3-Bahnen. 0 = konstante Geschwindigkeit.',
+      },
+      {
+        key: 'phase3_corner',
+        label: 'Corner',
+        unit: 'mm',
+        min: 0,
+        max: 50,
+        cornerWith: {
+          accelKey: 'phase3_a',
+          speedKeys: ['phase3_v_extract', 'phase3_v_insert'],
+        },
+        info: CORNER_INFO,
+      },
+    ],
+  },
+  {
+    id: 'homing',
+    title: 'Homing',
+    fields: [
+      {
+        key: 'v_homing',
+        label: 'vHoming',
+        unit: 'mm/s',
+        minExclusive: 0,
+        max: 50,
+        info: 'Homing-Geschwindigkeit der Core-Referenzfahrt Z+ → X+ → Y+.',
+      },
+      {
+        key: 'a_homing',
+        label: 'aHoming',
+        unit: 'mm/s²',
+        min: 0,
+        max: 500,
+        info: 'Beschleunigung für Homing-Seek/Retract. Endanschlag-Stopp ist hart (kein Corner-Blend).',
+      },
+      {
+        key: 'home_offset_x',
+        label: 'Homing-Rückzug X',
+        unit: 'mm',
+        info: 'Abstand vom X+-Endanschlag nach Homing. 0 → Default 2 mm. Die resultierende Pose wird als Home gemerkt (kein Snap auf Ursprung).',
+      },
+      {
+        key: 'home_offset_y',
+        label: 'Homing-Rückzug Y',
+        unit: 'mm',
+        info: 'Abstand vom Y+-Endanschlag nach Homing. 0 → Default 2 mm.',
+      },
+      {
+        key: 'home_offset_z',
+        label: 'Homing-Rückzug Z',
+        unit: 'mm',
+        info: 'Abstand vom Z+-Endanschlag nach Homing. 0 → Default 2 mm. Safe-Z bleibt ein eigener Parameter.',
       },
     ],
   },
@@ -228,27 +394,76 @@ const GROUPS = [
     ],
   },
   {
-    id: 'phase2',
-    title: 'Phase 2',
-    fields: [
-      { key: 'force_tolerance_N', label: 'forceTolerance', unit: 'N', minExclusive: 0, max: 50, info: 'Totzone |Fz − Sollkraft| für die iterative Einfügepunkt-Korrektur.' },
-      { key: 'z_correction_gain', label: 'zCorrectionGain', unit: 'mm/N', minExclusive: 0, info: 'ΔZ = K · (Fz − Sollkraft). Zu große Kraft → +Z weg vom Prüfkörper. Keine PID-Regelung.' },
-      { key: 'z_correction_max', label: 'zCorrectionMax', unit: 'mm', minExclusive: 0, max: 20, info: 'Betragsgrenze der Z-Korrektur pro Versuch.' },
-      { key: 'minimum_correction', label: 'minimumCorrection', unit: 'mm', minExclusive: 0, info: 'Kleinere Korrekturen werden ignoriert.' },
-      { key: 'max_optimization_iterations', label: 'maxOptimizationIterations', unit: '—', integer: true, min: 1, max: 10000, info: 'Abbruch, wenn die Sollkraft nach dieser Anzahl Versuche nicht in der Totzone liegt.' },
-    ],
-  },
-  {
     id: 'probe',
-    title: 'Probe Calibration',
+    title: 'Einmessung M19',
     fields: [
       {
-        key: 'probe_search_speed',
-        label: 'searchSpeed',
+        key: 'v_approach_probe',
+        label: 'vApproach (Probe)',
+        unit: 'mm/s',
+        minExclusive: 0,
+        max: 50,
+        info: 'Anfahrt / Ausrichten / Absenken zum Suchstart der M19-Einmessung.',
+      },
+      {
+        key: 'v_transfer_probe',
+        label: 'vTransfer (Probe)',
+        unit: 'mm/s',
+        minExclusive: 0,
+        max: 50,
+        info: 'Transfergeschwindigkeit: Backoff, Retreat, Hub-Transfers während M19.',
+      },
+      {
+        key: 'v_search',
+        label: 'vSearch (grob)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
         info: 'Schnelle Suchgeschwindigkeit bis zum Messtaster-Trigger.',
+      },
+      {
+        key: 'v_search_fine',
+        label: 'vSearch (fein)',
+        unit: 'mm/s',
+        minExclusive: 0,
+        max: 50,
+        info: 'Langsame Suchgeschwindigkeit der Feinmessungen.',
+      },
+      {
+        key: 'a_probe_transfer',
+        label: 'aTransfer (Probe)',
+        unit: 'mm/s²',
+        min: 0,
+        max: 500,
+        info: 'Beschleunigung für Probe-Transferbahnen. 0 = konstante Geschwindigkeit.',
+      },
+      {
+        key: 'corner_probe_transfer',
+        label: 'Corner Transfer (Probe)',
+        unit: 'mm',
+        min: 0,
+        max: 50,
+        cornerWith: {
+          accelKey: 'a_probe_transfer',
+          speedKeys: ['v_approach_probe', 'v_transfer_probe'],
+        },
+        info: CORNER_INFO,
+      },
+      {
+        key: 'a_probe_search',
+        label: 'aSearch (Probe)',
+        unit: 'mm/s²',
+        min: 0,
+        max: 500,
+        info: 'Trapezoid-Beschleunigung während der Suche (ohne Corner-Blend).',
+      },
+      {
+        key: 'a_probe_brake',
+        label: 'aBrake (Probe)',
+        unit: 'mm/s²',
+        min: 0,
+        max: 500,
+        info: 'Notbrems-Beschleunigung bei Messtaster-Trigger.',
       },
       {
         key: 'probe_search_distance',
@@ -283,14 +498,6 @@ const GROUPS = [
         info:
           'Grob-Anfahrhöhe (Standoff) über Messtaster- bzw. Prüfpunkt-Z. Schnelle Z-Fahrt endet hier; ' +
           'danach Feinanfahrt (Prüfpunkt) bzw. M19-Einmessprotokoll (Messtaster). Default 15 mm.',
-      },
-      {
-        key: 'fine_search_speed',
-        label: 'fineSearchSpeed',
-        unit: 'mm/s',
-        minExclusive: 0,
-        max: 50,
-        info: 'Langsame Suchgeschwindigkeit der Feinmessungen.',
       },
       {
         key: 'num_fine_searches',
@@ -355,7 +562,7 @@ const GROUPS = [
         unit: 'mm',
         min: -500,
         max: 500,
-        info: 'Mathematische Referenz (Offset-Referenz) für tool_offset. KEIN reales Probe-Zentrum und kein Bewegungsziel.',
+        info: 'LEGACY: frühere Offset-Referenz (Default 40,40,10). Nicht die reale Messtasterposition. Wird von M19 Install/OffsetOnly nicht mehr verwendet.',
       },
       {
         key: 'probe_offset_reference_y',
@@ -363,7 +570,7 @@ const GROUPS = [
         unit: 'mm',
         min: -500,
         max: 500,
-        info: 'Mathematische Referenz (Offset-Referenz) für tool_offset. KEIN reales Probe-Zentrum und kein Bewegungsziel.',
+        info: 'LEGACY: frühere Offset-Referenz (Default 40,40,10). Nicht die reale Messtasterposition. Wird von M19 Install/OffsetOnly nicht mehr verwendet.',
       },
       {
         key: 'probe_offset_reference_z',
@@ -371,7 +578,7 @@ const GROUPS = [
         unit: 'mm',
         min: -500,
         max: 500,
-        info: 'Mathematische Referenz (Offset-Referenz) für tool_offset. KEIN reales Probe-Zentrum und kein Bewegungsziel.',
+        info: 'LEGACY: frühere Offset-Referenz (Default 40,40,10). Nicht die reale Messtasterposition. Wird von M19 Install/OffsetOnly nicht mehr verwendet.',
       },
     ],
   },
@@ -379,14 +586,11 @@ const GROUPS = [
     id: 'calibration',
     title: 'Calibration offsets',
     fields: [
-      { key: 'home_offset_x', label: 'Homing-Rückzug X', unit: 'mm', info: 'Abstand vom X+-Endanschlag nach Homing. 0 → Default 2 mm. Die resultierende Pose wird als Home gemerkt (kein Snap auf Ursprung).' },
-      { key: 'home_offset_y', label: 'Homing-Rückzug Y', unit: 'mm', info: 'Abstand vom Y+-Endanschlag nach Homing. 0 → Default 2 mm.' },
-      { key: 'home_offset_z', label: 'Homing-Rückzug Z', unit: 'mm', info: 'Abstand vom Z+-Endanschlag nach Homing. 0 → Default 2 mm. Safe-Z bleibt ein eigener Parameter.' },
       {
         key: 'tool_offset_x',
         label: 'toolOffset.x',
         unit: 'mm',
-        info: 'TCP-Korrektur: machine = plateOrigin + platePoint + toolOffset. Wird bei erfolgreicher Einmessung durch (probe_offset_reference - measured_probe) ersetzt, nicht kumuliert.',
+        info: 'TCP-Korrektur: machine = plateOrigin + platePoint + toolOffset. Nach FullCalib/Install = 0. Bei Procedure-OffsetOnly = probeCenter − aktuelle Messung.',
       },
       { key: 'tool_offset_y', label: 'toolOffset.y', unit: 'mm', info: 'Optionaler TCP-Offset in Y.' },
       { key: 'tool_offset_z', label: 'toolOffset.z', unit: 'mm', info: 'Optionaler TCP-Offset in Z.' },
@@ -396,17 +600,25 @@ const GROUPS = [
 
 function defaultMachineConfigPayload() {
   return {
-    v_approach: 10,
-    v_slow: 2,
-    v_measure: 1,
+    v_approach_testpoints: 10,
+    v_fine_testpoints: 2,
+    v_unclamp: 1,
     v_homing: 5,
-    acceleration: 0,
+    a_testpoints: 0,
+    corner_testpoints: 0,
+    a_homing: 0,
     phase1_v_extract: 1,
     phase1_v_insert: 1,
+    phase1_a: 0,
+    phase1_corner: 0,
     phase2_v_extract: 2,
     phase2_v_insert: 3,
+    phase2_a: 0,
+    phase2_corner: 0,
     phase3_v_extract: 2,
     phase3_v_insert: 2,
+    phase3_a: 0,
+    phase3_corner: 0,
     force_filter: 0,
     xy_tolerance_N: 0.5,
     xy_correction_step: 0.05,
@@ -426,12 +638,18 @@ function defaultMachineConfigPayload() {
     z_correction_max: 1,
     minimum_correction: 0.01,
     max_optimization_iterations: 10,
-    probe_search_speed: 2,
+    v_approach_probe: 10,
+    v_transfer_probe: 10,
+    v_search: 2,
+    v_search_fine: 1,
+    a_probe_transfer: 0,
+    corner_probe_transfer: 0,
+    a_probe_search: 0,
+    a_probe_brake: 500,
     probe_search_distance: 10,
     probe_backoff: 1,
     search_depth: 5,
     approach_distance: 15,
-    fine_search_speed: 1,
     num_fine_searches: 3,
     head_diameter: 0,
     measuring_head_diameter: 8,
@@ -453,6 +671,61 @@ function defaultMachineConfigPayload() {
     heartbeat_timeout_s: 0.3,
     xy_correct_timeout_s: 2,
   };
+}
+
+/**
+ * Client/server hint when corner > 0 but a≤0 or R < v²/(2a).
+ * Reads cornerWith metadata from GROUPS (or a supplied groups array).
+ */
+function evaluateCornerConsistencyHints(cfg, groups = GROUPS) {
+  const hints = [];
+  if (!cfg || typeof cfg !== 'object') {
+    return hints;
+  }
+  for (const group of groups) {
+    for (const field of group.fields || []) {
+      if (!field.cornerWith) {
+        continue;
+      }
+      const corner = Number(cfg[field.key]);
+      if (!(corner > 0)) {
+        continue;
+      }
+      const a = Number(cfg[field.cornerWith.accelKey]);
+      const speeds = (field.cornerWith.speedKeys || [])
+        .map((key) => Number(cfg[key]))
+        .filter((v) => Number.isFinite(v) && v > 0);
+      const vmax = speeds.length ? Math.max(...speeds) : 0;
+      if (!(a > 0)) {
+        const minA = corner > 0 && vmax > 0 ? (vmax * vmax) / (2 * corner) : null;
+        hints.push({
+          key: field.key,
+          label: field.label,
+          message:
+            minA !== null
+              ? `${field.label}: Bei Corner > 0 muss a > 0 sein. Empfohlen: a ≥ ${minA.toFixed(3)} mm/s² oder R erhöhen / v senken.`
+              : `${field.label}: Bei Corner > 0 muss a > 0 sein (sonst kein Blend).`,
+        });
+        continue;
+      }
+      if (!(vmax > 0)) {
+        continue;
+      }
+      const minR = (vmax * vmax) / (2 * a);
+      if (corner + 1e-9 < minR) {
+        const minA = (vmax * vmax) / (2 * corner);
+        const maxV = Math.sqrt(2 * a * corner);
+        hints.push({
+          key: field.key,
+          label: field.label,
+          message:
+            `${field.label}: R=${corner} < v²/(2a)=${minR.toFixed(3)} mm. ` +
+            `Empfehlung: R ≥ ${minR.toFixed(3)} mm, oder a ≥ ${minA.toFixed(3)} mm/s², oder v ≤ ${maxV.toFixed(3)} mm/s.`,
+        });
+      }
+    }
+  }
+  return hints;
 }
 
 function validateMachineConfigPayload(cfg) {
@@ -490,4 +763,5 @@ module.exports = {
   GROUPS,
   defaultMachineConfigPayload,
   validateMachineConfigPayload,
+  evaluateCornerConsistencyHints,
 };

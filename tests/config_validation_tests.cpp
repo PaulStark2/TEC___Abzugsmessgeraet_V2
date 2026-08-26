@@ -20,7 +20,7 @@ int main()
         {
             return 1;
         }
-        if (cfg.motion.v_approach > SafetyLimits::kMaxVelocity)
+        if (cfg.motion.v_approach_testpoints > SafetyLimits::kMaxVelocity)
         {
             return 2;
         }
@@ -47,9 +47,9 @@ int main()
     // Reject velocity above safety; dest unchanged (no silent clamp).
     {
         MachineConfig dest{};
-        const float original = dest.motion.v_approach;
+        const float original = dest.motion.v_approach_testpoints;
         MachineConfig incoming = dest;
-        incoming.motion.v_approach = SafetyLimits::kMaxVelocity + 1.0f;
+        incoming.motion.v_approach_testpoints = SafetyLimits::kMaxVelocity + 1.0f;
         ConfigValidationError error = ConfigValidationError::Ok;
         if (tryApplyMachineConfig(dest, incoming, error))
         {
@@ -59,7 +59,7 @@ int main()
         {
             return 11;
         }
-        if (!nearEqual(dest.motion.v_approach, original))
+        if (!nearEqual(dest.motion.v_approach_testpoints, original))
         {
             return 12;
         }
@@ -68,7 +68,7 @@ int main()
     // Reject non-positive velocity.
     {
         MachineConfig incoming{};
-        incoming.motion.v_slow = 0.0f;
+        incoming.motion.v_fine_testpoints = 0.0f;
         if (validateMachineConfig(incoming) != ConfigValidationError::VelocityNotPositive)
         {
             return 13;
@@ -110,7 +110,7 @@ int main()
     {
         MachineConfig dest{};
         MachineConfig incoming = dest;
-        incoming.motion.v_measure = 1.5f;
+        incoming.motion.v_unclamp = 1.5f;
         incoming.spreader.retract_time_s = 0.8f;
         ConfigValidationError error = ConfigValidationError::Ok;
         if (!tryApplyMachineConfig(dest, incoming, error))
@@ -121,7 +121,7 @@ int main()
         {
             return 19;
         }
-        if (!nearEqual(dest.motion.v_measure, 1.5f) || !nearEqual(dest.spreader.retract_time_s, 0.8f))
+        if (!nearEqual(dest.motion.v_unclamp, 1.5f) || !nearEqual(dest.spreader.retract_time_s, 0.8f))
         {
             return 20;
         }
@@ -130,20 +130,43 @@ int main()
     // Acceleration 0 (constant velocity) is valid; negative is not.
     {
         MachineConfig cfg{};
-        cfg.motion.acceleration = 0.0f;
+        cfg.motion.a_testpoints = 0.0f;
         if (validateMachineConfig(cfg) != ConfigValidationError::Ok)
         {
             return 21;
         }
-        cfg.motion.acceleration = -1.0f;
+        cfg.motion.a_testpoints = -1.0f;
         if (validateMachineConfig(cfg) != ConfigValidationError::AccelerationNegative)
         {
             return 22;
         }
-        cfg.motion.acceleration = SafetyLimits::kMaxAcceleration + 1.0f;
+        cfg.motion.a_testpoints = SafetyLimits::kMaxAcceleration + 1.0f;
         if (validateMachineConfig(cfg) != ConfigValidationError::AccelerationExceedsSafety)
         {
             return 23;
+        }
+    }
+
+    // Corner blend inconsistent when R > 0 but a == 0, or R < v^2/(2a).
+    {
+        MachineConfig cfg{};
+        cfg.motion.a_testpoints = 0.0f;
+        cfg.motion.corner_testpoints = 1.0f;
+        if (validateMachineConfig(cfg) != ConfigValidationError::CornerInconsistent)
+        {
+            return 24;
+        }
+        cfg.motion.a_testpoints = 10.0f;
+        cfg.motion.v_approach_testpoints = 10.0f;
+        cfg.motion.corner_testpoints = 1.0f; // need >= 5
+        if (validateMachineConfig(cfg) != ConfigValidationError::CornerInconsistent)
+        {
+            return 25;
+        }
+        cfg.motion.corner_testpoints = 5.0f;
+        if (validateMachineConfig(cfg) != ConfigValidationError::Ok)
+        {
+            return 26;
         }
     }
 

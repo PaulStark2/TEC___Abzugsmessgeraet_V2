@@ -13,6 +13,8 @@ struct SafetyLimits
     // Absolute motion limits in machine position units / s and / s^2.
     static constexpr float kMaxVelocity = 50.0f;
     static constexpr float kMaxAcceleration = 500.0f;
+    // Max corner blend radius [machine units] for two-axis path blending.
+    static constexpr float kMaxCornerRadius = 50.0f;
 
     // Spreader valve timing bounds [s].
     static constexpr float kMinSpreaderTime_s = 0.01f;

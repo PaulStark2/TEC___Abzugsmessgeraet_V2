@@ -19,6 +19,14 @@ tecomm::DecodedFrame emptyHome()
     return f;
 }
 
+tecomm::DecodedFrame emptyDefineMcs()
+{
+    tecomm::DecodedFrame f{};
+    f.protocol_version = tecomm::kProtocolVersion;
+    f.message_id = static_cast<uint8_t>(tecomm::MessageId::CmdDefineMcs);
+    return f;
+}
+
 bool nearEqual(float a, float b, float eps = 0.15f)
 {
     return std::fabs(a - b) <= eps;
@@ -58,11 +66,11 @@ bool runHome(simbridge::SimProtocolBridge& bridge, const char* label, int max_ti
     std::printf("\n=== HOMING START: %s | mcs_valid_before=%d ===\n", label,
                 bridge.machine().machineCoordinateSystemValid() ? 1 : 0);
     const bool expect_define = !bridge.machine().machineCoordinateSystemValid();
-    std::printf("Expected path: %s\n", expect_define ? "DEFINE MCS (first home / !mcs_valid)"
-                                                       : "REFERENCE EXISTING MCS (normal home)");
+    std::printf("Expected path: %s\n", expect_define ? "DEFINE MCS (CmdDefineMcs)"
+                                                       : "REFERENCE EXISTING MCS (CmdHome)");
 
     std::vector<simbridge::OutboundFrame> out;
-    bridge.handleFrame(emptyHome(), tecomm::DecodeResult::Ok, out);
+    bridge.handleFrame(expect_define ? emptyDefineMcs() : emptyHome(), tecomm::DecodeResult::Ok, out);
 
     HomingState last = HomingState::None;
     bool retracting_note = false;
@@ -166,12 +174,12 @@ int main()
     std::printf("============================================================\n");
     std::printf("VERIFICATION: MCS define vs normal re-home (read-only)\n");
     std::printf("============================================================\n");
-    std::printf("Code paths (no production edits):\n");
-    std::printf("  DEFINE:  Machine::home() when !mcs_valid -> HomingMode::DefineMcs\n");
+    std::printf("Code paths:\n");
+    std::printf("  DEFINE:  CmdDefineMcs -> Machine::defineMachineCoordinateSystem()\n");
     std::printf("           beginHomingRetract: machine := raw (identity)\n");
     std::printf("           finishHomingSuccess: latch home_offset, mcs_valid=true,\n");
-    std::printf("                                clear plate/probe validity\n");
-    std::printf("  REFERENCE: Machine::home() when mcs_valid -> HomingMode::Reference\n");
+    std::printf("                                clear plate/probe validity + tool_offset\n");
+    std::printf("  REFERENCE: CmdHome -> Machine::home() when mcs_valid (else Rejected)\n");
     std::printf("           beginHomingRetract: machine := home_offset + R\n");
     std::printf("           finishHomingSuccess: leave home/plate/probe/tool unchanged\n");
     std::printf("============================================================\n");

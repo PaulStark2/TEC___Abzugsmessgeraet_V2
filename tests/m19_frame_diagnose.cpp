@@ -16,8 +16,10 @@ static tecomm::DecodedFrame emptyCmd(uint8_t id)
 static bool homeViaPlant(simbridge::SimProtocolBridge& b)
 {
     std::vector<simbridge::OutboundFrame> out;
-    b.handleFrame(emptyCmd(static_cast<uint8_t>(tecomm::MessageId::CmdHome)), tecomm::DecodeResult::Ok,
-                  out);
+    const uint8_t cmd = b.machine().machineCoordinateSystemValid()
+                            ? static_cast<uint8_t>(tecomm::MessageId::CmdHome)
+                            : static_cast<uint8_t>(tecomm::MessageId::CmdDefineMcs);
+    b.handleFrame(emptyCmd(cmd), tecomm::DecodeResult::Ok, out);
     for (int i = 0; i < 25000; ++i)
     {
         b.tick(0.05f);

@@ -15,6 +15,7 @@ const {
   encodeAckPayload,
   encodeNackPayload,
   encodeStatusReportPayload,
+  encodeMachineConfigPayload,
   decodeMoveToPayload,
   decodeBoolPayload,
 } = require('./m12Codec');
@@ -62,6 +63,103 @@ function replyAck(socket, messageId, resultCode = AckResultCode.Ok) {
     encodeAckPayload({ refMessageId: messageId, resultCode })
   );
   socket.write(ack.frame);
+}
+
+function sampleMachineConfig(overrides = {}) {
+  return {
+    v_approach_testpoints: 10,
+    v_fine_testpoints: 2,
+    v_unclamp: 1,
+    v_homing: 5,
+    a_testpoints: 0,
+    corner_testpoints: 0,
+    a_homing: 0,
+    force_filter: 0,
+    xy_tolerance_N: 0.5,
+    xy_correction_step: 0.05,
+    xy_max_correction: 2,
+    insertion_buffer: 1,
+    collision_approach_N: 20,
+    collision_retract_N: 20,
+    collision_clamp_N: 20,
+    collision_unclamp_N: 20,
+    collision_contact_N: 40,
+    collision_measure_N: 40,
+    spreader_extend_time_s: 0.5,
+    spreader_retract_time_s: 0.5,
+    force_tolerance_N: 0.5,
+    z_correction_gain: 0.1,
+    z_correction_max: 1,
+    minimum_correction: 0.01,
+    max_optimization_iterations: 10,
+    v_search: 2,
+    probe_search_distance: 10,
+    probe_backoff: 1,
+    home_offset_x: 0,
+    home_offset_y: 0,
+    home_offset_z: 0,
+    tool_offset_x: 0.25,
+    tool_offset_y: -0.5,
+    tool_offset_z: 1,
+    safe_z_buffer: 30,
+    sample_timeout_s: 0.5,
+    heartbeat_timeout_s: 0.3,
+    xy_correct_timeout_s: 2,
+    head_diameter: 0,
+    measuring_head_diameter: 8,
+    measuring_head_thickness: 3,
+    tool_diameter: 2.5,
+    tool_cylindrical_height: 15,
+    probe_xy_search_margin: 2,
+    insert_search_distance: 10,
+    search_depth: 5,
+    approach_distance: 10,
+    v_search_fine: 1,
+    probe_offset_reference_x: 0,
+    probe_offset_reference_y: 0,
+    probe_offset_reference_z: 5,
+    num_fine_searches: 3,
+    phase1_v_extract: 1,
+    phase1_v_insert: 1,
+    phase1_a: 0,
+    phase1_corner: 0,
+    phase2_v_extract: 2,
+    phase2_v_insert: 3,
+    phase2_a: 0,
+    phase2_corner: 0,
+    phase3_v_extract: 2,
+    phase3_v_insert: 2,
+    phase3_a: 0,
+    phase3_corner: 0,
+    v_approach_probe: 10,
+    v_transfer_probe: 10,
+    a_probe_transfer: 0,
+    corner_probe_transfer: 0,
+    a_probe_search: 0,
+    a_probe_brake: 500,
+    probe_center_x: 0,
+    probe_center_y: 0,
+    probe_center_z: 0,
+    ...overrides,
+  };
+}
+
+function replyMachineConfig(socket, config) {
+  const payload = encodeMachineConfigPayload(config);
+  assert.ok(payload, 'encodeMachineConfigPayload failed');
+  const frame = encodeFrame(MessageId.MsgMachineConfig, payload);
+  socket.write(frame.frame);
+}
+
+function replyMachineConfigSameWrite(socket, config) {
+  const ack = encodeFrame(
+    MessageId.RspAck,
+    encodeAckPayload({ refMessageId: MessageId.CmdGetMachineConfig, resultCode: AckResultCode.Ok })
+  );
+  const payload = encodeMachineConfigPayload(config);
+  assert.ok(payload, 'encodeMachineConfigPayload failed');
+  const cfg = encodeFrame(MessageId.MsgMachineConfig, payload);
+  socket.write(Buffer.concat([ack.frame, cfg.frame]));
 }
 
 function startMockHost(handler, helloOverrides = {}) {
@@ -504,6 +602,197 @@ async function testCloseStopsReconnect() {
   server.close();
 }
 
+async function testGetMachineConfigAckThenDelayedConfig() {
+  const cfg = sampleMachineConfig({ tool_offset_x: 42 });
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdGetMachineConfig) {
+      return;
+    }
+    replyAck(socket, MessageId.CmdGetMachineConfig);
+    setTimeout(() => replyMachineConfig(socket, cfg), 80);
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      const pending = client.getMachineConfig();
+      let settled = false;
+      pending.then(() => {
+        settled = true;
+      });
+      await sleep(30);
+      assert.strictEqual(settled, false, 'must not resolve after Ack without MsgMachineConfig');
+      const result = await pending;
+      assert.ok(result.ok, result.error);
+      assert.ok(result.config);
+      assert.ok(Math.abs(result.config.tool_offset_x - 42) < 1e-4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+async function testGetMachineConfigAckAndConfigSameChunk() {
+  const cfg = sampleMachineConfig({ safe_z_buffer: 55 });
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdGetMachineConfig) {
+      return;
+    }
+    replyMachineConfigSameWrite(socket, cfg);
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      const result = await client.getMachineConfig();
+      assert.ok(result.ok, result.error);
+      assert.ok(Math.abs(result.config.safe_z_buffer - 55) < 1e-4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+async function testGetMachineConfigAckAndConfigSeparateWrites() {
+  const cfg = sampleMachineConfig({ measuring_head_diameter: 12 });
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdGetMachineConfig) {
+      return;
+    }
+    replyAck(socket, MessageId.CmdGetMachineConfig);
+    setImmediate(() => replyMachineConfig(socket, cfg));
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      const result = await client.getMachineConfig();
+      assert.ok(result.ok, result.error);
+      assert.ok(Math.abs(result.config.measuring_head_diameter - 12) < 1e-4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+async function testGetMachineConfigAckRejected() {
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdGetMachineConfig) {
+      return;
+    }
+    replyAck(socket, MessageId.CmdGetMachineConfig, AckResultCode.Rejected);
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      const result = await client.getMachineConfig();
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.error, 'Command rejected by Core');
+      assert.strictEqual(result.config, undefined);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+async function testGetMachineConfigTimeoutWithoutConfig() {
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdGetMachineConfig) {
+      return;
+    }
+    replyAck(socket, MessageId.CmdGetMachineConfig);
+  });
+
+  try {
+    await withClient(
+      port,
+      async (client) => {
+        const result = await client.getMachineConfig();
+        assert.strictEqual(result.ok, false);
+        assert.strictEqual(result.error, MACHINE_UNAVAILABLE);
+        assert.strictEqual(result.config, undefined);
+        assert.strictEqual(client.getStatus().connected, false);
+      },
+      { ackTimeoutMs: 200 }
+    );
+  } finally {
+    server.close();
+  }
+}
+
+async function testGetMachineConfigDoesNotReturnStaleConfig() {
+  const stale = sampleMachineConfig({ tool_offset_x: 999 });
+  const fresh = sampleMachineConfig({ tool_offset_x: 42 });
+  const { server, port, sockets } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdGetMachineConfig) {
+      return;
+    }
+    replyAck(socket, MessageId.CmdGetMachineConfig);
+    setTimeout(() => replyMachineConfig(socket, fresh), 60);
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      replyMachineConfig(sockets[0], stale);
+      await sleep(20);
+
+      const pending = client.getMachineConfig();
+      let settled = false;
+      pending.then((result) => {
+        settled = true;
+        if (result.ok) {
+          assert.ok(Math.abs(result.config.tool_offset_x - 42) < 1e-4);
+          assert.ok(Math.abs(result.config.tool_offset_x - 999) > 1e-4);
+        }
+      });
+      await sleep(30);
+      assert.strictEqual(settled, false, 'stale lastMachineConfig must not satisfy pending get');
+      const result = await pending;
+      assert.ok(result.ok, result.error);
+      assert.ok(Math.abs(result.config.tool_offset_x - 42) < 1e-4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+async function testGetMachineConfigSequentialCalls() {
+  const firstCfg = sampleMachineConfig({ tool_offset_x: 1 });
+  const secondCfg = sampleMachineConfig({ tool_offset_x: 2 });
+  let callCount = 0;
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdGetMachineConfig) {
+      return;
+    }
+    callCount += 1;
+    replyAck(socket, MessageId.CmdGetMachineConfig);
+    const cfg = callCount === 1 ? firstCfg : secondCfg;
+    setTimeout(() => replyMachineConfig(socket, cfg), 40);
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      const first = await client.getMachineConfig();
+      assert.ok(first.ok, first.error);
+      assert.ok(Math.abs(first.config.tool_offset_x - 1) < 1e-4);
+
+      const pending = client.getMachineConfig();
+      let settled = false;
+      pending.then((result) => {
+        settled = true;
+        if (result.ok) {
+          assert.ok(Math.abs(result.config.tool_offset_x - 2) < 1e-4);
+          assert.ok(Math.abs(result.config.tool_offset_x - 1) > 1e-4);
+        }
+      });
+      await sleep(20);
+      assert.strictEqual(settled, false, 'second call must not return first config early');
+      const second = await pending;
+      assert.ok(second.ok, second.error);
+      assert.ok(Math.abs(second.config.tool_offset_x - 2) < 1e-4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
 async function main() {
   await testStatusHello();
   await testMoveToAck();
@@ -519,6 +808,13 @@ async function main() {
   await testMeasuredHomeLatchFromHomingComplete();
   await testAlreadyHomedDoesNotLatchLivePose();
   await testCloseStopsReconnect();
+  await testGetMachineConfigAckThenDelayedConfig();
+  await testGetMachineConfigAckAndConfigSameChunk();
+  await testGetMachineConfigAckAndConfigSeparateWrites();
+  await testGetMachineConfigAckRejected();
+  await testGetMachineConfigTimeoutWithoutConfig();
+  await testGetMachineConfigDoesNotReturnStaleConfig();
+  await testGetMachineConfigSequentialCalls();
   console.log('protocolMachineClient.test.js: PASS');
 }
 

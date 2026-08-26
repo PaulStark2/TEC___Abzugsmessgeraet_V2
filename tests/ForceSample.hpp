@@ -90,7 +90,11 @@ inline HostInputs withProcessForce(const TestExecutor& ex, const Machine& machin
     return withPlantInputs(machine, in);
 }
 
-// Drive the Core homing sequence Z+ → X+ → Y+ (seek + retract) to Homed.
+// Drive Z+ → X+ → Y+ to Homed. First call on a fresh machine defines MCS;
+// subsequent calls use reference home() only.
+// If DefineMcs runs, plate/probe taught before this helper are restored afterward so
+// existing unit tests that setPlateOrigin() then homeMachine() keep working.
+// Production GUI never depends on that restore (it teaches after Define).
 inline bool homeMachine(Machine& machine)
 {
     MachineConfig cfg = machine.machineConfig();
@@ -101,15 +105,40 @@ inline bool homeMachine(Machine& machine)
         return false;
     }
 
+    const bool need_define = !machine.machineCoordinateSystemValid();
+    const TestPoint plate_before = machine.calibrationSet().plate_origin;
+    const bool plate_v_before = machine.calibrationSet().plate_origin_valid;
+    const TestPoint probe_before = machine.calibrationSet().probe_center;
+    const bool probe_v_before = machine.calibrationSet().probe_center_valid;
+    const TestPoint tool_before = machine.calibrationSet().tool_offset;
+
     HostInputs in = withFreshForce(HostInputs{});
     machine.setHostInputs(in);
-    if (!machine.home())
+    const bool started =
+        need_define ? machine.defineMachineCoordinateSystem() : machine.home();
+    if (!started)
     {
         return false;
     }
 
     auto advanceAxis = [&](HomingState seek_phase, bool& limit_flag) {
-        // Seek toward +max briefly so the limit is not asserted at the start pose.
+        if (!need_define)
+        {
+            // Reference harness: trip immediately so raw barely moves. A long seek
+            // before the soft switch would inflate reference_offset and desync
+            // SimPlant raw discs from machine-frame probe_center.
+            limit_flag = true;
+            machine.setHostInputs(withFreshForce(in));
+            machine.tick(0.05f);
+            limit_flag = false;
+            for (int i = 0; i < 400 && machine.homingState() == seek_phase; ++i)
+            {
+                machine.setHostInputs(withFreshForce(in));
+                machine.tick(0.05f);
+            }
+            return;
+        }
+        // DefineMcs: seek briefly so the limit is not asserted at the start pose.
         for (int i = 0; i < 80 && machine.homingState() == seek_phase; ++i)
         {
             limit_flag = false;
@@ -138,7 +167,24 @@ inline bool homeMachine(Machine& machine)
         return false;
     }
     advanceAxis(HomingState::HomingY, in.limitYMax);
-    return machine.isHomed();
+    if (!machine.isHomed())
+    {
+        return false;
+    }
+
+    if (need_define)
+    {
+        if (plate_v_before)
+        {
+            machine.setPlateOrigin(plate_before);
+        }
+        if (probe_v_before)
+        {
+            machine.setProbeCenter(probe_before);
+            machine.setToolOffset(tool_before);
+        }
+    }
+    return true;
 }
 
 // For tests that require the automatic procedure to start,
@@ -149,12 +195,11 @@ inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
     // after homing the TCP is at/near (0,0,...) when they start an automatic process.
     const TestPoint start_pose{machine.x(), machine.y(), machine.z()};
 
-    // Manual calibration is defined as: user jogs TCP near the probe,
-    // then M19 uses current TCP pose as search_reference.
-    // For the default virtual probe, the disc center equals probe_offset_reference.
+    // Manual calibration: user jogs TCP to hub P_z above the disc; Core derives
+    // search_ref.z = tcp.z - approach_distance. Default disc = probe_offset_reference.
     const MachineConfig::Probe& probe_cfg = machine.machineConfig().probe;
     machine.moveTo(probe_cfg.probe_offset_reference.x, probe_cfg.probe_offset_reference.y,
-                    probe_cfg.probe_offset_reference.z);
+                    probe_cfg.probe_offset_reference.z + probe_cfg.approach_distance);
     for (int i = 0; i < 600 && machine.motionState() != MotionState::AtTarget; ++i)
     {
         machine.setHostInputs(withFreshForce(HostInputs{}));
@@ -178,9 +223,7 @@ inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
     machine.setRuntimeConfigLocked(false);
     machine.setCommunicationWatchdogEnabled(false);
 
-    // Restore pre-calib pose. ProcedureController raises to dynamic Safe-Z on start.
-    // Note: moveTo clears isHomed (at-home flag) but keeps HomingState::Homed
-    // (coordinate reference) so a subsequent homeMachine can restore at-home.
+    // Standalone M19 completion calls Machine::stop() → Stopped. moveTo recovers.
     machine.moveTo(start_pose.x, start_pose.y, start_pose.z);
     for (int i = 0; i < 600 && machine.motionState() != MotionState::AtTarget; ++i)
     {
@@ -193,6 +236,11 @@ inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
         return false;
     }
 
-    // Procedure start requires isHomed (at home pose) — re-home after M19 motion.
+    // Prefer latching isHomed at the MCS home pose without a second soft-limit
+    // Reference seek (which can disturb offsets vs SimPlant). Fall back to home().
+    if (machine.confirmHomedIfAtHome(1.0f))
+    {
+        return true;
+    }
     return homeMachine(machine);
 }

@@ -286,7 +286,7 @@ int main()
         }
     }
 
-    // Retreat clears to startPose (lateral_offset), not merely raise Z at contact XY.
+    // Retreat ends at hub P_z (reference XY @ approach Z), not the lateral startPose.
     {
         Machine m;
         ProbeSearch search;
@@ -297,16 +297,15 @@ int main()
         {
             return 90;
         }
-        const float expected_x = disc.x + r.lateral_offset;
         const float expected_z = disc.z + r.approach_distance;
-        if (!nearEqual(m.x(), expected_x, 0.8f) || !nearEqual(m.y(), disc.y, 0.8f) ||
+        if (!nearEqual(m.x(), disc.x, 0.8f) || !nearEqual(m.y(), disc.y, 0.8f) ||
             !nearEqual(m.z(), expected_z, 0.8f))
         {
             return 91;
         }
     }
 
-    // Symmetry: +Y retreat also ends at its startPose.
+    // Symmetry: +Y retreat also ends at hub P_z.
     {
         Machine m;
         ProbeSearch search;
@@ -317,12 +316,131 @@ int main()
         {
             return 92;
         }
-        const float expected_y = disc.y + r.lateral_offset;
         const float expected_z = disc.z + r.approach_distance;
-        if (!nearEqual(m.y(), expected_y, 0.8f) || !nearEqual(m.x(), disc.x, 0.8f) ||
+        if (!nearEqual(m.y(), disc.y, 0.8f) || !nearEqual(m.x(), disc.x, 0.8f) ||
             !nearEqual(m.z(), expected_z, 0.8f))
         {
             return 93;
+        }
+    }
+
+    // Approach/retreat transfer legs change only one axis at a time.
+    {
+        Machine m;
+        ProbeSearch search;
+        ProbeSearch::Request r = zRequest();
+        r.dir = ProbeSearchDir::PosX;
+        r.num_fine_searches = 0;
+        if (!search.start(m, r))
+        {
+            return 100;
+        }
+        float prev_x = m.x();
+        float prev_y = m.y();
+        float prev_z = m.z();
+        for (int i = 0; i < 2000 && !search.isComplete() && !search.isError(); ++i)
+        {
+            const ProbeSearch::State st = search.state();
+            // Contact / single-axis transfer legs must not move two axes at once.
+            // AlignHub / RetreatToHub may blend (multi-axis) when corner_radius > 0.
+            const bool single_axis_only = st == ProbeSearch::State::TraverseStart ||
+                                          st == ProbeSearch::State::Descend ||
+                                          st == ProbeSearch::State::RetreatClear ||
+                                          st == ProbeSearch::State::FastSearch ||
+                                          st == ProbeSearch::State::FineSearch ||
+                                          st == ProbeSearch::State::Backoff;
+            m.setHostInputs(withDiscTrigger(m, disc));
+            m.tick(0.05f);
+            search.tick(0.05f, m);
+            if (single_axis_only)
+            {
+                const int moving =
+                    (std::fabs(m.x() - prev_x) > 1.0e-4f ? 1 : 0) +
+                    (std::fabs(m.y() - prev_y) > 1.0e-4f ? 1 : 0) +
+                    (std::fabs(m.z() - prev_z) > 1.0e-4f ? 1 : 0);
+                if (moving > 1)
+                {
+                    return 101;
+                }
+            }
+            prev_x = m.x();
+            prev_y = m.y();
+            prev_z = m.z();
+        }
+        if (!search.isComplete())
+        {
+            return 102;
+        }
+    }
+
+    // AlignHub with corner > 0 may move two axes during blend (X+Y or Z+X).
+    {
+        Machine m;
+        MachineConfig cfg = m.machineConfig();
+        cfg.probe.a_probe_transfer = 50.0f;
+        cfg.probe.corner_probe_transfer = 5.0f;
+        cfg.probe.v_approach_probe = 10.0f;
+        cfg.probe.v_transfer_probe = 10.0f;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 110;
+        }
+        // Short Z leg so blend starts early (rem_z <= R).
+        m.setCurrentPose(0.0f, 0.0f, 14.0f);
+        ProbeSearch search;
+        ProbeSearch::Request r = zRequest();
+        r.reference = TestPoint{20.0f, 20.0f, 5.0f};
+        r.dir = ProbeSearchDir::NegZ;
+        r.approach_distance = 10.0f; // hub.z = 15
+        r.approach_speed = 10.0f;
+        r.transfer_speed = 10.0f;
+        r.num_fine_searches = 0;
+        if (!search.start(m, r))
+        {
+            return 111;
+        }
+        bool saw_multi = false;
+        float prev_x = m.x();
+        float prev_y = m.y();
+        float prev_z = m.z();
+        for (int i = 0; i < 2000 && search.state() == ProbeSearch::State::AlignHub; ++i)
+        {
+            m.tick(0.01f);
+            search.tick(0.01f, m);
+            const int moving =
+                (std::fabs(m.x() - prev_x) > 1.0e-4f ? 1 : 0) +
+                (std::fabs(m.y() - prev_y) > 1.0e-4f ? 1 : 0) +
+                (std::fabs(m.z() - prev_z) > 1.0e-4f ? 1 : 0);
+            if (moving > 1)
+            {
+                saw_multi = true;
+                break;
+            }
+            prev_x = m.x();
+            prev_y = m.y();
+            prev_z = m.z();
+        }
+        if (!saw_multi)
+        {
+            return 112;
+        }
+        for (int i = 0; i < 5000 && search.state() == ProbeSearch::State::AlignHub; ++i)
+        {
+            m.tick(0.01f);
+            search.tick(0.01f, m);
+            if (m.motionState() == MotionState::AtTarget ||
+                m.machineState() == MachineState::Idle)
+            {
+                // About to leave AlignHub — require hub pose before FastSearch.
+                const TestPoint hub{20.0f, 20.0f, 15.0f};
+                if (std::fabs(m.x() - hub.x) > 0.05f || std::fabs(m.y() - hub.y) > 0.05f ||
+                    std::fabs(m.z() - hub.z) > 0.05f)
+                {
+                    return 113;
+                }
+                break;
+            }
         }
     }
 

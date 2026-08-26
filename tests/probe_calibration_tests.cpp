@@ -2,6 +2,7 @@
 #include "HostInputs.hpp"
 #include "Machine.hpp"
 #include "MachineConfig.hpp"
+#include "CoordinateTransform.hpp"
 #include "ProbeCalibration.hpp"
 #include "ProbeGeometry.hpp"
 
@@ -17,9 +18,10 @@ static bool applyFastProbeConfig(Machine& machine)
 {
     MachineConfig cfg = machine.machineConfig();
     cfg.probe.num_fine_searches = 0;
-    cfg.probe.search_speed = 15.0f;
-    cfg.probe.fine_search_speed = 5.0f;
-    cfg.motion.v_approach = 25.0f;
+    cfg.probe.v_search = 15.0f;
+    cfg.probe.v_search_fine = 5.0f;
+    cfg.probe.v_approach_probe = 25.0f;
+    cfg.probe.v_transfer_probe = 25.0f;
     ConfigValidationError err = ConfigValidationError::Ok;
     return machine.trySetMachineConfig(cfg, err);
 }
@@ -138,7 +140,7 @@ int main()
         }
     }
 
-    // Offset disc: tool_offset = nominal - measured, replace not accumulate.
+    // Install with disc away from legacy probe_offset_reference: toolOffset must be 0.
     {
         Machine m;
         if (!applyFastProbeConfig(m))
@@ -148,35 +150,38 @@ int main()
         const TestPoint nominal = m.machineConfig().probe.probe_offset_reference;
         const TestPoint disc{nominal.x + 1.0f, nominal.y - 2.0f, nominal.z + 1.0f};
         ProbeCalibration calib;
-        if (!calib.start(m, disc) || !runCalib(calib, m, disc, 4000))
+        if (!calib.start(m, disc, ProbeCalibration::StorePolicy::Install) ||
+            !runCalib(calib, m, disc, 4000))
         {
             return 21;
         }
         const TestPoint measured = m.calibrationSet().probe_center;
         const TestPoint offset = m.calibrationSet().tool_offset;
-        if (!nearEqual(offset.x, nominal.x - measured.x) || !nearEqual(offset.y, nominal.y - measured.y) ||
-            !nearEqual(offset.z, nominal.z - measured.z))
+        if (!nearEqual(measured.x, disc.x) || !nearEqual(measured.y, disc.y) ||
+            !nearEqual(measured.z, disc.z))
         {
             return 22;
         }
-        if (!nearEqual(offset.x, -1.0f, 0.8f) || !nearEqual(offset.y, 2.0f, 0.8f) ||
-            !nearEqual(offset.z, -1.0f, 0.8f))
+        if (!nearEqual(offset.x, 0.0f) || !nearEqual(offset.y, 0.0f) || !nearEqual(offset.z, 0.0f))
         {
             return 23;
         }
-
-        ProbeCalibration calib2;
-        if (!calib2.start(m, disc) || !runCalib(calib2, m, disc, 4000))
+        // Must NOT equal legacy (reference - measured).
+        if (nearEqual(offset.x, nominal.x - measured.x, 0.05f) &&
+            nearEqual(offset.y, nominal.y - measured.y, 0.05f) &&
+            std::fabs(nominal.x - measured.x) > 0.5f)
         {
             return 24;
         }
-        const TestPoint offset2 = m.calibrationSet().tool_offset;
-        if (!nearEqual(offset2.x, offset.x, 0.8f) || !nearEqual(offset2.y, offset.y, 0.8f) ||
-            !nearEqual(offset2.z, offset.z, 0.8f))
+
+        ProbeCalibration calib2;
+        if (!calib2.start(m, disc, ProbeCalibration::StorePolicy::Install) ||
+            !runCalib(calib2, m, disc, 4000))
         {
             return 25;
         }
-        if (std::fabs(offset2.x) > 3.0f)
+        const TestPoint offset2 = m.calibrationSet().tool_offset;
+        if (!nearEqual(offset2.x, 0.0f) || !nearEqual(offset2.y, 0.0f) || !nearEqual(offset2.z, 0.0f))
         {
             return 26;
         }
@@ -363,6 +368,49 @@ int main()
         }
     }
 
+    // After each finished direction the TCP is back at hub P_z.
+    {
+        Machine m;
+        if (!applyFastProbeConfig(m))
+        {
+            return 75;
+        }
+        const TestPoint disc = m.machineConfig().probe.probe_offset_reference;
+        const float standoff = m.machineConfig().probe.approach_distance;
+        ProbeCalibration calib;
+        if (!calib.start(m, disc))
+        {
+            return 76;
+        }
+        ProbeCalibration::Step prev = calib.step();
+        for (int i = 0; i < 5000 && !calib.isComplete() && !calib.isError(); ++i)
+        {
+            m.tick(0.05f);
+            m.setHostInputs(withDiscTrigger(m, disc));
+            calib.tick(0.05f, m);
+            if (calib.step() != prev)
+            {
+                // Hub Z uses measured center after MeasureZ; before FitCenter ≈ disc.z + standoff.
+                const float expect_z = disc.z + standoff;
+                if (!nearEqual(m.x(), disc.x, 0.8f) || !nearEqual(m.y(), disc.y, 0.8f) ||
+                    !nearEqual(m.z(), expect_z, 1.0f))
+                {
+                    return 77;
+                }
+                prev = calib.step();
+            }
+        }
+        if (!calib.isComplete())
+        {
+            return 78;
+        }
+        if (!nearEqual(m.x(), disc.x, 0.8f) || !nearEqual(m.y(), disc.y, 0.8f) ||
+            !nearEqual(m.z(), disc.z + standoff, 1.0f))
+        {
+            return 79;
+        }
+    }
+
     // head_diameter is intentionally irrelevant: probe_center/tool_offset must not change.
     {
         Machine m1;
@@ -497,12 +545,10 @@ int main()
         const float tcp_z_lat = expected_center.z - search_depth;
 
         const TestPoint nominal = m.machineConfig().probe.probe_offset_reference;
-        const TestPoint expected_offset{nominal.x - expected_center.x, nominal.y - expected_center.y,
-                                          nominal.z - expected_center.z};
 
         ProbeCalibration calib;
         const TestPoint search_ref{m.x(), m.y(), m.z()};
-        if (!calib.start(m, search_ref))
+        if (!calib.start(m, search_ref, ProbeCalibration::StorePolicy::Install))
         {
             return 91;
         }
@@ -546,17 +592,15 @@ int main()
             return 93;
         }
         const TestPoint measured_offset = m.calibrationSet().tool_offset;
-        if (!nearEqual(measured_offset.x, expected_offset.x) ||
-            !nearEqual(measured_offset.y, expected_offset.y) ||
-            !nearEqual(measured_offset.z, expected_offset.z))
+        if (!nearEqual(measured_offset.x, 0.0f) || !nearEqual(measured_offset.y, 0.0f) ||
+            !nearEqual(measured_offset.z, 0.0f))
         {
             return 94;
         }
     }
 
-    // Architecture proof: disc center differs strongly from probe_offset_reference.
-    // M19 must discover the real disc center via trigger contacts and must not search
-    // around probe_offset_reference.
+    // Architecture proof: disc far from legacy probe_offset_reference.
+    // Install discovers disc; toolOffset = 0 (never reference - measured).
     {
         Machine m;
         if (!applyFastProbeConfig(m))
@@ -564,7 +608,6 @@ int main()
             return 200;
         }
 
-        const TestPoint probe_ref = m.machineConfig().probe.probe_offset_reference;
         const TestPoint disc1{73.0f, 31.0f, 14.0f};
         const TestPoint start_tcp{72.0f, 30.0f, 20.0f};
 
@@ -572,7 +615,8 @@ int main()
 
         ProbeCalibration calib;
         const TestPoint search_ref{m.x(), m.y(), m.z()};
-        if (!calib.start(m, search_ref) || !runCalib(calib, m, disc1, 8000))
+        if (!calib.start(m, search_ref, ProbeCalibration::StorePolicy::Install) ||
+            !runCalib(calib, m, disc1, 8000))
         {
             return 201;
         }
@@ -584,36 +628,30 @@ int main()
             return 202;
         }
 
-        // tool_offset definition must stay unchanged:
-        // tool_offset = probe_offset_reference - measured_probe
-        const TestPoint expected_offset{probe_ref.x - disc1.x, probe_ref.y - disc1.y, probe_ref.z - disc1.z};
         const TestPoint measured_offset = m.calibrationSet().tool_offset;
-        if (!nearEqual(measured_offset.x, expected_offset.x, 1.0f) ||
-            !nearEqual(measured_offset.y, expected_offset.y, 1.0f) ||
-            !nearEqual(measured_offset.z, expected_offset.z, 1.0f))
+        if (!nearEqual(measured_offset.x, 0.0f) || !nearEqual(measured_offset.y, 0.0f) ||
+            !nearEqual(measured_offset.z, 0.0f))
         {
             return 203;
         }
     }
 
-    // Multiple discs with the same core configuration:
-    // Core must keep using the current search_reference and discover the new disc center.
+    // Multiple discs with Install: Core discovers new disc; toolOffset stays 0.
     {
         Machine m;
         if (!applyFastProbeConfig(m))
         {
             return 210;
         }
-        const TestPoint probe_ref = m.machineConfig().probe.probe_offset_reference;
         const TestPoint disc2{55.0f, 67.0f, 8.0f};
-        // Pick a TCP z so ProbeSearch's Z end aligns with disc z.
         const float search_depth = m.machineConfig().probe.search_depth;
         const TestPoint start_tcp2{54.0f, 66.0f, disc2.z + search_depth};
         moveMachineTo(m, start_tcp2);
 
         ProbeCalibration calib2;
         const TestPoint search_ref2{m.x(), m.y(), m.z()};
-        if (!calib2.start(m, search_ref2) || !runCalib(calib2, m, disc2, 8000))
+        if (!calib2.start(m, search_ref2, ProbeCalibration::StorePolicy::Install) ||
+            !runCalib(calib2, m, disc2, 8000))
         {
             return 211;
         }
@@ -625,11 +663,9 @@ int main()
             return 212;
         }
 
-        const TestPoint expected_offset2{probe_ref.x - disc2.x, probe_ref.y - disc2.y, probe_ref.z - disc2.z};
         const TestPoint measured_offset2 = m.calibrationSet().tool_offset;
-        if (!nearEqual(measured_offset2.x, expected_offset2.x, 1.0f) ||
-            !nearEqual(measured_offset2.y, expected_offset2.y, 1.0f) ||
-            !nearEqual(measured_offset2.z, expected_offset2.z, 1.0f))
+        if (!nearEqual(measured_offset2.x, 0.0f) || !nearEqual(measured_offset2.y, 0.0f) ||
+            !nearEqual(measured_offset2.z, 0.0f))
         {
             return 213;
         }
@@ -694,6 +730,179 @@ int main()
             !nearEqual(fail_offset.z, kept_offset.z))
         {
             return 106;
+        }
+    }
+
+    // Test A / G style: Install away from (40,40,10) → probeCenter≈disc, toolOffset=0
+    {
+        Machine m;
+        if (!applyFastProbeConfig(m))
+        {
+            return 300;
+        }
+        const TestPoint disc{73.0f, 31.0f, 14.0f};
+        moveMachineTo(m, TestPoint{72.0f, 30.0f, 20.0f});
+        ProbeCalibration calib;
+        if (!calib.start(m, TestPoint{m.x(), m.y(), m.z()}, ProbeCalibration::StorePolicy::Install) ||
+            !runCalib(calib, m, disc, 8000))
+        {
+            return 301;
+        }
+        const TestPoint c = m.calibrationSet().probe_center;
+        const TestPoint t = m.calibrationSet().tool_offset;
+        if (!nearEqual(c.x, 73.0f, 1.0f) || !nearEqual(c.y, 31.0f, 1.0f) || !nearEqual(c.z, 14.0f, 1.0f))
+        {
+            return 302;
+        }
+        if (!nearEqual(t.x, 0.0f) || !nearEqual(t.y, 0.0f) || !nearEqual(t.z, 0.0f))
+        {
+            return 303;
+        }
+    }
+
+    // Test B: OffsetOnly identical measurement → toolOffset≈0, probeCenter unchanged
+    {
+        Machine m;
+        if (!applyFastProbeConfig(m))
+        {
+            return 310;
+        }
+        const TestPoint disc{55.0f, 67.0f, 8.0f};
+        m.setProbeCenter(disc);
+        m.setToolOffset(TestPoint{0.0f, 0.0f, 0.0f});
+        const float search_depth = m.machineConfig().probe.search_depth;
+        moveMachineTo(m, TestPoint{54.0f, 66.0f, disc.z + search_depth});
+        ProbeCalibration calib;
+        if (!calib.start(m, TestPoint{m.x(), m.y(), m.z()}, ProbeCalibration::StorePolicy::OffsetOnly) ||
+            !runCalib(calib, m, disc, 8000))
+        {
+            return 311;
+        }
+        const TestPoint c = m.calibrationSet().probe_center;
+        const TestPoint t = m.calibrationSet().tool_offset;
+        if (!nearEqual(c.x, 55.0f) || !nearEqual(c.y, 67.0f) || !nearEqual(c.z, 8.0f))
+        {
+            return 312;
+        }
+        if (!nearEqual(t.x, 0.0f, 0.8f) || !nearEqual(t.y, 0.0f, 0.8f) || !nearEqual(t.z, 0.0f, 0.8f))
+        {
+            return 313;
+        }
+    }
+
+    // Test C: OffsetOnly with synthetic contact poses → toolOffset = center - measured
+    {
+        Machine m;
+        if (!applyFastProbeConfig(m))
+        {
+            return 320;
+        }
+        const TestPoint stored{100.0f, 120.0f, 40.0f};
+        m.setProbeCenter(stored);
+        m.setToolOffset(TestPoint{0.0f, 0.0f, 0.0f});
+
+        const TestPoint measured{100.2f, 119.9f, 40.1f};
+        const float r_sum = expectedXyContactRadius(m.machineConfig().probe.measuring_head_diameter,
+                                                     m.machineConfig().probe.tool_diameter);
+        const float thickness = m.machineConfig().probe.measuring_head_thickness;
+        const float search_depth = m.machineConfig().probe.search_depth;
+        const float tcp_z_top = measured.z + 0.5f * thickness;
+        const float tcp_z_lat = measured.z - search_depth;
+
+        ProbeCalibration calib;
+        if (!calib.start(m, TestPoint{m.x(), m.y(), m.z()}, ProbeCalibration::StorePolicy::OffsetOnly))
+        {
+            return 321;
+        }
+        std::uint32_t seq = 1;
+        for (int i = 0; i < 6000 && !calib.isComplete() && !calib.isError(); ++i)
+        {
+            TestPoint latch{};
+            switch (calib.step())
+            {
+            case ProbeCalibration::Step::MeasureZ:
+                latch = TestPoint{stored.x, stored.y, tcp_z_top};
+                break;
+            case ProbeCalibration::Step::MeasureNegY:
+                latch = TestPoint{measured.x, measured.y - r_sum, tcp_z_lat};
+                break;
+            case ProbeCalibration::Step::MeasurePosY:
+                latch = TestPoint{measured.x, measured.y + r_sum, tcp_z_lat};
+                break;
+            case ProbeCalibration::Step::MeasureNegX:
+                latch = TestPoint{measured.x - r_sum, measured.y, tcp_z_lat};
+                break;
+            case ProbeCalibration::Step::MeasurePosX:
+                latch = TestPoint{measured.x + r_sum, measured.y, tcp_z_lat};
+                break;
+            default:
+                latch = stored;
+                break;
+            }
+            m.setHostInputs(withManualProbeTrigger(latch, true, seq++));
+            m.tick(0.05f);
+            calib.tick(0.05f, m);
+        }
+        if (!calib.isComplete())
+        {
+            return 322;
+        }
+        const TestPoint c = m.calibrationSet().probe_center;
+        if (!nearEqual(c.x, 100.0f) || !nearEqual(c.y, 120.0f) || !nearEqual(c.z, 40.0f))
+        {
+            return 323;
+        }
+        const TestPoint t = m.calibrationSet().tool_offset;
+        if (!nearEqual(t.x, -0.2f, 0.15f) || !nearEqual(t.y, 0.1f, 0.15f) || !nearEqual(t.z, -0.1f, 0.15f))
+        {
+            return 324;
+        }
+    }
+
+    // OffsetOnly without valid probeCenter must fail.
+    {
+        Machine m;
+        applyFastProbeConfig(m);
+        ProbeCalibration calib;
+        if (calib.start(m, TestPoint{0, 0, 10}, ProbeCalibration::StorePolicy::OffsetOnly))
+        {
+            return 330;
+        }
+    }
+
+    // Test D: transform with toolOffset=0
+    {
+        CalibrationSet calib{};
+        calib.plate_origin = TestPoint{98.0f, 78.0f, 28.0f};
+        calib.plate_origin_valid = true;
+        calib.tool_offset = TestPoint{0.0f, 0.0f, 0.0f};
+        TestPoint machine_pt{};
+        if (!toMachinePoint(calib, TestPoint{10.0f, 20.0f, 5.0f}, machine_pt))
+        {
+            return 340;
+        }
+        if (!nearEqual(machine_pt.x, 108.0f, 1e-3f) || !nearEqual(machine_pt.y, 98.0f, 1e-3f) ||
+            !nearEqual(machine_pt.z, 33.0f, 1e-3f))
+        {
+            return 341;
+        }
+    }
+
+    // Transform after OffsetOnly toolOffset = (-0.2, +0.1, -0.1)
+    {
+        CalibrationSet calib{};
+        calib.plate_origin = TestPoint{98.0f, 78.0f, 28.0f};
+        calib.plate_origin_valid = true;
+        calib.tool_offset = TestPoint{-0.2f, 0.1f, -0.1f};
+        TestPoint machine_pt{};
+        if (!toMachinePoint(calib, TestPoint{10.0f, 20.0f, 5.0f}, machine_pt))
+        {
+            return 350;
+        }
+        if (!nearEqual(machine_pt.x, 107.8f, 1e-3f) || !nearEqual(machine_pt.y, 98.1f, 1e-3f) ||
+            !nearEqual(machine_pt.z, 32.9f, 1e-3f))
+        {
+            return 351;
         }
     }
 

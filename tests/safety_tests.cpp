@@ -223,12 +223,14 @@ int main()
         HostInputs in = makeSafeInputs();
         in.e_stop = true;
         setHostSafety(machine, in);
-        ex.tick(kDt);
+        // ProcedureController::tick returns early while Paused — evaluate E-Stop on Machine.
+        machine.tick(kDt);
 
         if (machine.machineState() != MachineState::Fault)
         {
             return 32;
         }
+        ex.tick(kDt); // Running tick sees Fault → abort process
         if (ex.processState() != ProcessState::Aborted)
         {
             return 33;

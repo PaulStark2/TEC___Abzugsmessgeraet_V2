@@ -7,9 +7,8 @@
  * seeks cannot be predicted from targets alone, so they are omitted rather
  * than drawn as misleading chords.
  *
- * For pure Safe-Z / XY / Z legs, each segment is identical to the TCP path
- * the MotionPlanner produces for the same moveTo (independent axes; planar
- * or vertical moves are straight).
+ * Corners are drawn sharp (X then Y). Live motion may blend when corner_radius > 0.
+ * previewNote: "Vorschau ohne Kurvenradius"
  */
 
 function near(a, b, eps = 1e-3) {
@@ -38,14 +37,22 @@ export function buildApproachSegments(from, target, safeZ, options = {}) {
 
   if (!near(cur.z, safeZ)) {
     const to = { x: cur.x, y: cur.y, z: safeZ };
-    segments.push({ type: 'SafeZ', from: { ...cur }, to, speedLabel: 'v_approach' });
+    segments.push({ type: 'SafeZ', from: { ...cur }, to, speedLabel: 'v_approach_testpoints' });
     cur = to;
   }
 
   if (!sameXY(cur, target)) {
-    const to = { x: target.x, y: target.y, z: safeZ };
-    segments.push({ type: 'XY', from: { ...cur }, to, speedLabel: 'v_approach' });
-    cur = to;
+    // Core MotionPlanner: X then Y at Safe-Z (never simultaneous XY).
+    if (!near(cur.x, target.x)) {
+      const toX = { x: target.x, y: cur.y, z: safeZ };
+      segments.push({ type: 'X', from: { ...cur }, to: toX, speedLabel: 'v_approach_testpoints' });
+      cur = toX;
+    }
+    if (!near(cur.y, target.y)) {
+      const toY = { x: cur.x, y: target.y, z: safeZ };
+      segments.push({ type: 'Y', from: { ...cur }, to: toY, speedLabel: 'v_approach_testpoints' });
+      cur = toY;
+    }
   }
 
   const coarseZ = useStandoff ? target.z + standoff : target.z;
@@ -55,14 +62,14 @@ export function buildApproachSegments(from, target, safeZ, options = {}) {
       type: useStandoff && includeFine ? 'ZCoarse' : 'Z',
       from: { ...cur },
       to,
-      speedLabel: 'v_approach',
+      speedLabel: 'v_approach_testpoints',
     });
     cur = to;
   }
 
   if (includeFine && useStandoff && !near(cur.z, target.z)) {
     const to = { x: cur.x, y: cur.y, z: target.z };
-    segments.push({ type: 'ZFine', from: { ...cur }, to, speedLabel: 'v_slow' });
+    segments.push({ type: 'ZFine', from: { ...cur }, to, speedLabel: 'v_fine_testpoints' });
     cur = to;
   }
 
@@ -80,7 +87,7 @@ export function buildProcedurePlannedPath(startPose, machinePoints, safeZ, probe
   const segments = [];
   const vertices = [];
   if (!startPose || !Number.isFinite(safeZ)) {
-    return { segments, vertices };
+    return { segments, vertices, previewNote: 'Vorschau ohne Kurvenradius' };
   }
 
   const standoff = Number(options.approachStandoffMm);
@@ -111,7 +118,7 @@ export function buildProcedurePlannedPath(startPose, machinePoints, safeZ, probe
         type: 'SafeZ',
         from: { ...cur },
         to,
-        speedLabel: 'v_approach',
+        speedLabel: 'v_approach_testpoints',
         phase: 'MoveSafePose',
       });
       vertices.push({ ...to });
@@ -141,7 +148,7 @@ export function buildProcedurePlannedPath(startPose, machinePoints, safeZ, probe
         type: 'ZFine',
         from: { ...cur },
         to: toStand,
-        speedLabel: 'v_slow',
+        speedLabel: 'v_fine_testpoints',
         phase: 'Unclamp',
         pointIndex: i,
       });
@@ -154,7 +161,7 @@ export function buildProcedurePlannedPath(startPose, machinePoints, safeZ, probe
         type: 'SafeZ',
         from: { ...cur },
         to: toSafe,
-        speedLabel: 'v_approach',
+        speedLabel: 'v_approach_testpoints',
         phase: 'NextPoint',
         pointIndex: i,
       });
@@ -171,11 +178,11 @@ export function buildProcedurePlannedPath(startPose, machinePoints, safeZ, probe
       type: 'SafeZ',
       from: { ...cur },
       to: toSafe,
-      speedLabel: 'v_approach',
+      speedLabel: 'v_approach_testpoints',
       phase: 'MoveSafeEnd',
     });
     vertices.push({ ...toSafe });
   }
 
-  return { segments, vertices };
+  return { segments, vertices, previewNote: 'Vorschau ohne Kurvenradius' };
 }

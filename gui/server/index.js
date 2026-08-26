@@ -15,6 +15,8 @@ const { createPlantClient } = require('./simulation/plantClient');
 const machineConfigStore = require('./config/machineConfigStore');
 const { GROUPS: parameterGroups, validateMachineConfigPayload } = require('./config/parameterCatalog');
 const calibrationStore = require('./config/calibrationStore');
+const { pushCommittedCalibration } = require('./config/pushCommittedCalibration');
+const { MCS_REQUIRED_MESSAGE } = require('./config/mcsMessages');
 const forcePathStore = require('./results/forcePathStore');
 const { plantProbeDiscCenterOnly } = require('./coord/physicalGeometry');
 
@@ -193,7 +195,25 @@ async function handleCommand(body) {
       if (typeof machineClient.home !== 'function') {
         return { ok: false, error: 'home not supported by client' };
       }
+      {
+        const st = typeof machineClient.getStatus === 'function' ? machineClient.getStatus() : {};
+        if (st.mcsValid !== true) {
+          return {
+            ok: false,
+            error: MCS_REQUIRED_MESSAGE,
+            code: 'mcs_required',
+            status: st,
+          };
+        }
+      }
       result = await machineClient.home();
+      break;
+    case 'defineMcs':
+      if (typeof machineClient.defineMcs !== 'function') {
+        return { ok: false, error: 'defineMcs not supported by client' };
+      }
+      // Do not touch committed calibration.json here — commit is persistMcs only.
+      result = await machineClient.defineMcs();
       break;
     case 'clearFault':
     case 'resetFault':
@@ -248,15 +268,9 @@ if (typeof machineClient.onSessionReady === 'function') {
         console.error(`[CONFIG] push on connect failed: ${pushed.error || 'unknown'}`);
       }
     }
-    const calib = calibrationStore.load();
-    if (calib.plateOriginValid && calib.plateOrigin && typeof machineClient.setPlateOrigin === 'function') {
-      await machineClient.setPlateOrigin(calib.plateOrigin.x, calib.plateOrigin.y, calib.plateOrigin.z);
-    }
-    if (calib.probeCenterValid && calib.probeCenter && typeof machineClient.setProbeCenter === 'function') {
-      const pushed = await machineClient.setProbeCenter(calib.probeCenter.x, calib.probeCenter.y, calib.probeCenter.z);
-      if (!pushed.ok) {
-        console.error(`[CALIB] probe_center push on connect failed: ${pushed.error || 'unknown'}`);
-      }
+    const pushedCalib = await pushCommittedCalibration(machineClient);
+    if (!pushedCalib.ok) {
+      console.error(`[CALIB] commit push on connect failed: ${pushedCalib.error || 'unknown'}`);
     }
   });
 }
@@ -549,9 +563,71 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && urlPath === '/api/calibration/define-mcs') {
+    if (typeof machineClient.defineMcs !== 'function') {
+      sendJson(res, 400, { ok: false, error: 'MCS-Definition ist auf diesem Backend nicht verfügbar' });
+      return;
+    }
+    // Core Define only — committed calibration.json unchanged until persistMcs.
+    const result = await machineClient.defineMcs();
+    sendJson(res, result.ok ? 200 : 400, {
+      ...result,
+      calibration: calibrationStore.load(),
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/rollback-full') {
+    // Abort before commit: re-apply committed store into Core (Disk unchanged).
+    const result = await pushCommittedCalibration(machineClient);
+    sendJson(res, result.ok ? 200 : 400, {
+      ok: result.ok,
+      restored: Boolean(result.restored),
+      reason: result.reason,
+      error: result.error,
+      calibration: result.calibration || calibrationStore.load(),
+      message: result.restored
+        ? 'Committed Kalibrierung wieder in den Core geladen.'
+        : result.reason === 'no_committed_mcs'
+          ? MCS_REQUIRED_MESSAGE
+          : undefined,
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/mcs') {
+    try {
+      const body = await readJsonBody(req);
+      const status = machineClient.getStatus();
+      const x = Number(body.x !== undefined ? body.x : status.measuredHome?.x ?? status.x);
+      const y = Number(body.y !== undefined ? body.y : status.measuredHome?.y ?? status.y);
+      const z = Number(body.z !== undefined ? body.z : status.measuredHome?.z ?? status.z);
+      if (![x, y, z].every(Number.isFinite)) {
+        sendJson(res, 400, { ok: false, error: 'x, y, z must be finite' });
+        return;
+      }
+      sendJson(res, 200, {
+        ok: true,
+        calibration: calibrationStore.setMachineCoordinateSystem({ x, y, z }),
+      });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: err.message || 'Invalid JSON body' });
+    }
+    return;
+  }
+
   if (req.method === 'POST' && urlPath === '/api/calibration/plate-origin') {
     try {
       const body = await readJsonBody(req);
+      const calib = calibrationStore.load();
+      if (!calib.machineCoordinateSystem || !calib.machineCoordinateSystem.valid) {
+        sendJson(res, 400, {
+          ok: false,
+          error:
+            'Kein gültiges Maschinenkoordinatensystem. Bitte zuerst MCS und Bauplatte/Messtaster definieren und kalibrieren.',
+        });
+        return;
+      }
       const status = machineClient.getStatus();
       const x = Number(body.x !== undefined ? body.x : status.x);
       const y = Number(body.y !== undefined ? body.y : status.y);
@@ -585,40 +661,16 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && urlPath === '/api/calibration/sync') {
-    if (typeof machineClient.getMachineConfig !== 'function') {
-      sendJson(res, 400, { ok: false, error: 'Kalibrierungssync ist auf diesem Backend nicht verfügbar' });
-      return;
+    let persistProbeCenter = false;
+    try {
+      const body = await readJsonBody(req);
+      persistProbeCenter = Boolean(body && body.persistProbeCenter === true);
+    } catch {
+      // empty body → tool-only sync
     }
-    const status = machineClient.getStatus();
-    if (!status.connected) {
-      sendJson(res, 400, { ok: false, error: 'Controller nicht verbunden' });
-      return;
-    }
-    const cfgResult = await machineClient.getMachineConfig();
-    if (!cfgResult.ok || !cfgResult.config) {
-      sendJson(res, 400, { ok: false, error: cfgResult.error || 'CmdGetMachineConfig failed' });
-      return;
-    }
-    const c = cfgResult.config;
-    const storedCfg = machineConfigStore.load();
-    machineConfigStore.save({
-      ...storedCfg,
-      tool_offset_x: c.tool_offset_x,
-      tool_offset_y: c.tool_offset_y,
-      tool_offset_z: c.tool_offset_z,
-    });
-    let calib = calibrationStore.load();
-    if (status.probeCenterValid) {
-      calib = calibrationStore.setProbeCenter(
-        {
-          x: c.probe_offset_reference_x - c.tool_offset_x,
-          y: c.probe_offset_reference_y - c.tool_offset_y,
-          z: c.probe_offset_reference_z - c.tool_offset_z,
-        },
-        { x: c.tool_offset_x, y: c.tool_offset_y, z: c.tool_offset_z }
-      );
-    }
-    sendJson(res, 200, { ok: true, calibration: calib, config: machineConfigStore.load() });
+    const { syncCalibrationFromController } = require('./config/syncCalibrationFromController');
+    const result = await syncCalibrationFromController(machineClient, { persistProbeCenter });
+    sendJson(res, result.ok ? 200 : 400, result);
     return;
   }
 

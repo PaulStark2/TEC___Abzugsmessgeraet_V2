@@ -16,6 +16,52 @@ function escapeHtml(str) {
     .replaceAll('"', '&quot;');
 }
 
+/** Mirrors server parameterCatalog.evaluateCornerConsistencyHints (uses field.cornerWith). */
+function evaluateCornerConsistencyHints(cfg, groups) {
+  const hints = [];
+  if (!cfg || typeof cfg !== 'object' || !Array.isArray(groups)) {
+    return hints;
+  }
+  for (const group of groups) {
+    for (const field of group.fields || []) {
+      if (!field.cornerWith) {
+        continue;
+      }
+      const corner = Number(cfg[field.key]);
+      if (!(corner > 0)) {
+        continue;
+      }
+      const a = Number(cfg[field.cornerWith.accelKey]);
+      const speeds = (field.cornerWith.speedKeys || [])
+        .map((key) => Number(cfg[key]))
+        .filter((v) => Number.isFinite(v) && v > 0);
+      const vmax = speeds.length ? Math.max(...speeds) : 0;
+      if (!(a > 0)) {
+        const minA = corner > 0 && vmax > 0 ? (vmax * vmax) / (2 * corner) : null;
+        hints.push(
+          minA !== null
+            ? `${field.label}: Bei Corner > 0 muss a > 0 sein. Empfohlen: a ≥ ${minA.toFixed(3)} mm/s² oder R erhöhen / v senken.`
+            : `${field.label}: Bei Corner > 0 muss a > 0 sein (sonst kein Blend).`
+        );
+        continue;
+      }
+      if (!(vmax > 0)) {
+        continue;
+      }
+      const minR = (vmax * vmax) / (2 * a);
+      if (corner + 1e-9 < minR) {
+        const minA = (vmax * vmax) / (2 * corner);
+        const maxV = Math.sqrt(2 * a * corner);
+        hints.push(
+          `${field.label}: R=${corner} < v²/(2a)=${minR.toFixed(3)} mm. ` +
+            `Empfehlung: R ≥ ${minR.toFixed(3)} mm, oder a ≥ ${minA.toFixed(3)} mm/s², oder v ≤ ${maxV.toFixed(3)} mm/s.`
+        );
+      }
+    }
+  }
+  return hints;
+}
+
 export function renderParameters(container) {
   container.innerHTML = `
     <section class="panel page-panel">
@@ -62,6 +108,32 @@ export function renderParameters(container) {
         setFeedback(err.message || String(err), true);
       }
     });
+  }
+
+  function readFormValues(baseConfig) {
+    const next = { ...baseConfig };
+    contentEl.querySelectorAll('input[data-key]').forEach((input) => {
+      const key = input.getAttribute('data-key');
+      next[key] = Number(input.value);
+    });
+    return next;
+  }
+
+  function updateCornerHints(groups, baseConfig) {
+    const hintEl = contentEl.querySelector('#param-corner-hints');
+    if (!hintEl) {
+      return;
+    }
+    const hints = evaluateCornerConsistencyHints(readFormValues(baseConfig), groups);
+    if (!hints.length) {
+      hintEl.hidden = true;
+      hintEl.innerHTML = '';
+      return;
+    }
+    hintEl.hidden = false;
+    hintEl.innerHTML = `<strong>Corner-Konsistenz:</strong><ul>${hints
+      .map((h) => `<li>${escapeHtml(h)}</li>`)
+      .join('')}</ul>`;
   }
 
   function renderEditor(groups, config) {
@@ -120,6 +192,7 @@ export function renderParameters(container) {
       <div class="param-editor-layout">
         <div class="param-tabs" role="tablist">${tabs}</div>
         <form id="param-form" class="control-form">
+          <div id="param-corner-hints" class="param-corner-hints" hidden></div>
           ${sections}
           <div class="control-actions page-actions">
             <button type="submit">Speichern und an Controller senden</button>
@@ -141,14 +214,15 @@ export function renderParameters(container) {
       });
     });
 
+    contentEl.querySelectorAll('input[data-key]').forEach((input) => {
+      input.addEventListener('input', () => updateCornerHints(groups, config));
+    });
+    updateCornerHints(groups, config);
+
     contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
     contentEl.querySelector('#param-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      const next = { ...config };
-      contentEl.querySelectorAll('input[data-key]').forEach((input) => {
-        const key = input.getAttribute('data-key');
-        next[key] = Number(input.value);
-      });
+      const next = readFormValues(config);
       try {
         await saveMachineConfig(next);
         setFeedback('Konfiguration gespeichert.', false);

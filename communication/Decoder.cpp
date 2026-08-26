@@ -23,6 +23,7 @@ bool isEmptyCommandId(uint8_t message_id)
     case MessageId::CmdHome:
     case MessageId::CmdGetMachineConfig:
     case MessageId::CmdStartProbeCalib:
+    case MessageId::CmdDefineMcs:
     case MessageId::CmdRequestStatus:
         return true;
     default:
@@ -58,6 +59,8 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdSetPlateOrigin:
     case MessageId::CmdSetProbeCenter:
     case MessageId::CmdStartProbeCalib:
+    case MessageId::CmdDefineMcs:
+    case MessageId::CmdRestoreMcs:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
     case MessageId::RspNack:
@@ -231,6 +234,16 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
         }
 
     case MessageId::CmdSetProbeCenter:
+        if (payload_length != kPlateOriginPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            MoveToPayload parsed{};
+            return decodeMoveToPayload(payload, payload_length, parsed);
+        }
+
+    case MessageId::CmdRestoreMcs:
         if (payload_length != kPlateOriginPayloadWireSize)
         {
             return false;

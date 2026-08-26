@@ -19,6 +19,7 @@ const {
   encodeTestConfigurationMessage,
   encodePlateOriginMessage,
   encodeProbeCenterMessage,
+  encodeRestoreMcsMessage,
   decodeAckPayload,
   decodeNackPayload,
   decodeStatusReportPayload,
@@ -60,6 +61,7 @@ function createDefaultStatus(connected = false) {
     forceSampleFresh: false,
     plateOriginValid: false,
     probeCenterValid: false,
+    mcsValid: false,
     measuredHome: null,
     connected,
   };
@@ -116,19 +118,44 @@ function createProtocolMachineClient(options = {}) {
   let forcePathHandler = null;
   let measuredHome = null;
   let lastHomingState = null;
-  /** @type {Map<number, { resolve: Function, timer: NodeJS.Timeout }>} */
+  /** @type {Map<number, { resolve: Function, timer: NodeJS.Timeout, waitForMachineConfig?: boolean, ackOk?: boolean, config?: object|null }>} */
   const pendingByMessageId = new Map();
 
   function getStatus() {
     return { ...status, connected: connected && sessionReady };
   }
 
-  function rejectPending(errorMessage) {
-    for (const [, pending] of pendingByMessageId) {
-      clearTimeout(pending.timer);
-      pending.resolve({ ok: false, error: errorMessage, status: getStatus() });
+  function finishPendingCommand(messageId, result) {
+    const pending = pendingByMessageId.get(messageId);
+    if (!pending) {
+      return;
     }
-    pendingByMessageId.clear();
+    clearTimeout(pending.timer);
+    pendingByMessageId.delete(messageId);
+    pending.resolve(result);
+  }
+
+  function tryCompleteGetMachineConfigPending(pending) {
+    if (!pending.waitForMachineConfig || !pending.ackOk || pending.config == null) {
+      return;
+    }
+    lastMachineConfig = pending.config;
+    finishPendingCommand(MessageId.CmdGetMachineConfig, {
+      ok: true,
+      config: pending.config,
+      status: getStatus(),
+    });
+  }
+
+  function rejectPending(errorMessage) {
+    const pendingIds = [...pendingByMessageId.keys()];
+    for (const messageId of pendingIds) {
+      finishPendingCommand(messageId, {
+        ok: false,
+        error: errorMessage,
+        status: getStatus(),
+      });
+    }
   }
 
   function markDisconnected(reason) {
@@ -190,7 +217,18 @@ function createProtocolMachineClient(options = {}) {
     }
 
     if (frame.messageId === MessageId.MsgMachineConfig) {
-      lastMachineConfig = decodeMachineConfigPayload(frame.payload);
+      const decoded = decodeMachineConfigPayload(frame.payload);
+      const pendingGet = pendingByMessageId.get(MessageId.CmdGetMachineConfig);
+      if (pendingGet && pendingGet.waitForMachineConfig) {
+        if (decoded) {
+          pendingGet.config = decoded;
+          tryCompleteGetMachineConfigPending(pendingGet);
+        }
+        return;
+      }
+      if (decoded) {
+        lastMachineConfig = decoded;
+      }
       return;
     }
 
@@ -211,19 +249,29 @@ function createProtocolMachineClient(options = {}) {
       if (!pending) {
         return;
       }
-      clearTimeout(pending.timer);
-      pendingByMessageId.delete(ack.refMessageId);
       const error = ackErrorMessage(ack.resultCode);
-      if (error) {
-        pending.resolve({
-          ok: false,
-          error,
-          resultCode: ack.resultCode,
-          status: getStatus(),
-        });
-      } else {
-        pending.resolve({ ok: true, resultCode: ack.resultCode, status: getStatus() });
+      if (pending.waitForMachineConfig) {
+        if (error) {
+          finishPendingCommand(ack.refMessageId, {
+            ok: false,
+            error,
+            resultCode: ack.resultCode,
+            status: getStatus(),
+          });
+          return;
+        }
+        pending.ackOk = true;
+        tryCompleteGetMachineConfigPending(pending);
+        return;
       }
+      finishPendingCommand(ack.refMessageId, error
+        ? {
+            ok: false,
+            error,
+            resultCode: ack.resultCode,
+            status: getStatus(),
+          }
+        : { ok: true, resultCode: ack.resultCode, status: getStatus() });
       return;
     }
 
@@ -236,9 +284,7 @@ function createProtocolMachineClient(options = {}) {
       if (!pending) {
         return;
       }
-      clearTimeout(pending.timer);
-      pendingByMessageId.delete(nack.refMessageId);
-      pending.resolve({
+      finishPendingCommand(nack.refMessageId, {
         ok: false,
         error: nackErrorMessage(nack.errorCode),
         status: getStatus(),
@@ -276,13 +322,16 @@ function createProtocolMachineClient(options = {}) {
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        pendingByMessageId.delete(messageId);
+        finishPendingCommand(messageId, {
+          ok: false,
+          error: MACHINE_UNAVAILABLE,
+          status: getStatus(),
+        });
         // Half-open TCP (host killed, no close yet): fail closed and force reconnect.
         markDisconnected(MACHINE_UNAVAILABLE);
         if (!closed) {
           scheduleReconnect();
         }
-        resolve({ ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() });
       }, ackTimeoutMs);
 
       pendingByMessageId.set(messageId, { resolve, timer });
@@ -294,14 +343,12 @@ function createProtocolMachineClient(options = {}) {
           }
           const pending = pendingByMessageId.get(messageId);
           if (pending) {
-            clearTimeout(pending.timer);
-            pendingByMessageId.delete(messageId);
-            markDisconnected(MACHINE_UNAVAILABLE);
-            pending.resolve({
+            finishPendingCommand(messageId, {
               ok: false,
               error: MACHINE_UNAVAILABLE,
               status: getStatus(),
             });
+            markDisconnected(MACHINE_UNAVAILABLE);
           } else {
             markDisconnected(MACHINE_UNAVAILABLE);
           }
@@ -310,17 +357,80 @@ function createProtocolMachineClient(options = {}) {
           }
         });
       } catch (err) {
-        const pending = pendingByMessageId.get(messageId);
-        if (pending) {
-          clearTimeout(pending.timer);
-          pendingByMessageId.delete(messageId);
-        }
-        markDisconnected(MACHINE_UNAVAILABLE);
-        resolve({
+        finishPendingCommand(messageId, {
           ok: false,
           error: MACHINE_UNAVAILABLE,
           status: getStatus(),
         });
+        markDisconnected(MACHINE_UNAVAILABLE);
+        if (!closed) {
+          scheduleReconnect();
+        }
+      }
+    });
+  }
+
+  function sendGetMachineConfigAndWait(frame) {
+    if (!isLiveSession()) {
+      return Promise.resolve({
+        ok: false,
+        error: MACHINE_UNAVAILABLE,
+        status: getStatus(),
+      });
+    }
+    if (pendingByMessageId.has(MessageId.CmdGetMachineConfig)) {
+      return Promise.resolve({
+        ok: false,
+        error: 'Command already pending for this message id',
+        status: getStatus(),
+      });
+    }
+
+    const activeSocket = socket;
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        finishPendingCommand(MessageId.CmdGetMachineConfig, {
+          ok: false,
+          error: MACHINE_UNAVAILABLE,
+          status: getStatus(),
+        });
+        markDisconnected(MACHINE_UNAVAILABLE);
+        if (!closed) {
+          scheduleReconnect();
+        }
+      }, ackTimeoutMs);
+
+      pendingByMessageId.set(MessageId.CmdGetMachineConfig, {
+        resolve,
+        timer,
+        waitForMachineConfig: true,
+        ackOk: false,
+        config: null,
+      });
+
+      try {
+        activeSocket.write(frame, (writeErr) => {
+          if (!writeErr) {
+            return;
+          }
+          finishPendingCommand(MessageId.CmdGetMachineConfig, {
+            ok: false,
+            error: MACHINE_UNAVAILABLE,
+            status: getStatus(),
+          });
+          markDisconnected(MACHINE_UNAVAILABLE);
+          if (!closed) {
+            scheduleReconnect();
+          }
+        });
+      } catch (err) {
+        finishPendingCommand(MessageId.CmdGetMachineConfig, {
+          ok: false,
+          error: MACHINE_UNAVAILABLE,
+          status: getStatus(),
+        });
+        markDisconnected(MACHINE_UNAVAILABLE);
         if (!closed) {
           scheduleReconnect();
         }
@@ -523,7 +633,7 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdClearFault, encoded.frame);
   }
 
-  /** Core homing sequence Z+ → X+ → Y+ (CmdHome). */
+  /** Core homing sequence Z+ → X+ → Y+ (CmdHome) — Reference only. */
   async function home() {
     if (!isLiveSession()) {
       return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
@@ -533,6 +643,35 @@ function createProtocolMachineClient(options = {}) {
       return { ok: false, error: 'Failed to encode HOME' };
     }
     return sendFrameAndWait(MessageId.CmdHome, encoded.frame);
+  }
+
+  /** Explicit MCS definition (CmdDefineMcs). */
+  async function defineMcs() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdDefineMcs);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode DEFINE_MCS' };
+    }
+    return sendFrameAndWait(MessageId.CmdDefineMcs, encoded.frame);
+  }
+
+  /**
+   * Restore persisted MCS without motion (CmdRestoreMcs).
+   * @param {number} x
+   * @param {number} y
+   * @param {number} z
+   */
+  async function restoreMcs(x, y, z) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeRestoreMcsMessage(x, y, z);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode RESTORE_MCS' };
+    }
+    return sendFrameAndWait(MessageId.CmdRestoreMcs, encoded.frame);
   }
 
   async function setSpeed() {
@@ -591,11 +730,7 @@ function createProtocolMachineClient(options = {}) {
     if (!encoded.ok) {
       return { ok: false, error: 'Failed to encode GET_MACHINE_CONFIG' };
     }
-    const result = await sendFrameAndWait(MessageId.CmdGetMachineConfig, encoded.frame);
-    if (!result.ok) {
-      return result;
-    }
-    return { ok: true, config: lastMachineConfig, status: getStatus() };
+    return sendGetMachineConfigAndWait(encoded.frame);
   }
 
   async function setTestConfiguration(cfg) {
@@ -702,6 +837,8 @@ function createProtocolMachineClient(options = {}) {
     pneumaticOpen,
     pneumaticClose,
     home,
+    defineMcs,
+    restoreMcs,
     clearFault,
     setSpeed,
     loadProgram,

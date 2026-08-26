@@ -21,6 +21,34 @@ function testTransformMatchesCore() {
   assert.ok(Math.abs(m.z - 10) < 1e-9);
 }
 
+/** Test D: FullCalib toolOffset=0 → machine = plateOrigin + platePoint */
+function testInstallZeroToolOffset() {
+  const calib = {
+    plateOriginValid: true,
+    plateOrigin: { x: 98, y: 78, z: 28 },
+    toolOffset: { x: 0, y: 0, z: 0 },
+  };
+  const m = toMachinePoint(calib, { x: 10, y: 20, z: 5 });
+  assert.ok(m);
+  assert.ok(Math.abs(m.x - 108) < 1e-9);
+  assert.ok(Math.abs(m.y - 98) < 1e-9);
+  assert.ok(Math.abs(m.z - 33) < 1e-9);
+}
+
+/** After OffsetOnly deviation: machinePoint = plateOrigin + platePoint + toolOffset */
+function testOffsetOnlyTransform() {
+  const calib = {
+    plateOriginValid: true,
+    plateOrigin: { x: 98, y: 78, z: 28 },
+    toolOffset: { x: -0.2, y: 0.1, z: -0.1 },
+  };
+  const m = toMachinePoint(calib, { x: 10, y: 20, z: 5 });
+  assert.ok(m);
+  assert.ok(Math.abs(m.x - 107.8) < 1e-9);
+  assert.ok(Math.abs(m.y - 98.1) < 1e-9);
+  assert.ok(Math.abs(m.z - 32.9) < 1e-9);
+}
+
 function testBatchNullIfInvalid() {
   assert.strictEqual(
     toMachinePoints({ plateOriginValid: false, plateOrigin: { x: 0, y: 0, z: 0 } }, [
@@ -32,5 +60,7 @@ function testBatchNullIfInvalid() {
 
 testRejectWithoutPlateOrigin();
 testTransformMatchesCore();
+testInstallZeroToolOffset();
+testOffsetOnlyTransform();
 testBatchNullIfInvalid();
 console.log('coordinateTransform.test.js: PASS');

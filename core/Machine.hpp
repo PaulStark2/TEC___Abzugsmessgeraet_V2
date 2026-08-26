@@ -91,18 +91,23 @@ public:
     // Start a new move to a target pose. // command move
     void moveTo(float x, float y, float z); // delegate
 
-    // Start Core homing sequence Z+ → X+ → Y+ (M16).
-    // If MCS is not yet defined, this performs defineMachineCoordinateSystem() once.
-    // If MCS is defined, re-applies the stored frame at the switches (step-loss correction)
-    // without redefining the origin or touching probe/plate/tool_offset.
+    // Reference-only homing (Z+ → X+ → Y+). Requires a valid MCS; never defines MCS.
+    // Re-applies the stored frame at the switches (step-loss correction) without
+    // touching home_offset / probe / plate / tool_offset.
     bool home();
 
-    // Explicit one-shot MCS definition (same motion SM as home). Sets
-    // machine_coordinate_system_valid and latches CalibrationSet.home_offset.
-    // Intentional re-definition clears plate/probe validity (geometry must be re-taught).
+    // Explicit MCS definition (same motion SM as home). Latches CalibrationSet.home_offset,
+    // sets machine_coordinate_system_valid, clears plate/probe validity (and tool_offset).
     bool defineMachineCoordinateSystem();
 
+    // Host restore after restart: latch MCS without motion and without invalidating geometry.
+    bool restoreMachineCoordinateSystem(const TestPoint& home_position);
+
     bool machineCoordinateSystemValid() const;
+
+    // If MCS is valid and the TCP is already at CalibrationSet.home_offset, latch
+    // isHomed without running the limit-seek SM (used after jog-back-to-home).
+    bool confirmHomedIfAtHome(float tolerance_mm = 0.5f);
 
     // Test helper: open-loop step loss without clearing MCS offsets.
     void shiftRawPose(float dx, float dy, float dz);
@@ -161,6 +166,10 @@ public:
     const CalibrationSet& calibrationSet() const;
 
     void setActiveVelocity(float velocity);
+    // Apply velocity / acceleration / corner blend for the next motion segment.
+    void setActiveMotionProfile(float velocity, float acceleration, float corner_radius);
+    // Decelerate to a hold at the current pose (probe trigger); does not Process-STOP.
+    void brakeToStop(float acceleration);
     void setPreClampXyEnabled(bool enabled);
     void loadPreClampForceParams();
     bool preClampXyEnabled() const;
@@ -199,6 +208,7 @@ private:
     // Default motion parameters used when (re)starting motion after stopMotion(). // stored defaults
     float default_max_velocity_; // max velocity
     float default_acceleration_; // acceleration
+    float default_corner_radius_; // two-axis blend radius (0 = full stop)
 
     // Commanded destination (never overwritten by soft-limit blocking).
     float stored_target_x_; // stored X

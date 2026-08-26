@@ -201,11 +201,13 @@ testLoadProgramEncode();
 
 function sampleMachineConfig() {
   return {
-    v_approach: 10,
-    v_slow: 2,
-    v_measure: 1,
+    v_approach_testpoints: 10,
+    v_fine_testpoints: 2,
+    v_unclamp: 1,
     v_homing: 5,
-    acceleration: 0,
+    a_testpoints: 0,
+    corner_testpoints: 0,
+    a_homing: 0,
     force_filter: 0,
     xy_tolerance_N: 0.5,
     xy_correction_step: 0.05,
@@ -224,7 +226,7 @@ function sampleMachineConfig() {
     z_correction_max: 1,
     minimum_correction: 0.01,
     max_optimization_iterations: 10,
-    probe_search_speed: 2,
+    v_search: 2,
     probe_search_distance: 10,
     probe_backoff: 1,
     home_offset_x: 0,
@@ -246,17 +248,32 @@ function sampleMachineConfig() {
     insert_search_distance: 10,
     search_depth: 5,
     approach_distance: 10,
-    fine_search_speed: 1,
+    v_search_fine: 1,
     probe_offset_reference_x: 0,
     probe_offset_reference_y: 0,
     probe_offset_reference_z: 5,
     num_fine_searches: 3,
     phase1_v_extract: 1,
     phase1_v_insert: 1,
+    phase1_a: 0,
+    phase1_corner: 0,
     phase2_v_extract: 2,
     phase2_v_insert: 3,
+    phase2_a: 0,
+    phase2_corner: 0,
     phase3_v_extract: 2,
     phase3_v_insert: 2,
+    phase3_a: 0,
+    phase3_corner: 0,
+    v_approach_probe: 10,
+    v_transfer_probe: 10,
+    a_probe_transfer: 0,
+    corner_probe_transfer: 0,
+    a_probe_search: 0,
+    a_probe_brake: 500,
+    probe_center_x: 0,
+    probe_center_y: 0,
+    probe_center_z: 0,
   };
 }
 
@@ -274,6 +291,9 @@ function testMachineConfigRoundtrip() {
   assert.ok(nearEqual(decoded.insert_search_distance, 10));
   assert.strictEqual(decoded.num_fine_searches, 3);
   assert.ok(nearEqual(decoded.phase2_v_insert, 3));
+  assert.ok(nearEqual(decoded.corner_testpoints, 0));
+  assert.ok(nearEqual(decoded.a_probe_brake, 500));
+  assert.ok(nearEqual(decoded.v_approach_probe, 10));
   assert.strictEqual(decoded.max_optimization_iterations, 10);
   const frame = encodeFrame(MessageId.CmdSetMachineConfig, payload);
   assert.ok(frame.ok);

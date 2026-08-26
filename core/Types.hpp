@@ -157,6 +157,9 @@ enum class ConfigValidationError : uint8_t
     VelocityNotPositive,
     AccelerationExceedsSafety,
     AccelerationNegative,
+    CornerExceedsSafety,
+    CornerNegative,
+    CornerInconsistent, // corner_radius < v^2/(2a) when blending is enabled
     ForceExceedsSafety,
     ForceNotPositive,
     TimeExceedsSafety,
