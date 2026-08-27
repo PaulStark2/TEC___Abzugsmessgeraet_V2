@@ -14,13 +14,18 @@ const { createProcedureService } = require('./procedure/procedureService');
 const { createPlantClient } = require('./simulation/plantClient');
 const machineConfigStore = require('./config/machineConfigStore');
 const { compareCriticalMachineConfig } = require('./config/machineConfigSync');
-const { GROUPS: parameterGroups, validateMachineConfigPayload } = require('./config/parameterCatalog');
+const {
+  GROUPS: parameterGroups,
+  READ_ONLY_KEYS,
+  validateMachineConfigPayload,
+} = require('./config/parameterCatalog');
 const { isJogStepAllowed } = require('./config/jogStep');
 const calibrationStore = require('./config/calibrationStore');
 const { pushCommittedCalibration } = require('./config/pushCommittedCalibration');
 const { MCS_REQUIRED_MESSAGE } = require('./config/mcsMessages');
 const forcePathStore = require('./results/forcePathStore');
 const { plantProbeDiscCenterOnly } = require('./coord/physicalGeometry');
+const simPlantStore = require('./config/simPlantStore');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -275,6 +280,8 @@ const procedureService = createProcedureService(machineClient, { plantClient });
 // (environment VARIABLE PARAMETER_MENU_PASSWORD).
 const PARAMETER_MENU_PASSWORD = process.env.PARAMETER_MENU_PASSWORD || 'tec-admin';
 let parametersUnlocked = false;
+/** After plant reconnect, push persisted SimUI settings once. */
+let plantSettingsRestored = false;
 
 if (typeof machineClient.onForcePathChunk === 'function') {
   machineClient.onForcePathChunk((chunk) => forcePathStore.appendChunk(chunk));
@@ -309,6 +316,43 @@ function sendPlantResult(res, result) {
     return;
   }
   sendJson(res, result && result.offline ? 503 : 400, result || { ok: false, error: 'Unknown error' });
+}
+
+/**
+ * Re-apply last SimUI plant settings after simulation host restart.
+ * @returns {Promise<boolean>} true if plant accepted the restore
+ */
+async function restorePersistedPlantSettings() {
+  const saved = simPlantStore.load();
+  const limitsResult = await plantClient.setLimits(saved.limits);
+  if (!limitsResult || !limitsResult.ok) {
+    return false;
+  }
+  const discResult = await plantClient.setProbeDisc(saved.probeDisc);
+  if (!discResult || !discResult.ok) {
+    return false;
+  }
+  const stiffnessResult = await plantClient.setForceStiffness(saved.forceStiffnessNPerMm);
+  return Boolean(stiffnessResult && stiffnessResult.ok);
+}
+
+function persistPlantSettingsFromState(state) {
+  if (!state || typeof state !== 'object') {
+    return;
+  }
+  const patch = {};
+  if (state.limits) {
+    patch.limits = state.limits;
+  }
+  if (state.probe) {
+    patch.probeDisc = state.probe;
+  }
+  if (state.forceStiffnessNPerMm !== undefined) {
+    patch.forceStiffnessNPerMm = state.forceStiffnessNPerMm;
+  }
+  if (Object.keys(patch).length) {
+    simPlantStore.save(patch);
+  }
 }
 
 function readFiniteNumber(value) {
@@ -602,7 +646,14 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const body = await readJsonBody(req);
-      const incoming = { ...machineConfigStore.load(), ...(body.config || body) };
+      const stored = machineConfigStore.load();
+      const incoming = { ...stored, ...(body.config || body) };
+      // tool_offset_* only via probe calibration sync — ignore menu edits.
+      for (const key of READ_ONLY_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(stored, key)) {
+          incoming[key] = stored[key];
+        }
+      }
       const check = validateMachineConfigPayload(incoming);
       if (!check.ok) {
         sendJson(res, 400, { ok: false, error: check.error });
@@ -855,7 +906,22 @@ const server = http.createServer(async (req, res) => {
 
   // M15 simulation plant proxy: virtual sensors only, no machine commands.
   if (req.method === 'GET' && urlPath === '/api/simulation/state') {
-    sendPlantResult(res, await plantClient.getState());
+    let result = await plantClient.getState();
+    if (!result || !result.ok) {
+      if (result && result.offline) {
+        plantSettingsRestored = false;
+      }
+      sendPlantResult(res, result);
+      return;
+    }
+    if (!plantSettingsRestored) {
+      const restored = await restorePersistedPlantSettings();
+      if (restored) {
+        plantSettingsRestored = true;
+        result = await plantClient.getState();
+      }
+    }
+    sendPlantResult(res, result);
     return;
   }
 
@@ -877,7 +943,13 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: 'No limit values provided' });
         return;
       }
-      sendPlantResult(res, await plantClient.setLimits(limits));
+      const result = await plantClient.setLimits(limits);
+      if (result && result.ok) {
+        simPlantStore.save({ limits });
+        plantSettingsRestored = true;
+        persistPlantSettingsFromState(result.state);
+      }
+      sendPlantResult(res, result);
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
     }
@@ -913,7 +985,13 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
-      sendPlantResult(res, await plantClient.setProbeDisc(disc));
+      const result = await plantClient.setProbeDisc(disc);
+      if (result && result.ok) {
+        simPlantStore.save({ probeDisc: disc });
+        plantSettingsRestored = true;
+        persistPlantSettingsFromState(result.state);
+      }
+      sendPlantResult(res, result);
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
     }
@@ -942,7 +1020,13 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: 'nPerMm must be a non-negative number' });
         return;
       }
-      sendPlantResult(res, await plantClient.setForceStiffness(nPerMm));
+      const result = await plantClient.setForceStiffness(nPerMm);
+      if (result && result.ok) {
+        simPlantStore.save({ forceStiffnessNPerMm: nPerMm });
+        plantSettingsRestored = true;
+        persistPlantSettingsFromState(result.state);
+      }
+      sendPlantResult(res, result);
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
     }

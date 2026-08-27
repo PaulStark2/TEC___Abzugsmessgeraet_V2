@@ -52,6 +52,13 @@ function run() {
   const future = GROUPS.flatMap((g) => g.fields).filter((f) => f.future).map((f) => f.key);
   assert.ok(future.includes('force_filter'));
 
+  const readOnly = GROUPS.flatMap((g) => g.fields).filter((f) => f.readOnly).map((f) => f.key);
+  assert.deepStrictEqual(readOnly.sort(), ['tool_offset_x', 'tool_offset_y', 'tool_offset_z']);
+  for (const field of GROUPS.flatMap((g) => g.fields)) {
+    assert.ok(/^[A-Za-z]/.test(field.label), `${field.key} label should be English: ${field.label}`);
+    assert.ok(!/[äöüÄÖÜß]/.test(field.label), `${field.key} label has German chars: ${field.label}`);
+  }
+
   const migrated = migrateLegacyKeys({
     v_approach: 8,
     v_slow: 1.5,

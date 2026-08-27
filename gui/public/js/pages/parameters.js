@@ -16,6 +16,18 @@ function escapeHtml(str) {
     .replaceAll('"', '&quot;');
 }
 
+function rangeText(field) {
+  if (field.minExclusive !== undefined) {
+    return `> ${field.minExclusive}${field.max !== undefined ? ` … ${field.max}` : ''}`;
+  }
+  if (field.min !== undefined || field.max !== undefined) {
+    return `${field.min !== undefined ? field.min : '—'} … ${
+      field.max !== undefined ? field.max : '—'
+    }`;
+  }
+  return 'endlich (Core-Validierung)';
+}
+
 /** Mirrors server parameterCatalog.evaluateCornerConsistencyHints (uses field.cornerWith). */
 function evaluateCornerConsistencyHints(cfg, groups) {
   const hints = [];
@@ -69,20 +81,62 @@ export function renderParameters(container) {
       <p class="placeholder-note">
         Geschütztes Menü. Ungültige Werte werden vom Controller mit NACK abgelehnt;
         der bisherige gültige Wert bleibt erhalten (kein stilles Clamping).
-        SafetyLimits sind nicht editierbar.
+        SafetyLimits sind nicht editierbar. toolOffset nur über Messtaster-Einmessung.
       </p>
       <p id="parameters-feedback" class="command-feedback" aria-live="polite"></p>
       <div id="parameters-content"></div>
+      <div id="param-info-modal" class="param-info-overlay" hidden>
+        <div class="param-info-dialog" role="dialog" aria-modal="true" aria-labelledby="param-info-title">
+          <h3 id="param-info-title"></h3>
+          <div id="param-info-body" class="param-info-body"></div>
+          <div class="param-info-actions">
+            <button type="button" id="param-info-close">Schließen</button>
+          </div>
+        </div>
+      </div>
     </section>
   `;
 
   const feedbackEl = container.querySelector('#parameters-feedback');
   const contentEl = container.querySelector('#parameters-content');
+  const modalEl = container.querySelector('#param-info-modal');
+  const modalTitleEl = container.querySelector('#param-info-title');
+  const modalBodyEl = container.querySelector('#param-info-body');
 
   function setFeedback(text, isError) {
     feedbackEl.textContent = text || '';
     feedbackEl.classList.toggle('command-feedback--error', Boolean(isError));
   }
+
+  function closeInfoModal() {
+    modalEl.hidden = true;
+    modalTitleEl.textContent = '';
+    modalBodyEl.innerHTML = '';
+  }
+
+  function openInfoModal(field) {
+    modalTitleEl.textContent = field.label || field.key;
+    modalBodyEl.innerHTML = `
+      <p>${escapeHtml(field.info || '')}</p>
+      <p><strong>Einheit:</strong> ${escapeHtml(field.unit || '—')}</p>
+      <p><strong>Zulässiger Bereich:</strong> ${escapeHtml(rangeText(field))}</p>
+      <p><strong>Wirkung:</strong> ${
+        field.readOnly
+          ? 'nur Anzeige — Wert wird durch Messtaster-Einmessung gesetzt'
+          : field.future
+            ? 'noch nicht im Core ausgewertet'
+            : 'wirkt auf Core MachineConfig'
+      }</p>
+    `;
+    modalEl.hidden = false;
+  }
+
+  container.querySelector('#param-info-close').addEventListener('click', closeInfoModal);
+  modalEl.addEventListener('click', (ev) => {
+    if (ev.target === modalEl) {
+      closeInfoModal();
+    }
+  });
 
   function renderLocked() {
     contentEl.innerHTML = `
@@ -113,6 +167,9 @@ export function renderParameters(container) {
   function readFormValues(baseConfig) {
     const next = { ...baseConfig };
     contentEl.querySelectorAll('input[data-key]').forEach((input) => {
+      if (input.readOnly || input.disabled) {
+        return;
+      }
       const key = input.getAttribute('data-key');
       next[key] = Number(input.value);
     });
@@ -136,7 +193,14 @@ export function renderParameters(container) {
       .join('')}</ul>`;
   }
 
-  function renderEditor(groups, config, meta = {}) {
+  function renderEditor(groups, config) {
+    const fieldByKey = new Map();
+    for (const group of groups) {
+      for (const field of group.fields || []) {
+        fieldByKey.set(field.key, field);
+      }
+    }
+
     const tabs = groups
       .map(
         (group, idx) => `
@@ -153,80 +217,60 @@ export function renderParameters(container) {
           idx === 0 ? '' : 'hidden'
         }>
         <legend>${escapeHtml(group.title)}</legend>
-        ${group.fields
-          .map(
-            (field) => `
-          <label class="param-field">
-            <span class="param-field__label">${escapeHtml(field.label)}</span>
-            <input
-              data-key="${escapeHtml(field.key)}"
-              type="number"
-              step="${field.integer ? '1' : 'any'}"
-              ${field.min !== undefined ? `min="${field.min}"` : ''}
-              ${field.max !== undefined ? `max="${field.max}"` : ''}
-              value="${escapeHtml(config[field.key] ?? '')}"
-            />
-            <span class="param-field__unit">${escapeHtml(field.unit || '')}</span>
-            ${field.future ? '<span class="param-field__future">zukünftig</span>' : ''}
-            <details class="param-info">
-              <summary>Info</summary>
-              <p>${escapeHtml(field.info || '')}</p>
-              <p>Einheit: ${escapeHtml(field.unit || '—')}</p>
-              <p>Zulässiger Bereich: ${escapeHtml(
-                field.minExclusive !== undefined
-                  ? `> ${field.minExclusive}${field.max !== undefined ? ` … ${field.max}` : ''}`
-                  : field.min !== undefined || field.max !== undefined
-                    ? `${field.min !== undefined ? field.min : '—'} … ${field.max !== undefined ? field.max : '—'}`
-                    : 'endlich (Core-Validierung)'
-              )}</p>
-              <p>Wirkung: ${field.future ? 'noch nicht im Core ausgewertet' : 'wirkt auf Core MachineConfig'}</p>
-            </details>
-          </label>`
-          )
-          .join('')}
+        <div class="param-table-wrap">
+          <table class="param-table">
+            <thead>
+              <tr>
+                <th scope="col">Parameter</th>
+                <th scope="col">Wert</th>
+                <th scope="col">Einheit</th>
+                <th scope="col">Info</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(group.fields || [])
+                .map((field) => {
+                  const readOnly = Boolean(field.readOnly);
+                  return `
+                <tr class="${readOnly ? 'param-row--readonly' : ''}${
+                    field.future ? ' param-row--future' : ''
+                  }">
+                  <td class="param-table__name">
+                    ${escapeHtml(field.label)}
+                    ${field.future ? '<span class="param-field__future">zukünftig</span>' : ''}
+                    ${readOnly ? '<span class="param-field__readonly">nur Anzeige</span>' : ''}
+                  </td>
+                  <td class="param-table__value">
+                    <input
+                      data-key="${escapeHtml(field.key)}"
+                      type="number"
+                      step="${field.integer ? '1' : 'any'}"
+                      ${field.min !== undefined ? `min="${field.min}"` : ''}
+                      ${field.max !== undefined ? `max="${field.max}"` : ''}
+                      value="${escapeHtml(config[field.key] ?? '')}"
+                      ${readOnly ? 'readonly disabled' : ''}
+                    />
+                  </td>
+                  <td class="param-table__unit">${escapeHtml(field.unit || '')}</td>
+                  <td class="param-table__info">
+                    <button type="button" class="param-info-btn" data-info-key="${escapeHtml(
+                      field.key
+                    )}" aria-label="Info zu ${escapeHtml(field.label)}">Info</button>
+                  </td>
+                </tr>`;
+                })
+                .join('')}
+            </tbody>
+          </table>
+        </div>
       </fieldset>`
       )
       .join('');
-
-    const syncNotes = [];
-    if (meta.lastConnectPushError) {
-      syncNotes.push(
-        `Connect-Push fehlgeschlagen: ${meta.lastConnectPushError}. Werte liegen ggf. nur auf Disk.`
-      );
-    }
-    if (meta.coreError) {
-      syncNotes.push(`Controller-Config konnte nicht gelesen werden: ${meta.coreError}`);
-    } else if (meta.coreConnected && meta.configDrift) {
-      const keys = (meta.mismatchedKeys || []).join(', ') || 'kritische Felder';
-      syncNotes.push(
-        `Drift Disk ↔ Controller (${keys}). Speichern, damit der Controller die Disk-Werte übernimmt.`
-      );
-    } else if (meta.coreConnected && meta.coreConfig) {
-      syncNotes.push('Disk und Controller (kritische Motion-Felder) stimmen überein.');
-    } else if (meta.machineClientMode === 'protocol' && !meta.coreConnected) {
-      syncNotes.push(
-        'Controller nicht verbunden — Speichern wird abgelehnt, bis die Protocol-Session steht.'
-      );
-    } else if (meta.machineClientMode === 'mock') {
-      syncNotes.push('Mock-Backend: Speichern schreibt nur die Disk (kein Core-RAM).');
-    }
 
     contentEl.innerHTML = `
       <div class="param-editor-layout">
         <div class="param-tabs" role="tablist">${tabs}</div>
         <form id="param-form" class="control-form">
-              ${
-            syncNotes.length
-              ? `<div id="param-sync-status" class="param-sync-status ${
-                  meta.configDrift ||
-                  meta.lastConnectPushError ||
-                  meta.coreError ||
-                  (meta.machineClientMode === 'protocol' && !meta.coreConnected)
-                    ? 'param-sync-status--warn'
-                    : 'param-sync-status--ok'
-                }" role="status">${syncNotes.map((n) => `<p>${escapeHtml(n)}</p>`).join('')}</div>`
-              : ''
-          }
           <div id="param-corner-hints" class="param-corner-hints" hidden></div>
           ${sections}
           <div class="control-actions page-actions">
@@ -249,7 +293,16 @@ export function renderParameters(container) {
       });
     });
 
-    contentEl.querySelectorAll('input[data-key]').forEach((input) => {
+    contentEl.querySelectorAll('.param-info-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const field = fieldByKey.get(btn.getAttribute('data-info-key'));
+        if (field) {
+          openInfoModal(field);
+        }
+      });
+    });
+
+    contentEl.querySelectorAll('input[data-key]:not([readonly])').forEach((input) => {
       input.addEventListener('input', () => updateCornerHints(groups, config));
     });
     updateCornerHints(groups, config);
@@ -259,15 +312,8 @@ export function renderParameters(container) {
       ev.preventDefault();
       const next = readFormValues(config);
       try {
-        const saved = await saveMachineConfig(next);
-        const pushed = saved.pushedToController === true;
-        setFeedback(
-          pushed
-            ? 'Konfiguration gespeichert und am Controller verifiziert.'
-            : 'Konfiguration gespeichert (kein Controller-Push auf diesem Backend).',
-          false
-        );
-        await refresh();
+        await saveMachineConfig(next);
+        setFeedback('Konfiguration gespeichert.', false);
       } catch (err) {
         setFeedback(err.message || String(err), true);
       }
@@ -281,17 +327,11 @@ export function renderParameters(container) {
       renderLocked();
       return;
     }
-    renderEditor(catalog.groups || [], cfg.config || {}, {
-      coreConfig: cfg.coreConfig || null,
-      coreConnected: cfg.coreConnected === true,
-      coreError: cfg.coreError || null,
-      configDrift: cfg.configDrift === true,
-      mismatchedKeys: cfg.mismatchedKeys || [],
-      lastConnectPushError: cfg.lastConnectPushError || null,
-      machineClientMode: cfg.machineClientMode || 'mock',
-    });
+    renderEditor(catalog.groups || [], cfg.config || {});
   }
 
   refresh().catch((err) => setFeedback(err.message || String(err), true));
-  return () => {};
+  return () => {
+    closeInfoModal();
+  };
 }

@@ -18,7 +18,7 @@ const GROUPS = [
     fields: [
       {
         key: 'v_approach_testpoints',
-        label: 'vApproach (Prüfpunkte)',
+        label: 'vApproach (test points)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -26,7 +26,7 @@ const GROUPS = [
       },
       {
         key: 'v_fine_testpoints',
-        label: 'vFine (Prüfpunkte)',
+        label: 'vFine (test points)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -42,7 +42,7 @@ const GROUPS = [
       },
       {
         key: 'a_testpoints',
-        label: 'a (Prüfpunkte)',
+        label: 'a (test points)',
         unit: 'mm/s²',
         min: 0,
         max: 500,
@@ -50,7 +50,7 @@ const GROUPS = [
       },
       {
         key: 'corner_testpoints',
-        label: 'Corner (Prüfpunkte)',
+        label: 'corner (test points)',
         unit: 'mm',
         min: 0,
         max: 50,
@@ -62,7 +62,7 @@ const GROUPS = [
       },
       {
         key: 'safe_z_buffer',
-        label: 'Safe-Z-Puffer',
+        label: 'safeZBuffer',
         unit: 'mm',
         minExclusive: 0,
         max: 500,
@@ -70,7 +70,7 @@ const GROUPS = [
       },
       {
         key: 'jog_min_step_mm',
-        label: 'Jog-Mindestschrittweite',
+        label: 'jogMinStep',
         unit: 'mm',
         minExclusive: 0,
         max: 50,
@@ -87,7 +87,7 @@ const GROUPS = [
     fields: [
       {
         key: 'phase1_v_extract',
-        label: 'Ausgliedergeschwindigkeit',
+        label: 'vExtract',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -95,7 +95,7 @@ const GROUPS = [
       },
       {
         key: 'phase1_v_insert',
-        label: 'Eingliedergeschwindigkeit',
+        label: 'vInsert',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -103,7 +103,7 @@ const GROUPS = [
       },
       {
         key: 'phase1_a',
-        label: 'Beschleunigung',
+        label: 'acceleration',
         unit: 'mm/s²',
         min: 0,
         max: 500,
@@ -111,7 +111,7 @@ const GROUPS = [
       },
       {
         key: 'phase1_corner',
-        label: 'Corner',
+        label: 'corner',
         unit: 'mm',
         min: 0,
         max: 50,
@@ -129,7 +129,7 @@ const GROUPS = [
     fields: [
       {
         key: 'phase2_v_extract',
-        label: 'Ausgliedergeschwindigkeit',
+        label: 'vExtract',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -137,7 +137,7 @@ const GROUPS = [
       },
       {
         key: 'phase2_v_insert',
-        label: 'Eingliedergeschwindigkeit',
+        label: 'vInsert',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -145,7 +145,7 @@ const GROUPS = [
       },
       {
         key: 'phase2_a',
-        label: 'Beschleunigung',
+        label: 'acceleration',
         unit: 'mm/s²',
         min: 0,
         max: 500,
@@ -153,7 +153,7 @@ const GROUPS = [
       },
       {
         key: 'phase2_corner',
-        label: 'Corner',
+        label: 'corner',
         unit: 'mm',
         min: 0,
         max: 50,
@@ -210,7 +210,7 @@ const GROUPS = [
     fields: [
       {
         key: 'phase3_v_extract',
-        label: 'Ausgliedergeschwindigkeit',
+        label: 'vExtract',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -218,7 +218,7 @@ const GROUPS = [
       },
       {
         key: 'phase3_v_insert',
-        label: 'Eingliedergeschwindigkeit',
+        label: 'vInsert',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -226,7 +226,7 @@ const GROUPS = [
       },
       {
         key: 'phase3_a',
-        label: 'Beschleunigung',
+        label: 'acceleration',
         unit: 'mm/s²',
         min: 0,
         max: 500,
@@ -234,7 +234,7 @@ const GROUPS = [
       },
       {
         key: 'phase3_corner',
-        label: 'Corner',
+        label: 'corner',
         unit: 'mm',
         min: 0,
         max: 50,
@@ -268,19 +268,19 @@ const GROUPS = [
       },
       {
         key: 'home_offset_x',
-        label: 'Homing-Rückzug X',
+        label: 'homeOffset.x',
         unit: 'mm',
         info: 'Abstand vom X+-Endanschlag nach Homing. 0 → Default 2 mm. Die resultierende Pose wird als Home gemerkt (kein Snap auf Ursprung).',
       },
       {
         key: 'home_offset_y',
-        label: 'Homing-Rückzug Y',
+        label: 'homeOffset.y',
         unit: 'mm',
         info: 'Abstand vom Y+-Endanschlag nach Homing. 0 → Default 2 mm.',
       },
       {
         key: 'home_offset_z',
-        label: 'Homing-Rückzug Z',
+        label: 'homeOffset.z',
         unit: 'mm',
         info: 'Abstand vom Z+-Endanschlag nach Homing. 0 → Default 2 mm. Safe-Z bleibt ein eigener Parameter.',
       },
@@ -374,12 +374,12 @@ const GROUPS = [
     id: 'collision',
     title: 'Collision',
     fields: [
-      { key: 'collision_approach_N', label: 'Approach', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Approach (unterhalb der festen SafetyLimits ±50 N).' },
-      { key: 'collision_retract_N', label: 'Retract', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Retract.' },
-      { key: 'collision_clamp_N', label: 'Clamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Clamp.' },
-      { key: 'collision_unclamp_N', label: 'Unclamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Unclamp.' },
-      { key: 'collision_contact_N', label: 'Contact', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Contact / Eingliedern (Phase 1).' },
-      { key: 'collision_measure_N', label: 'Measure', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Measure / Prüfung (Phase 3).' },
+      { key: 'collision_approach_N', label: 'collisionApproach', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Approach (unterhalb der festen SafetyLimits ±50 N).' },
+      { key: 'collision_retract_N', label: 'collisionRetract', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Retract.' },
+      { key: 'collision_clamp_N', label: 'collisionClamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Clamp.' },
+      { key: 'collision_unclamp_N', label: 'collisionUnclamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Unclamp.' },
+      { key: 'collision_contact_N', label: 'collisionContact', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Contact / Eingliedern (Phase 1).' },
+      { key: 'collision_measure_N', label: 'collisionMeasure', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Measure / Prüfung (Phase 3).' },
     ],
   },
   {
@@ -410,7 +410,7 @@ const GROUPS = [
     fields: [
       {
         key: 'v_approach_probe',
-        label: 'vApproach (Probe)',
+        label: 'vApproach (probe)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -418,7 +418,7 @@ const GROUPS = [
       },
       {
         key: 'v_transfer_probe',
-        label: 'vTransfer (Probe)',
+        label: 'vTransfer (probe)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -426,7 +426,7 @@ const GROUPS = [
       },
       {
         key: 'v_search',
-        label: 'vSearch (grob)',
+        label: 'vSearch (coarse)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -434,7 +434,7 @@ const GROUPS = [
       },
       {
         key: 'v_search_fine',
-        label: 'vSearch (fein)',
+        label: 'vSearch (fine)',
         unit: 'mm/s',
         minExclusive: 0,
         max: 50,
@@ -442,7 +442,7 @@ const GROUPS = [
       },
       {
         key: 'a_probe_transfer',
-        label: 'aTransfer (Probe)',
+        label: 'aTransfer (probe)',
         unit: 'mm/s²',
         min: 0,
         max: 500,
@@ -450,7 +450,7 @@ const GROUPS = [
       },
       {
         key: 'corner_probe_transfer',
-        label: 'Corner Transfer (Probe)',
+        label: 'cornerTransfer (probe)',
         unit: 'mm',
         min: 0,
         max: 50,
@@ -462,7 +462,7 @@ const GROUPS = [
       },
       {
         key: 'a_probe_search',
-        label: 'aSearch (Probe)',
+        label: 'aSearch (probe)',
         unit: 'mm/s²',
         min: 0,
         max: 500,
@@ -470,7 +470,7 @@ const GROUPS = [
       },
       {
         key: 'a_probe_brake',
-        label: 'aBrake (Probe)',
+        label: 'aBrake (probe)',
         unit: 'mm/s²',
         min: 0,
         max: 500,
@@ -601,13 +601,33 @@ const GROUPS = [
         key: 'tool_offset_x',
         label: 'toolOffset.x',
         unit: 'mm',
-        info: 'TCP-Korrektur: machine = plateOrigin + platePoint + toolOffset. Nach FullCalib/Install = 0. Bei Procedure-OffsetOnly = probeCenter − aktuelle Messung.',
+        readOnly: true,
+        info:
+          'TCP-Korrektur X: machine = plateOrigin + platePoint + toolOffset. ' +
+          'Nur durch Messtaster-Einmessung (FullCalib/Install oder OffsetOnly) setzbar — nicht manuell änderbar.',
       },
-      { key: 'tool_offset_y', label: 'toolOffset.y', unit: 'mm', info: 'Optionaler TCP-Offset in Y.' },
-      { key: 'tool_offset_z', label: 'toolOffset.z', unit: 'mm', info: 'Optionaler TCP-Offset in Z.' },
+      {
+        key: 'tool_offset_y',
+        label: 'toolOffset.y',
+        unit: 'mm',
+        readOnly: true,
+        info: 'TCP-Korrektur Y. Nur durch Messtaster-Einmessung setzbar — nicht manuell änderbar.',
+      },
+      {
+        key: 'tool_offset_z',
+        label: 'toolOffset.z',
+        unit: 'mm',
+        readOnly: true,
+        info: 'TCP-Korrektur Z. Nur durch Messtaster-Einmessung setzbar — nicht manuell änderbar.',
+      },
     ],
   },
 ];
+
+/** Keys that must not be changed via the parameter menu (probe calibration only). */
+const READ_ONLY_KEYS = GROUPS.flatMap((g) => g.fields)
+  .filter((f) => f.readOnly)
+  .map((f) => f.key);
 
 function defaultMachineConfigPayload() {
   return {
@@ -773,6 +793,7 @@ function validateMachineConfigPayload(cfg) {
 
 module.exports = {
   GROUPS,
+  READ_ONLY_KEYS,
   defaultMachineConfigPayload,
   validateMachineConfigPayload,
   evaluateCornerConsistencyHints,
