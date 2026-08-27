@@ -2,9 +2,12 @@
 
 /**
  * Dynamic Safe-Z (plate frame), mirrors core/SafeZ.hpp:
- *   safe_z_plate = max(point.z) + safe_z_buffer
+ *   max_clearance_z = max(max(point.z), probe_z_plate)
+ *   safe_z_plate = max_clearance_z + safe_z_buffer
+ *   probe_z_plate = probe_center.z - plate_origin.z - tool_offset.z
  * Machine traverse height:
  *   safe_z_machine = plate_origin.z + safe_z_plate + tool_offset.z
+ * Probe is included only when probeCenterValid.
  */
 
 function finiteNumber(value) {
@@ -40,6 +43,30 @@ function computeMaxPlatePointZ(points) {
     }
   }
   return { ok: true, maxPointZ: maxZ };
+}
+
+/**
+ * Probe center is machine-frame; convert Z into plate frame.
+ * @returns {{ ok: true, probeZPlate: number } | { ok: false } | { skipped: true }}
+ */
+function computeProbeZPlate(calibration) {
+  if (!calibration || !calibration.probeCenterValid || !calibration.probeCenter) {
+    return { skipped: true };
+  }
+  if (!calibration.plateOriginValid || !calibration.plateOrigin) {
+    return { skipped: true };
+  }
+  const pz = finiteNumber(calibration.probeCenter.z);
+  const oz = finiteNumber(calibration.plateOrigin.z);
+  const tz = finiteNumber(calibration.toolOffset && calibration.toolOffset.z) ?? 0;
+  if (pz === null || oz === null) {
+    return {
+      ok: false,
+      code: 'probe_center',
+      error: 'Messtaster-Zentrum.z ist ungültig — Safe-Z kann nicht berechnet werden.',
+    };
+  }
+  return { ok: true, probeZPlate: pz - oz - tz };
 }
 
 /**
@@ -98,28 +125,44 @@ function computeSafeZMachine(calibration, safeZPlate) {
 }
 
 /**
- * Full resolve: plate points + buffer + calibration → machine Safe-Z.
+ * Full resolve: plate points + optional probe + buffer + calibration → machine Safe-Z.
  */
 function resolveProgramSafeZ(points, safeZBuffer, calibration) {
   const plate = computeSafeZPlate(points, safeZBuffer);
   if (!plate.ok) {
     return plate;
   }
-  const machine = computeSafeZMachine(calibration, plate.safeZPlate);
+  const probe = computeProbeZPlate(calibration);
+  if (probe.ok === false) {
+    return probe;
+  }
+  let maxClearanceZ = plate.maxPointZ;
+  let probeZPlate = null;
+  if (probe.ok === true) {
+    probeZPlate = probe.probeZPlate;
+    if (probeZPlate > maxClearanceZ) {
+      maxClearanceZ = probeZPlate;
+    }
+  }
+  const safeZPlate = maxClearanceZ + plate.safeZBuffer;
+  const machine = computeSafeZMachine(calibration, safeZPlate);
   if (!machine.ok) {
     return machine;
   }
   return {
     ok: true,
     maxPointZ: plate.maxPointZ,
+    probeZPlate,
+    maxClearanceZ,
     safeZBuffer: plate.safeZBuffer,
-    safeZPlate: plate.safeZPlate,
+    safeZPlate,
     safeZMachine: machine.safeZMachine,
   };
 }
 
 module.exports = {
   computeMaxPlatePointZ,
+  computeProbeZPlate,
   computeSafeZPlate,
   computeSafeZMachine,
   resolveProgramSafeZ,

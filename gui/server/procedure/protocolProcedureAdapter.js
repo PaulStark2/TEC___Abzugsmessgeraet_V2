@@ -26,9 +26,46 @@ const { validateProcedureStartPreconditions } = require('./startPreconditions');
 const { validateCoreNotRunningForProcedureStart } = require('./coreProcessGuard');
 const { derivePointProgress } = require('./procedureProgress');
 
+function referenceOffsetFromPoses(plantPose, machinePose) {
+  if (
+    !plantPose ||
+    !machinePose ||
+    ![plantPose.x, plantPose.y, plantPose.z, machinePose.x, machinePose.y, machinePose.z].every(
+      Number.isFinite
+    )
+  ) {
+    return { x: 0, y: 0, z: 0 };
+  }
+  return {
+    x: plantPose.x - machinePose.x,
+    y: plantPose.y - machinePose.y,
+    z: plantPose.z - machinePose.z,
+  };
+}
+
+async function loadWorkspaceFromPlant(plantClient, machineStatus) {
+  if (!plantClient || typeof plantClient.getState !== 'function') {
+    return null;
+  }
+  const result = await plantClient.getState();
+  if (!result || !result.ok || !result.state || !result.state.limits) {
+    return null;
+  }
+  const status = machineStatus || {};
+  const startPose = [status.x, status.y, status.z].every(Number.isFinite)
+    ? { x: status.x, y: status.y, z: status.z }
+    : null;
+  return {
+    limits: result.state.limits,
+    referenceOffset: referenceOffsetFromPoses(result.pose, startPose),
+    startPose,
+  };
+}
+
 const POLL_MS = 200;
 
-function createProtocolProcedureAdapter(machineClient) {
+function createProtocolProcedureAdapter(machineClient, options = {}) {
+  const plantClient = options.plantClient || null;
   let pollTimer = null;
   let params = null;
   let points = [];
@@ -406,10 +443,15 @@ function createProtocolProcedureAdapter(machineClient) {
 
     const calib = calibrationStore.load();
     const machineCfg = machineConfigStore.load();
+    const workspace = await loadWorkspaceFromPlant(
+      plantClient,
+      typeof machineClient.getStatus === 'function' ? machineClient.getStatus() : {}
+    );
     const preflight = validateProcedureStartPreconditions({
       calibration: calib,
       machineConfig: machineCfg,
       points: selection.points,
+      workspace: workspace || undefined,
     });
     if (!preflight.ok) {
       return { ok: false, error: preflight.error };

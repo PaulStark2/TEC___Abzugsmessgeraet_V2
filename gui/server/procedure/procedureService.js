@@ -9,7 +9,7 @@ const procedureStore = require('./procedureStore');
 const { createMockProcedureAdapter } = require('./mockProcedureAdapter');
 const { createProtocolProcedureAdapter } = require('./protocolProcedureAdapter');
 
-function createProcedureService(machineClient) {
+function createProcedureService(machineClient, options = {}) {
   const mode = (
     machineClient.machineClientMode ||
     process.env.MACHINE_CLIENT ||
@@ -21,7 +21,9 @@ function createProcedureService(machineClient) {
   if (mode === 'mock') {
     adapter = createMockProcedureAdapter(machineClient);
   } else if (mode === 'protocol') {
-    adapter = createProtocolProcedureAdapter(machineClient);
+    adapter = createProtocolProcedureAdapter(machineClient, {
+      plantClient: options.plantClient || null,
+    });
   } else {
     adapter = {
       kind: 'unsupported',

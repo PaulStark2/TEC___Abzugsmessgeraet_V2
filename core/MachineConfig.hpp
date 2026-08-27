@@ -20,7 +20,7 @@ struct MachineConfig
         float v_homing = 5.0f;
         float a_homing = 0.0f; // seek/retract only; endstop hit is hard stop
 
-        // Clearance above the highest plate-frame program point (mm).
+        // Clearance above max(highest plate-frame program Z, probe Z in plate frame) [mm].
         float safe_z_buffer = 30.0f;
 
         // Procedure phase extract (+Z) / insert (−Z) speeds and path profile.

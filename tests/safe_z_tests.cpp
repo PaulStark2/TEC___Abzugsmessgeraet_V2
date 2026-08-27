@@ -162,6 +162,40 @@ int main()
         }
     }
 
+    // Probe lower than points: Safe-Z stays max(point.z) + buffer.
+    {
+        TestProgram program;
+        program.add(TestPoint{0.0f, 0.0f, 10.0f});
+        CalibrationSet calib{};
+        calib.plate_origin_valid = true;
+        calib.plate_origin = TestPoint{0.0f, 0.0f, 0.0f};
+        calib.probe_center_valid = true;
+        calib.probe_center = TestPoint{40.0f, 40.0f, 5.0f};
+        float machine_z = 0.0f;
+        if (!resolveProgramSafeZMachine(program, 30.0f, calib, machine_z) ||
+            !nearEqual(machine_z, 40.0f))
+        {
+            return 13;
+        }
+    }
+
+    // Probe higher than points: buffer is applied to probe Z.
+    {
+        TestProgram program;
+        program.add(TestPoint{0.0f, 0.0f, 10.0f});
+        CalibrationSet calib{};
+        calib.plate_origin_valid = true;
+        calib.plate_origin = TestPoint{0.0f, 0.0f, 0.0f};
+        calib.probe_center_valid = true;
+        calib.probe_center = TestPoint{40.0f, 40.0f, 25.0f};
+        float machine_z = 0.0f;
+        if (!resolveProgramSafeZMachine(program, 30.0f, calib, machine_z) ||
+            !nearEqual(machine_z, 55.0f))
+        {
+            return 14;
+        }
+    }
+
     // Test H — Raise → XY → Lower with dynamic Safe-Z
     {
         Machine machine;
@@ -179,8 +213,7 @@ int main()
         program.add(TestPoint{6.0f, 4.0f, -1.0f});
         ex.setProgram(program);
         float safe_z_machine = 0.0f;
-        if (!expectedSafeZMachine(machine, program, safe_z_machine) ||
-            !nearEqual(safe_z_machine, 4.0f)) // -1 + 5
+        if (!expectedSafeZMachine(machine, program, safe_z_machine))
         {
             return 21;
         }

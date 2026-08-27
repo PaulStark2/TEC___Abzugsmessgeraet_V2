@@ -3,12 +3,19 @@
 ## Formula (plate frame)
 
 ```text
-safe_z_plate = max(program.point.z) + safe_z_buffer
+probe_z_plate       = probe_center.z − plate_origin.z − tool_offset.z
+max_clearance_z     = max(max(program.point.z), probe_z_plate)
+safe_z_plate        = max_clearance_z + safe_z_buffer
 ```
 
 - `program.point.z` are **Bauplattenkoordinaten** (plate frame).
-- `safe_z_buffer` is the configurable clearance above the highest test point (default **30 mm**).
+- `probe_center` is the calibrated Messtaster position (**machine** frame); it is
+  converted to plate frame before the max.
+- If the Messtaster sits higher than every test point, the buffer is added to
+  the probe Z instead. Otherwise the previous point-only height is unchanged.
+- `safe_z_buffer` is the configurable clearance (default **30 mm**).
 - There is no freely editable absolute machine-frame Safe-Z.
+- Probe is included only when `probe_center_valid`.
 
 ## Machine frame
 
@@ -41,6 +48,17 @@ Raise Z to safe_z_machine
 
 `MotionPlanner` remains the axis authority.
 
+## Workspace reject
+
+The GUI planned path (`buildProcedurePlannedPath`) is checked against the
+simulation plant limits (raw frame; `raw = machine + referenceOffset`).
+
+If any waypoint lies outside that envelope, start is refused and the Sim-UI
+shows an error. Safe-Z is **not** clamped to `zMax`. Soft-limit blocking in
+Core is unchanged (no Fault).
+
+Without a reachable plant channel the envelope check is skipped (hardware).
+
 ## Configuration
 
 | Field | Role |
@@ -58,6 +76,7 @@ Automatic start requires:
 - valid `plate_origin`,
 - valid `probe_center`,
 - machine homed,
-- resolvable `safe_z_machine` with all points strictly below it.
+- resolvable `safe_z_machine` with all points strictly below it,
+- planned path inside plant limits when those limits are available.
 
 Core helpers: `core/SafeZ.hpp`. GUI mirror: `gui/server/coord/safeZ.js`.

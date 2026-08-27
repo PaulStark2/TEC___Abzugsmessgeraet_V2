@@ -1,7 +1,10 @@
 /**
  * Dynamic Safe-Z (mirrors core/SafeZ.hpp / server/coord/safeZ.js).
- * safe_z_plate = max(point.z) + safe_z_buffer
+ * max_clearance_z = max(max(point.z), probe_z_plate)
+ * safe_z_plate = max_clearance_z + safe_z_buffer
+ * probe_z_plate = probe_center.z - plate_origin.z - tool_offset.z
  * safe_z_machine = plate_origin.z + safe_z_plate + tool_offset.z
+ * Probe is included only when probeCenterValid.
  */
 
 function finiteNumber(value) {
@@ -48,8 +51,24 @@ export function resolveProgramSafeZ(points, safeZBuffer, calibration) {
   if (oz === null) {
     return null;
   }
+  let maxClearanceZ = plate.maxPointZ;
+  let probeZPlate = null;
+  if (calibration.probeCenterValid && calibration.probeCenter) {
+    const pz = finiteNumber(calibration.probeCenter.z);
+    if (pz === null) {
+      return null;
+    }
+    probeZPlate = pz - oz - tz;
+    if (probeZPlate > maxClearanceZ) {
+      maxClearanceZ = probeZPlate;
+    }
+  }
+  const safeZPlate = maxClearanceZ + plate.safeZBuffer;
   return {
     ...plate,
-    safeZMachine: oz + plate.safeZPlate + tz,
+    probeZPlate,
+    maxClearanceZ,
+    safeZPlate,
+    safeZMachine: oz + safeZPlate + tz,
   };
 }

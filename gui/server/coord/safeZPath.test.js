@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildApproachSegments, buildProcedurePlannedPath } = require('./safeZPath');
+const { buildApproachSegments, buildProcedurePlannedPath, findWorkspaceViolation } = require('./safeZPath');
 
 function testRaiseXyCoarseFine() {
   const segs = buildApproachSegments({ x: 0, y: 0, z: 0 }, { x: 10, y: 5, z: 1 }, 40, {
@@ -68,4 +68,53 @@ function testProcedureIncludesProbeThenPoints() {
 testRaiseXyCoarseFine();
 testNoDiagonal();
 testProcedureIncludesProbeThenPoints();
+
+function testWorkspaceInside() {
+  const path = buildProcedurePlannedPath(
+    { x: 10, y: 10, z: 0 },
+    [{ x: 20, y: 20, z: 1 }],
+    30,
+    { x: 15, y: 15, z: 5 },
+    { approachStandoffMm: 5 }
+  );
+  const check = findWorkspaceViolation(
+    path.vertices,
+    { xMin: 0, xMax: 100, yMin: 0, yMax: 100, zMin: -10, zMax: 80 },
+    { x: 0, y: 0, z: 0 }
+  );
+  assert.strictEqual(check.ok, true);
+}
+
+function testWorkspaceOutsideZ() {
+  const path = buildProcedurePlannedPath(
+    { x: 10, y: 10, z: 0 },
+    [{ x: 20, y: 20, z: 1 }],
+    40,
+    null,
+    { includeProbe: false }
+  );
+  const check = findWorkspaceViolation(
+    path.vertices,
+    { xMin: 0, xMax: 100, yMin: 0, yMax: 100, zMin: 0, zMax: 20 },
+    { x: 0, y: 0, z: 0 }
+  );
+  assert.strictEqual(check.ok, false);
+  assert.strictEqual(check.code, 'workspace');
+  assert.strictEqual(check.detail.axis, 'Z');
+}
+
+function testWorkspaceUsesReferenceOffset() {
+  const check = findWorkspaceViolation(
+    [{ x: 0, y: 0, z: 10 }],
+    { xMin: 0, xMax: 100, yMin: 0, yMax: 100, zMin: 0, zMax: 50 },
+    { x: 0, y: 0, z: 45 }
+  );
+  assert.strictEqual(check.ok, false);
+  assert.strictEqual(check.detail.axis, 'Z');
+  assert.ok(Math.abs(check.detail.raw.z - 55) < 1e-6);
+}
+
+testWorkspaceInside();
+testWorkspaceOutsideZ();
+testWorkspaceUsesReferenceOffset();
 console.log('safeZPath.test.js: PASS');

@@ -66,7 +66,7 @@ const GROUPS = [
         unit: 'mm',
         minExclusive: 0,
         max: 500,
-        info: 'Abstand, den die Maschine oberhalb des höchsten Prüfpunkts beim Verfahren zwischen Prüfpunkten einhält. Safe-Z (Bauplatte) = max(Punkt.z) + Puffer.',
+        info: 'Abstand oberhalb von max(höchster Prüfpunkt, Messtaster) beim Verfahren. Safe-Z (Bauplatte) = max(Punkt.z, Messtaster.z) + Puffer.',
       },
     ],
   },

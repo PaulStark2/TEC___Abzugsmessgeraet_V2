@@ -6,7 +6,7 @@ import { connectStatus, fetchCalibration, fetchMachineConfig } from '/js/api.js'
 import { toMachinePoints } from '/js/coord/coordinateTransform.js';
 import { resolveProgramSafeZ } from '/js/coord/safeZ.js';
 import { createGantryView } from '/js/sim/gantryView.js';
-import { buildProcedurePlannedPath } from '/js/sim/safeZPath.js';
+import { buildProcedurePlannedPath, findWorkspaceViolation } from '/js/sim/safeZPath.js';
 import { collectOverlayLabels } from '/js/sim/overlayLabels.js';
 import { homeMarkerPose } from '/js/sim/homeMarker.js';
 import {
@@ -69,6 +69,7 @@ let calibrationSnapshot = null;
 let machineConfigSnapshot = null;
 let lastStatus = null;
 let lastPlantPose = null;
+let lastPlantLimits = null;
 let lastPlannedSegments = [];
 let traveledSamples = [];
 let lastSampleKey = '';
@@ -307,7 +308,24 @@ function updateOverlayLabels() {
   );
 }
 
-function updateSafeZNote() {
+function workspaceReferenceOffset(status) {
+  if (
+    !lastPlantPose ||
+    !status ||
+    ![lastPlantPose.x, lastPlantPose.y, lastPlantPose.z, status.x, status.y, status.z].every(
+      Number.isFinite
+    )
+  ) {
+    return { x: 0, y: 0, z: 0 };
+  }
+  return {
+    x: lastPlantPose.x - status.x,
+    y: lastPlantPose.y - status.y,
+    z: lastPlantPose.z - status.z,
+  };
+}
+
+function updateSafeZNote(plannedVertices) {
   const note = dom.safeZNote;
   if (!note) {
     return;
@@ -319,18 +337,37 @@ function updateSafeZNote() {
   );
   if (!resolved) {
     note.hidden = false;
+    note.classList.toggle('sim-program-note--warn', true);
     note.textContent =
       plateProgramPoints.length === 0
         ? 'Kein Prüfprogramm geladen. Die Safe-Z-Höhe kann nicht berechnet werden.'
         : 'Safe-Z nicht berechenbar (Programm, Puffer oder Bauplatten-Kalibrierung prüfen).';
     return;
   }
-  note.hidden = false;
-  note.textContent =
+  const probePart =
+    resolved.probeZPlate !== null && Number.isFinite(resolved.probeZPlate)
+      ? `Messtaster (Bauplatte): ${resolved.probeZPlate.toFixed(2)} mm · `
+      : '';
+  let text =
     `Höchster Prüfpunkt: ${resolved.maxPointZ.toFixed(2)} mm · ` +
+    probePart +
     `Safe-Z-Puffer: ${resolved.safeZBuffer.toFixed(2)} mm · ` +
     `Safe-Z (Bauplatte): ${resolved.safeZPlate.toFixed(2)} mm · ` +
     `Safe-Z (Maschine): ${resolved.safeZMachine.toFixed(2)} mm`;
+  const limits = lastPlantLimits || normalizePlantLimits(readLimitInputs());
+  const check = findWorkspaceViolation(
+    plannedVertices,
+    limits,
+    workspaceReferenceOffset(lastStatus)
+  );
+  note.hidden = false;
+  if (!check.ok) {
+    note.classList.toggle('sim-program-note--warn', true);
+    note.textContent = `${check.error} ${text}`;
+    return;
+  }
+  note.classList.toggle('sim-program-note--warn', false);
+  note.textContent = text;
 }
 
 function updateTrajectory(status) {
@@ -376,6 +413,7 @@ function updateTrajectory(status) {
   const insertSearch = Number(machineConfigSnapshot?.insert_search_distance);
   const insertionBuffer = Number(machineConfigSnapshot?.insertion_buffer);
 
+  let plannedVertices = [];
   if (Number.isFinite(safeZ) && startPose) {
     const planned = buildProcedurePlannedPath(
       startPose,
@@ -391,6 +429,7 @@ function updateTrajectory(status) {
       }
     );
     lastPlannedSegments = planned.segments;
+    plannedVertices = planned.vertices;
     gantry.setPlannedSegments(planned.segments);
   } else {
     // Do not invent a direct polyline when Safe-Z/start are unknown.
@@ -417,7 +456,7 @@ function updateTrajectory(status) {
   }
   gantry.setTraveledSamples(traveledSamples);
   updateOverlayLabels();
-  updateSafeZNote();
+  updateSafeZNote(plannedVertices);
 }
 
 function renderStatus(status) {
@@ -557,7 +596,8 @@ async function pollPlantState() {
     renderPlantState(result.state);
     syncLimitInputs(result.state.limits);
     syncProbeDiscInputs(result.state.probe);
-    gantry.setLimits(normalizePlantLimits(result.state.limits));
+    lastPlantLimits = normalizePlantLimits(result.state.limits);
+    gantry.setLimits(lastPlantLimits);
     if (
       result.pose &&
       Number.isFinite(result.pose.x) &&
@@ -567,6 +607,7 @@ async function pollPlantState() {
       lastPlantPose = { x: result.pose.x, y: result.pose.y, z: result.pose.z };
       if (lastStatus && lastStatus.connected !== false) {
         gantry.setPose(lastPlantPose);
+        updateTrajectory(lastStatus);
       }
     }
   } catch (err) {
@@ -645,7 +686,11 @@ async function runPlantAction(action, successMessage) {
     const result = await action();
     if (result && result.state) {
       renderPlantState(result.state);
-      gantry.setLimits(normalizePlantLimits(result.state.limits));
+      lastPlantLimits = normalizePlantLimits(result.state.limits);
+      gantry.setLimits(lastPlantLimits);
+      if (lastStatus) {
+        updateTrajectory(lastStatus);
+      }
     }
     setPlantFeedback(successMessage, false);
   } catch (err) {

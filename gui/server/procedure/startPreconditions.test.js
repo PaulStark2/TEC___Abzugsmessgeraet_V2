@@ -133,6 +133,60 @@ function testAcceptsValidProgram() {
   assert.strictEqual(result.safeZ.safeZMachine, 47);
 }
 
+function testProbeRaisesSafeZInPreflight() {
+  const result = validateProcedureStartPreconditions({
+    calibration: validCalib({
+      plateOrigin: { x: 0, y: 0, z: 0 },
+      probeCenter: { x: 40, y: 40, z: 20 },
+      toolOffset: { x: 0, y: 0, z: 0 },
+    }),
+    machineConfig: { safe_z_buffer: 30 },
+    points: [{ sequenceNumber: 1, x: 0, y: 0, z: 0 }],
+  });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.safeZ.maxClearanceZ, 20);
+  assert.strictEqual(result.safeZ.safeZPlate, 50);
+  assert.strictEqual(result.safeZ.safeZMachine, 50);
+}
+
+function testRejectsPathOutsideWorkspace() {
+  const result = validateProcedureStartPreconditions({
+    calibration: validCalib({
+      plateOrigin: { x: 0, y: 0, z: 0 },
+      probeCenter: { x: 10, y: 10, z: 5 },
+      toolOffset: { x: 0, y: 0, z: 0 },
+    }),
+    machineConfig: { safe_z_buffer: 30, approach_distance: 15 },
+    points: [{ sequenceNumber: 1, x: 0, y: 0, z: 0 }],
+    workspace: {
+      limits: { xMin: 0, xMax: 100, yMin: 0, yMax: 100, zMin: 0, zMax: 20 },
+      referenceOffset: { x: 0, y: 0, z: 0 },
+      startPose: { x: 0, y: 0, z: 0 },
+    },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.code, 'workspace');
+  assert.ok(result.error.includes('außerhalb des Bauraums'));
+}
+
+function testAcceptsPathInsideWorkspace() {
+  const result = validateProcedureStartPreconditions({
+    calibration: validCalib({
+      plateOrigin: { x: 0, y: 0, z: 0 },
+      probeCenter: { x: 10, y: 10, z: 5 },
+      toolOffset: { x: 0, y: 0, z: 0 },
+    }),
+    machineConfig: { safe_z_buffer: 10, approach_distance: 5 },
+    points: [{ sequenceNumber: 1, x: 8, y: 8, z: 0 }],
+    workspace: {
+      limits: { xMin: 0, xMax: 100, yMin: 0, yMax: 100, zMin: -20, zMax: 80 },
+      referenceOffset: { x: 0, y: 0, z: 0 },
+      startPose: { x: 0, y: 0, z: 0 },
+    },
+  });
+  assert.strictEqual(result.ok, true);
+}
+
 testA_simple();
 testB_negativeZ();
 testC_programChange();
@@ -143,4 +197,7 @@ testG_toolOffset();
 testRejectsMissingProbe();
 testRejectsMissingMcs();
 testAcceptsValidProgram();
+testProbeRaisesSafeZInPreflight();
+testRejectsPathOutsideWorkspace();
+testAcceptsPathInsideWorkspace();
 console.log('startPreconditions.test.js: PASS');

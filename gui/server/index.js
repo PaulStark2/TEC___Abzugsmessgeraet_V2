@@ -247,8 +247,8 @@ async function handleCommand(body) {
 }
 
 const machineClient = createMachineClient();
-const procedureService = createProcedureService(machineClient);
 const plantClient = createPlantClient();
+const procedureService = createProcedureService(machineClient, { plantClient });
 // GUI-only parameter-menu unlock. Not part of the STM32 safety circuit.
 // Default 'tec-admin' is for development. Production password MUST be changed
 // (environment VARIABLE PARAMETER_MENU_PASSWORD).

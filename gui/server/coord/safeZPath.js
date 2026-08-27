@@ -181,4 +181,63 @@ function buildProcedurePlannedPath(startPose, machinePoints, safeZ, probeCenter,
   return { segments, vertices, previewNote: 'Vorschau ohne Kurvenradius' };
 }
 
-module.exports = { buildApproachSegments, buildProcedurePlannedPath };
+function toRawPose(machinePose, referenceOffset) {
+  const ox = Number(referenceOffset && referenceOffset.x);
+  const oy = Number(referenceOffset && referenceOffset.y);
+  const oz = Number(referenceOffset && referenceOffset.z);
+  return {
+    x: Number(machinePose.x) + (Number.isFinite(ox) ? ox : 0),
+    y: Number(machinePose.y) + (Number.isFinite(oy) ? oy : 0),
+    z: Number(machinePose.z) + (Number.isFinite(oz) ? oz : 0),
+  };
+}
+
+function axisOutside(value, min, max, axis) {
+  if (Number.isFinite(min) && value < min - 1e-6) {
+    return { axis, side: 'min', value, limit: min };
+  }
+  if (Number.isFinite(max) && value > max + 1e-6) {
+    return { axis, side: 'max', value, limit: max };
+  }
+  return null;
+}
+
+/**
+ * Planned TCP vertices are machine-frame. Plant limits are raw.
+ * raw = machine + referenceOffset (identity when offset is omitted).
+ */
+function findWorkspaceViolation(vertices, limits, referenceOffset) {
+  if (!limits) {
+    return { ok: true, skipped: true };
+  }
+  const list = Array.isArray(vertices) ? vertices : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const pose = list[i];
+    if (!pose || ![pose.x, pose.y, pose.z].every(Number.isFinite)) {
+      continue;
+    }
+    const raw = toRawPose(pose, referenceOffset);
+    const hit =
+      axisOutside(raw.x, limits.xMin, limits.xMax, 'X') ||
+      axisOutside(raw.y, limits.yMin, limits.yMax, 'Y') ||
+      axisOutside(raw.z, limits.zMin, limits.zMax, 'Z');
+    if (hit) {
+      const sign = hit.side === 'max' ? '+' : '−';
+      return {
+        ok: false,
+        code: 'workspace',
+        error:
+          `Geplante Bahn liegt außerhalb des Bauraums (${hit.axis}${sign}). ` +
+          'Die Fahrt kann nicht ausgeführt werden.',
+        detail: { ...hit, index: i, raw },
+      };
+    }
+  }
+  return { ok: true };
+}
+
+module.exports = {
+  buildApproachSegments,
+  buildProcedurePlannedPath,
+  findWorkspaceViolation,
+};
