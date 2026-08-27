@@ -302,6 +302,9 @@ function testMachineConfigRoundtrip() {
   const getFrame = encodeEmptyMessage(MessageId.CmdGetMachineConfig);
   assert.ok(getFrame.ok);
   assert.strictEqual(decodeFrame(getFrame.frame).result, DecodeResult.Ok);
+  const invFrame = encodeEmptyMessage(MessageId.CmdInvalidateHoming);
+  assert.ok(invFrame.ok);
+  assert.strictEqual(decodeFrame(invFrame.frame).result, DecodeResult.Ok);
 }
 
 function testTestConfigurationRoundtrip() {

@@ -233,10 +233,23 @@ private:
     // M16 homing.
     HomingState homing_state_;
     bool is_homed_;
-    bool homing_retracting_;
+    bool homing_retracting_; // true while executing Retract-R after switch latch
     static constexpr float kHomingVelocity = 5.0f;
     static constexpr float kHomingOvershoot = 1000.0f;
     static constexpr float kDefaultHomingRetract = 2.0f; // mm from +max when config retract is 0
+    static constexpr float kHomingCreepSpeedFactor = 0.1f; // fraction of v_homing
+    static constexpr float kHomingCreepMinSpeed = 0.2f;    // mm/s floor
+    static constexpr float kHomingCreepBackTravel = 5.0f;  // mm per creep-back command
+    static constexpr float kHomingCreepBackMaxTravel = 50.0f; // safety: give up if still on limit
+
+    // Per-axis seek sub-state (not on the wire; HomingState stays Z/X/Y).
+    enum class HomingAxisLeg : uint8_t
+    {
+        FastSeek = 0,     // +max until limit true
+        CreepBack = 1,    // DefineMcs: −axis until limit false
+        CreepForward = 2, // DefineMcs: +axis until limit true (rising edge)
+        RetractR = 3      // retract by R from latched switch
+    };
 
     MachineConfig machine_config_;
     TestConfiguration test_configuration_;
@@ -289,13 +302,28 @@ private:
     void tickHoming(float dt);
     bool startHomingSequence(HomingMode mode);
     void beginHomingPhase(HomingState phase);
-    void beginHomingRetract(HomingState phase);
+    void beginCreepBack();
+    void beginCreepForward();
+    // DefineMcs: switch_raw_* = raw at creep rising edge (identity snap).
+    // Reference: switch_raw_* ignored; snap uses home_offset + R.
+    void beginHomingRetract(HomingState phase, float switch_raw_x, float switch_raw_y,
+                            float switch_raw_z);
     float homingRetractDistance(float configured) const;
+    float homingCreepVelocity() const;
+    void setHomingMotionSpeed(float velocity);
+    void commandActiveAxisToward(float signed_delta);
     bool homingPhaseLimitReached(HomingState phase) const;
     void finishHomingSuccess();
     void finishHomingError();
 
     HomingMode homing_mode_;
+    HomingAxisLeg homing_axis_leg_;
+    float homing_creep_back_traveled_;
+    // Last CreepForward pose while +max was still false (rising-edge bracket).
+    bool homing_have_creep_pre_;
+    float homing_creep_pre_raw_x_;
+    float homing_creep_pre_raw_y_;
+    float homing_creep_pre_raw_z_;
 
     void tickActiveMotion(float dt);
 };

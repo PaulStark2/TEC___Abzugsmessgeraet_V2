@@ -68,6 +68,17 @@ const GROUPS = [
         max: 500,
         info: 'Abstand oberhalb von max(höchster Prüfpunkt, Messtaster) beim Verfahren. Safe-Z (Bauplatte) = max(Punkt.z, Messtaster.z) + Puffer.',
       },
+      {
+        key: 'jog_min_step_mm',
+        label: 'Jog-Mindestschrittweite',
+        unit: 'mm',
+        minExclusive: 0,
+        max: 50,
+        info:
+          'Kleinste erlaubte Hand-Jog-Schrittweite (Hardware-/Treiber-Auflösung). ' +
+          'Im Handmodus und Kalibrier-Wizard sind nur Vielfache dieses Werts einstellbar. ' +
+          'Nur HMI/Host (machine-config.json) — nicht Teil des M12 MachineConfig-Wire.',
+      },
     ],
   },
   {
@@ -607,6 +618,7 @@ function defaultMachineConfigPayload() {
     a_testpoints: 0,
     corner_testpoints: 0,
     a_homing: 0,
+    jog_min_step_mm: 0.1,
     phase1_v_extract: 1,
     phase1_v_insert: 1,
     phase1_a: 0,

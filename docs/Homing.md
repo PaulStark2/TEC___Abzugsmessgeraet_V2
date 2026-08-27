@@ -29,14 +29,21 @@ Nur über die GUI-Funktion **„MCS und Bauplatte/Messtaster definieren und kali
 Abbruch vor Commit: Core wird aus dem committed Store zurückgespielt (`pushCommittedCalibration`).
 
 ```text
-Seek +Max → Stop (raw bleibt)
-→ reference: machine := raw (Identity auf der Achse)
+Seek +Max (schnell) bis limit*Max == true
+→ Kriech zurück (−Achse) bis limit*Max == false
+→ Kriech vor (+Achse) bis limit*Max == true   ← steigende Flanke = Schalterbezug
+→ reference: machine := raw (Identity auf der Achse)  [nur Bit + eigene Pose]
 → Retract um R
-→ nach Z/X/Y: home_offset = aktuelle Machine-Pose
+→ nach Z/X/Y AtTarget: home_offset = kommandierte Retract-Targets
 → machine_coordinate_system_valid = true
 → plate_origin_valid / probe_center_valid = false
 → tool_offset = 0
 ```
+
+Nur das **Endschalter-Bit** und die eigene Open-Loop-Pose — keine Plant-`+max`-Koordinaten.
+Die Kriechgeschwindigkeit ist `max(0.1·v_homing, 0.2 mm/s)`. An der steigenden Kriech-Flanke wird der Schalterbezug als **Mittelpunkt** der Core-Raw-Pose vor/nach dem Bit-Wechsel geschätzt (weiterhin nur Bit + eigene Pose). Restfehler ≈ ½·`v_creep·dt`.
+
+`home_offset` wird erst nach erfolgreichem Retract-AtTarget gesetzt.
 
 ### 2. Reference Homing — `home()` / `CmdHome`
 
@@ -76,5 +83,6 @@ Alte Dateien ohne MCS-Block → `mcs_valid = false` (kein Auto-Define).
 
 - Gantry / Plant: **raw** (kontinuierlich, kein Teleport am Schalter).
 - Statuszahlen: **Machine**.
-- Plant-Limits gegen raw.
+- Plant-Limits gegen raw → nur **`limit*Max` Bits** an den Core (keine numerische +Max-Ebene).
 - StatusFlag `McsValid` (Bit 6).
+- DefineMcs-Kriechsuche reagiert ausschließlich auf diese Bits + eigene Pose.

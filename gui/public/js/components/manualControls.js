@@ -2,15 +2,19 @@
 
 import { sendCommand } from '../api.js';
 import { MCS_REQUIRED_MESSAGE } from '../homingGate.js';
+import { bindJogAxes, jogAxesMarkup } from './jogControls.js';
 
 const SPEED_OPTIONS = [5, 10, 15, 25, 40];
 
 /**
- * G7 manual controls: speed, jog, spreader, homing stub.
+ * G7 manual controls: speed, jog (step/hold), spreader, homing stub.
  * @param {HTMLElement} container
+ * @param {{ getStatus?: () => object }} [opts]
  * @returns {() => void} cleanup
  */
-export function mountManualControls(container) {
+export function mountManualControls(container, opts) {
+  const getStatus = (opts && opts.getStatus) || (() => ({}));
+
   container.innerHTML = `
     <div class="manual-section">
       <h3>Geschwindigkeit</h3>
@@ -27,24 +31,7 @@ export function mountManualControls(container) {
 
     <div class="manual-section">
       <h3>Jog</h3>
-      <p class="placeholder-note">Einzel-Schritt pro Klick. Soft-STOP in der Statusleiste.</p>
-      <div class="jog-grid">
-        <div class="jog-axis">
-          <span class="jog-label">X</span>
-          <button type="button" class="btn-jog" data-axis="X" data-direction="-1">−X</button>
-          <button type="button" class="btn-jog" data-axis="X" data-direction="1">+X</button>
-        </div>
-        <div class="jog-axis">
-          <span class="jog-label">Y</span>
-          <button type="button" class="btn-jog" data-axis="Y" data-direction="-1">−Y</button>
-          <button type="button" class="btn-jog" data-axis="Y" data-direction="1">+Y</button>
-        </div>
-        <div class="jog-axis">
-          <span class="jog-label">Z</span>
-          <button type="button" class="btn-jog" data-axis="Z" data-direction="-1">−Z</button>
-          <button type="button" class="btn-jog" data-axis="Z" data-direction="1">+Z</button>
-        </div>
-      </div>
+      ${jogAxesMarkup()}
     </div>
 
     <div class="manual-section">
@@ -68,7 +55,6 @@ export function mountManualControls(container) {
 
   const speedSelect = container.querySelector('#manual-speed');
   const applySpeedBtn = container.querySelector('#btn-apply-speed');
-  const jogButtons = [...container.querySelectorAll('.btn-jog')];
   const openBtn = container.querySelector('#btn-pneumatic-open');
   const closeBtn = container.querySelector('#btn-pneumatic-close');
   const homeBtn = container.querySelector('#btn-home');
@@ -85,18 +71,6 @@ export function mountManualControls(container) {
     try {
       await sendCommand({ command: 'setSpeed', speed });
       setFeedback(`Geschwindigkeit auf ${speed} gesetzt`, false);
-    } catch (err) {
-      setFeedback(err.message || String(err), true);
-    }
-  };
-
-  const onJog = async (event) => {
-    const btn = event.currentTarget;
-    const axis = btn.dataset.axis;
-    const direction = Number(btn.dataset.direction);
-    try {
-      await sendCommand({ command: 'jog', axis, direction });
-      setFeedback(`jog ${axis} ${direction > 0 ? '+' : '−'}`, false);
     } catch (err) {
       setFeedback(err.message || String(err), true);
     }
@@ -142,16 +116,16 @@ export function mountManualControls(container) {
   };
 
   applySpeedBtn.addEventListener('click', onApplySpeed);
-  jogButtons.forEach((btn) => btn.addEventListener('click', onJog));
   openBtn.addEventListener('click', onOpen);
   closeBtn.addEventListener('click', onClose);
   homeBtn.addEventListener('click', onHome);
+  const unbindJog = bindJogAxes(container, { getStatus, setFeedback });
 
   return () => {
     applySpeedBtn.removeEventListener('click', onApplySpeed);
-    jogButtons.forEach((btn) => btn.removeEventListener('click', onJog));
     openBtn.removeEventListener('click', onOpen);
     closeBtn.removeEventListener('click', onClose);
     homeBtn.removeEventListener('click', onHome);
+    unbindJog();
   };
 }

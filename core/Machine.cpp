@@ -42,6 +42,12 @@ Machine::Machine()
     , is_homed_(false)
     , homing_retracting_(false)
     , homing_mode_(HomingMode::DefineMcs)
+    , homing_axis_leg_(HomingAxisLeg::FastSeek)
+    , homing_creep_back_traveled_(0.0f)
+    , homing_have_creep_pre_(false)
+    , homing_creep_pre_raw_x_(0.0f)
+    , homing_creep_pre_raw_y_(0.0f)
+    , homing_creep_pre_raw_z_(0.0f)
     , collision_context_(CollisionContext::Approach)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
@@ -87,6 +93,12 @@ Machine::Machine(const ForceControlParams& params)
     , is_homed_(false)
     , homing_retracting_(false)
     , homing_mode_(HomingMode::DefineMcs)
+    , homing_axis_leg_(HomingAxisLeg::FastSeek)
+    , homing_creep_back_traveled_(0.0f)
+    , homing_have_creep_pre_(false)
+    , homing_creep_pre_raw_x_(0.0f)
+    , homing_creep_pre_raw_y_(0.0f)
+    , homing_creep_pre_raw_z_(0.0f)
     , collision_context_(CollisionContext::Approach)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
@@ -487,11 +499,12 @@ bool Machine::startHomingSequence(HomingMode mode)
     homing_mode_ = mode;
     is_homed_ = false;
     homing_retracting_ = false;
+    homing_axis_leg_ = HomingAxisLeg::FastSeek;
+    homing_creep_back_traveled_ = 0.0f;
     homing_state_ = HomingState::HomingZ;
     machine_state_ = MachineState::Homing;
 
-    motion_planner_.setMotionParams(machine_config_.motion.v_homing, machine_config_.motion.a_homing,
-                                    0.0f);
+    setHomingMotionSpeed(machine_config_.motion.v_homing);
     beginHomingPhase(HomingState::HomingZ);
     return true;
 }
@@ -500,6 +513,8 @@ void Machine::beginHomingPhase(HomingState phase)
 {
     homing_state_ = phase;
     homing_retracting_ = false;
+    homing_axis_leg_ = HomingAxisLeg::FastSeek;
+    homing_creep_back_traveled_ = 0.0f;
 
     const float pos_x = motion_planner_.x();
     const float pos_y = motion_planner_.y();
@@ -533,8 +548,7 @@ void Machine::beginHomingPhase(HomingState phase)
     x_force_correction_active_ = false;
     y_force_correction_active_ = false;
 
-    motion_planner_.setMotionParams(machine_config_.motion.v_homing, machine_config_.motion.a_homing,
-                                    0.0f);
+    setHomingMotionSpeed(machine_config_.motion.v_homing);
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
 }
 
@@ -544,8 +558,71 @@ float Machine::homingRetractDistance(float configured) const
     return distance > 1.0e-4f ? distance : kDefaultHomingRetract;
 }
 
-void Machine::beginHomingRetract(HomingState phase)
+float Machine::homingCreepVelocity() const
 {
+    const float from_cfg = machine_config_.motion.v_homing * kHomingCreepSpeedFactor;
+    return from_cfg > kHomingCreepMinSpeed ? from_cfg : kHomingCreepMinSpeed;
+}
+
+void Machine::setHomingMotionSpeed(float velocity)
+{
+    const float v = (velocity > 0.0f) ? velocity : kHomingCreepMinSpeed;
+    motion_planner_.setMotionParams(v, machine_config_.motion.a_homing, 0.0f);
+}
+
+void Machine::commandActiveAxisToward(float signed_delta)
+{
+    const float pos_x = motion_planner_.x();
+    const float pos_y = motion_planner_.y();
+    const float pos_z = motion_planner_.z();
+    stored_target_x_ = pos_x;
+    stored_target_y_ = pos_y;
+    stored_target_z_ = pos_z;
+    commanded_target_x_ = pos_x;
+    commanded_target_y_ = pos_y;
+    switch (homing_state_)
+    {
+    case HomingState::HomingZ:
+        stored_target_z_ = pos_z + signed_delta;
+        break;
+    case HomingState::HomingX:
+        stored_target_x_ = pos_x + signed_delta;
+        commanded_target_x_ = stored_target_x_;
+        break;
+    case HomingState::HomingY:
+        stored_target_y_ = pos_y + signed_delta;
+        commanded_target_y_ = stored_target_y_;
+        break;
+    default:
+        break;
+    }
+    applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
+}
+
+void Machine::beginCreepBack()
+{
+    homing_axis_leg_ = HomingAxisLeg::CreepBack;
+    homing_retracting_ = false;
+    homing_creep_back_traveled_ = 0.0f;
+    motion_planner_.stopMotion();
+    setHomingMotionSpeed(homingCreepVelocity());
+    commandActiveAxisToward(-kHomingCreepBackTravel);
+}
+
+void Machine::beginCreepForward()
+{
+    homing_axis_leg_ = HomingAxisLeg::CreepForward;
+    homing_retracting_ = false;
+    homing_have_creep_pre_ = false;
+    motion_planner_.stopMotion();
+    setHomingMotionSpeed(homingCreepVelocity());
+    commandActiveAxisToward(kHomingOvershoot);
+}
+
+void Machine::beginHomingRetract(HomingState phase, float switch_raw_x, float switch_raw_y,
+                                 float switch_raw_z)
+{
+    homing_axis_leg_ = HomingAxisLeg::RetractR;
     homing_retracting_ = true;
     motion_planner_.stopMotion();
 
@@ -556,7 +633,7 @@ void Machine::beginHomingRetract(HomingState phase)
     float z = motion_planner_.z();
 
     // Snap machine frame at the physical +max switch without moving raw (no teleport).
-    // DefineMcs: identity on this axis (machine := raw) — establishes MCS.
+    // DefineMcs: identity on this axis at the creep rising-edge raw pose.
     // Reference: snap to calibrated switch pose (home + R) — corrects step loss, same MCS.
     switch (phase)
     {
@@ -564,7 +641,7 @@ void Machine::beginHomingRetract(HomingState phase)
         retract = homingRetractDistance(cfg_r.z);
         if (homing_mode_ == HomingMode::DefineMcs)
         {
-            z = motion_planner_.rawZ();
+            z = switch_raw_z;
         }
         else
         {
@@ -575,7 +652,7 @@ void Machine::beginHomingRetract(HomingState phase)
         retract = homingRetractDistance(cfg_r.x);
         if (homing_mode_ == HomingMode::DefineMcs)
         {
-            x = motion_planner_.rawX();
+            x = switch_raw_x;
         }
         else
         {
@@ -586,7 +663,7 @@ void Machine::beginHomingRetract(HomingState phase)
         retract = homingRetractDistance(cfg_r.y);
         if (homing_mode_ == HomingMode::DefineMcs)
         {
-            y = motion_planner_.rawY();
+            y = switch_raw_y;
         }
         else
         {
@@ -626,8 +703,7 @@ void Machine::beginHomingRetract(HomingState phase)
         break;
     }
 
-    motion_planner_.setMotionParams(machine_config_.motion.v_homing, machine_config_.motion.a_homing,
-                                    0.0f);
+    setHomingMotionSpeed(machine_config_.motion.v_homing);
     applyEffectiveTargets(stored_target_x_, stored_target_y_, stored_target_z_);
 }
 
@@ -648,9 +724,15 @@ bool Machine::homingPhaseLimitReached(HomingState phase) const
 
 void Machine::finishHomingSuccess()
 {
+    // Commanded retract targets after HomingY — preferred over live pose for DefineMcs latch.
+    const float home_x = stored_target_x_;
+    const float home_y = stored_target_y_;
+    const float home_z = stored_target_z_;
+
     homing_state_ = HomingState::Homed;
     is_homed_ = true;
     homing_retracting_ = false;
+    homing_axis_leg_ = HomingAxisLeg::FastSeek;
     machine_state_ = MachineState::Idle;
     motion_planner_.stopMotion();
 
@@ -658,8 +740,7 @@ void Machine::finishHomingSuccess()
     {
         // Latch calibrated home pose. Intentional MCS (re)definition requires re-teach
         // of plate/probe in the new frame — home() never takes this path.
-        calibration_set_.home_offset =
-            TestPoint{motion_planner_.x(), motion_planner_.y(), motion_planner_.z()};
+        calibration_set_.home_offset = TestPoint{home_x, home_y, home_z};
         calibration_set_.machine_coordinate_system_valid = true;
         calibration_set_.plate_origin_valid = false;
         calibration_set_.probe_center_valid = false;
@@ -668,9 +749,9 @@ void Machine::finishHomingSuccess()
     }
     // Reference mode: home_offset / plate / probe / tool_offset unchanged.
 
-    stored_target_x_ = motion_planner_.x();
-    stored_target_y_ = motion_planner_.y();
-    stored_target_z_ = motion_planner_.z();
+    stored_target_x_ = home_x;
+    stored_target_y_ = home_y;
+    stored_target_z_ = home_z;
     commanded_target_x_ = stored_target_x_;
     commanded_target_y_ = stored_target_y_;
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
@@ -682,6 +763,7 @@ void Machine::finishHomingError()
 {
     homing_state_ = HomingState::HomingError;
     homing_retracting_ = false;
+    homing_axis_leg_ = HomingAxisLeg::FastSeek;
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
                                     default_corner_radius_);
     motion_planner_.stopMotion();
@@ -702,8 +784,8 @@ void Machine::tickHoming(float dt)
         return;
     }
 
-    // Retract leg: leave the +max switch by the configured/default distance, then advance.
-    if (homing_retracting_)
+    // Retract-R leg: leave the +max switch by R, then advance to next axis / finish.
+    if (homing_axis_leg_ == HomingAxisLeg::RetractR || homing_retracting_)
     {
         blocked_directions_ = 0;
         motion_planner_.moveTo(stored_target_x_, stored_target_y_, stored_target_z_);
@@ -729,18 +811,115 @@ void Machine::tickHoming(float dt)
         return;
     }
 
-    if (homingPhaseLimitReached(homing_state_))
-    {
-        beginHomingRetract(homing_state_);
-        return;
-    }
-
     if (machine_state_ != MachineState::Homing)
     {
         return;
     }
 
-    // Hold non-homing axes at current position; drive only the active homing axis toward +limit.
+    // DefineMcs creep-back: leave the switch until the +max bit clears.
+    if (homing_axis_leg_ == HomingAxisLeg::CreepBack)
+    {
+        blocked_directions_ = 0;
+        motion_planner_.moveTo(stored_target_x_, stored_target_y_, stored_target_z_);
+        motion_planner_.tick(dt);
+        invokeHostInputUpdateCallback();
+
+        if (!homingPhaseLimitReached(homing_state_))
+        {
+            beginCreepForward();
+            return;
+        }
+
+        if (motion_planner_.motionState() == MotionState::AtTarget)
+        {
+            homing_creep_back_traveled_ += kHomingCreepBackTravel;
+            if (homing_creep_back_traveled_ >= kHomingCreepBackMaxTravel)
+            {
+                finishHomingError();
+                return;
+            }
+            commandActiveAxisToward(-kHomingCreepBackTravel);
+        }
+        return;
+    }
+
+    // DefineMcs creep-forward: rising edge of +max at creep speed.
+    if (homing_axis_leg_ == HomingAxisLeg::CreepForward)
+    {
+        auto latchCreepRisingEdge = [&](float pre_x, float pre_y, float pre_z, float post_x,
+                                        float post_y, float post_z) {
+            float sx = post_x;
+            float sy = post_y;
+            float sz = post_z;
+            switch (homing_state_)
+            {
+            case HomingState::HomingX:
+                sx = 0.5f * (pre_x + post_x);
+                break;
+            case HomingState::HomingY:
+                sy = 0.5f * (pre_y + post_y);
+                break;
+            case HomingState::HomingZ:
+                sz = 0.5f * (pre_z + post_z);
+                break;
+            default:
+                break;
+            }
+            beginHomingRetract(homing_state_, sx, sy, sz);
+        };
+
+        // Limit already true at tick start: rising edge was the previous step.
+        if (homingPhaseLimitReached(homing_state_))
+        {
+            const float post_x = motion_planner_.rawX();
+            const float post_y = motion_planner_.rawY();
+            const float post_z = motion_planner_.rawZ();
+            if (homing_have_creep_pre_)
+            {
+                latchCreepRisingEdge(homing_creep_pre_raw_x_, homing_creep_pre_raw_y_,
+                                     homing_creep_pre_raw_z_, post_x, post_y, post_z);
+            }
+            else
+            {
+                beginHomingRetract(homing_state_, post_x, post_y, post_z);
+            }
+            return;
+        }
+
+        homing_creep_pre_raw_x_ = motion_planner_.rawX();
+        homing_creep_pre_raw_y_ = motion_planner_.rawY();
+        homing_creep_pre_raw_z_ = motion_planner_.rawZ();
+        homing_have_creep_pre_ = true;
+
+        blocked_directions_ = 0;
+        motion_planner_.moveTo(stored_target_x_, stored_target_y_, stored_target_z_);
+        motion_planner_.tick(dt);
+        invokeHostInputUpdateCallback();
+
+        if (homingPhaseLimitReached(homing_state_))
+        {
+            latchCreepRisingEdge(homing_creep_pre_raw_x_, homing_creep_pre_raw_y_,
+                                 homing_creep_pre_raw_z_, motion_planner_.rawX(),
+                                 motion_planner_.rawY(), motion_planner_.rawZ());
+        }
+        return;
+    }
+
+    // Fast seek toward +max.
+    if (homingPhaseLimitReached(homing_state_))
+    {
+        if (homing_mode_ == HomingMode::DefineMcs)
+        {
+            beginCreepBack();
+        }
+        else
+        {
+            beginHomingRetract(homing_state_, motion_planner_.rawX(), motion_planner_.rawY(),
+                               motion_planner_.rawZ());
+        }
+        return;
+    }
+
     const float pos_x = motion_planner_.x();
     const float pos_y = motion_planner_.y();
     const float pos_z = motion_planner_.z();
@@ -767,10 +946,23 @@ void Machine::tickHoming(float dt)
         break;
     }
 
-    // Homing ignores soft-limit blocking toward the reference; limit reached ends the seek above.
     blocked_directions_ = 0;
     motion_planner_.moveTo(tx, ty, tz);
     motion_planner_.tick(dt);
+
+    invokeHostInputUpdateCallback();
+    if (homingPhaseLimitReached(homing_state_))
+    {
+        if (homing_mode_ == HomingMode::DefineMcs)
+        {
+            beginCreepBack();
+        }
+        else
+        {
+            beginHomingRetract(homing_state_, motion_planner_.rawX(), motion_planner_.rawY(),
+                               motion_planner_.rawZ());
+        }
+    }
 }
 
 void Machine::moveTo(float x, float y, float z)

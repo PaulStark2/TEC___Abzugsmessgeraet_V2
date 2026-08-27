@@ -48,6 +48,7 @@ const MessageId = Object.freeze({
   CmdSetProbeCenter: 0x55,
   CmdDefineMcs: 0x56,
   CmdRestoreMcs: 0x57,
+  CmdInvalidateHoming: 0x58,
   CmdRequestStatus: 0x7f,
   RspAck: 0x80,
   RspNack: 0x81,

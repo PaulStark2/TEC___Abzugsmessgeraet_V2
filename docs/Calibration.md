@@ -47,3 +47,9 @@ load calibration.json → CmdRestoreMcs → SetPlate/SetProbe (wenn gültig)
 ```
 
 Legacy-Dateien ohne MCS-Block: `mcs_valid = false` (kein erfundenes `homePosition`).
+
+## Hand-Jog (Kalibrier-Wizard)
+
+Bauplatte-/Messtaster-Schritte nutzen dieselbe Jog-UI wie der Handmodus
+(`jogPanel` → `jogControls`): Einzelschritt / Dauerhalt und eintippbare
+Schrittweite mit Raster `jog_min_step_mm` (Host-Parameter, siehe `gui/README.md` G7).

@@ -136,7 +136,7 @@ export function renderParameters(container) {
       .join('')}</ul>`;
   }
 
-  function renderEditor(groups, config) {
+  function renderEditor(groups, config, meta = {}) {
     const tabs = groups
       .map(
         (group, idx) => `
@@ -188,10 +188,45 @@ export function renderParameters(container) {
       )
       .join('');
 
+    const syncNotes = [];
+    if (meta.lastConnectPushError) {
+      syncNotes.push(
+        `Connect-Push fehlgeschlagen: ${meta.lastConnectPushError}. Werte liegen ggf. nur auf Disk.`
+      );
+    }
+    if (meta.coreError) {
+      syncNotes.push(`Controller-Config konnte nicht gelesen werden: ${meta.coreError}`);
+    } else if (meta.coreConnected && meta.configDrift) {
+      const keys = (meta.mismatchedKeys || []).join(', ') || 'kritische Felder';
+      syncNotes.push(
+        `Drift Disk ↔ Controller (${keys}). Speichern, damit der Controller die Disk-Werte übernimmt.`
+      );
+    } else if (meta.coreConnected && meta.coreConfig) {
+      syncNotes.push('Disk und Controller (kritische Motion-Felder) stimmen überein.');
+    } else if (meta.machineClientMode === 'protocol' && !meta.coreConnected) {
+      syncNotes.push(
+        'Controller nicht verbunden — Speichern wird abgelehnt, bis die Protocol-Session steht.'
+      );
+    } else if (meta.machineClientMode === 'mock') {
+      syncNotes.push('Mock-Backend: Speichern schreibt nur die Disk (kein Core-RAM).');
+    }
+
     contentEl.innerHTML = `
       <div class="param-editor-layout">
         <div class="param-tabs" role="tablist">${tabs}</div>
         <form id="param-form" class="control-form">
+              ${
+            syncNotes.length
+              ? `<div id="param-sync-status" class="param-sync-status ${
+                  meta.configDrift ||
+                  meta.lastConnectPushError ||
+                  meta.coreError ||
+                  (meta.machineClientMode === 'protocol' && !meta.coreConnected)
+                    ? 'param-sync-status--warn'
+                    : 'param-sync-status--ok'
+                }" role="status">${syncNotes.map((n) => `<p>${escapeHtml(n)}</p>`).join('')}</div>`
+              : ''
+          }
           <div id="param-corner-hints" class="param-corner-hints" hidden></div>
           ${sections}
           <div class="control-actions page-actions">
@@ -224,8 +259,15 @@ export function renderParameters(container) {
       ev.preventDefault();
       const next = readFormValues(config);
       try {
-        await saveMachineConfig(next);
-        setFeedback('Konfiguration gespeichert.', false);
+        const saved = await saveMachineConfig(next);
+        const pushed = saved.pushedToController === true;
+        setFeedback(
+          pushed
+            ? 'Konfiguration gespeichert und am Controller verifiziert.'
+            : 'Konfiguration gespeichert (kein Controller-Push auf diesem Backend).',
+          false
+        );
+        await refresh();
       } catch (err) {
         setFeedback(err.message || String(err), true);
       }
@@ -239,7 +281,15 @@ export function renderParameters(container) {
       renderLocked();
       return;
     }
-    renderEditor(catalog.groups || [], cfg.config || {});
+    renderEditor(catalog.groups || [], cfg.config || {}, {
+      coreConfig: cfg.coreConfig || null,
+      coreConnected: cfg.coreConnected === true,
+      coreError: cfg.coreError || null,
+      configDrift: cfg.configDrift === true,
+      mismatchedKeys: cfg.mismatchedKeys || [],
+      lastConnectPushError: cfg.lastConnectPushError || null,
+      machineClientMode: cfg.machineClientMode || 'mock',
+    });
   }
 
   refresh().catch((err) => setFeedback(err.message || String(err), true));

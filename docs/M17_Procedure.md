@@ -118,6 +118,7 @@ be dropped; the realtime loop does not wait.
 - Menü **Parametereinstellungen** (Passwort, Standard `tec-admin` bzw. `PARAMETER_MENU_PASSWORD`).
 - Katalog + Infofelder in `gui/server/config/parameterCatalog.js` (nicht im Core hardcodiert).
 - Persistenz: `gui/server/data/machine-config.json` (Pi). Core hält die aktive Kopie nur im RAM.
+- Host-only Felder (nicht im M12-Wire): z. B. `jog_min_step_mm` — bleiben auf Disk; Encode sendet nur Wire-Felder.
 - Beim Protocol-Connect wird die gespeicherte Config per `CmdSetMachineConfig` übertragen.
 - TestConfiguration und PlateOrigin werden vor `CmdStart` gesendet.
 - Messtaster-Button sendet `CmdStartProbeCalib` (manuelle Einmessung, M19.0).

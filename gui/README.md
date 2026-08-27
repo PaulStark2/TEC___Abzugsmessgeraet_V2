@@ -297,9 +297,13 @@ Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss l
 ### G7 — Handmodus
 
 - Mock-Commands: `setSpeed`, `jog`, `pneumaticOpen`, `pneumaticClose`, `home` (+ bestehende G3-Commands)
-- UI `#manual`: Geschwindigkeit, Jog ±X/Y/Z, Spreizer, Homing-Stub
+- UI `#manual` und Kalibrier-Wizard (`jogPanel`): gemeinsame Jog-Steuerung
+  - Modus **Einzelschritt**: Klick = ein `jog` mit eintippbarer Schrittweite (mm)
+  - Modus **Dauerhalt**: Pointer halten = `moveTo` weit entlang der Achse, Loslassen = `stop`
+  - Schrittweite ≥ `jog_min_step_mm` und Vielfaches davon (Raster); Server prüft dasselbe
+- Parameter `jog_min_step_mm`: nur HMI/Host (`machine-config.json` + Katalog), **nicht** im M12-Wire
 - Status erweitert um `manualSpeed`, `pneumaticExtended`, `homingInProgress`
-- Test: `g7_manual_smoke.js`
+- Test: `g7_manual_smoke.js`; Raster-Helper: `server/config/jogStep.test.js`
 
 ### G8 — Prüf-/Alterungsprozedur
 

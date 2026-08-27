@@ -333,6 +333,15 @@ export async function saveMachineConfig(config) {
   return result;
 }
 
+export async function invalidateHoming() {
+  const response = await fetch('/api/machine/invalidate-homing', { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
 export async function fixtureOpen() {
   return sendCommand({ command: 'fixtureOpen' });
 }

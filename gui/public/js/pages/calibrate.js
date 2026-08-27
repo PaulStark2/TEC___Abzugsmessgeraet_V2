@@ -12,9 +12,49 @@ import {
   syncCalibrationFromController,
   fixtureOpen,
   fixtureClose,
+  invalidateHoming,
 } from '../api.js';
 import { mountJogPanel } from '../components/jogPanel.js';
 import { MCS_REQUIRED_MESSAGE, GEOMETRY_INCOMPLETE_MESSAGE } from '../homingGate.js';
+
+const MCS_REDEFINE_TITLE = 'MCS neu definieren?';
+const MCS_REDEFINE_MESSAGE =
+  'Sind Sie sich sicher, dass Sie das Maschinenkoordinatensystem (MCS) neu definieren wollen. Das bestehenden Maschinenkoordinatensystem (MCS) und der Homed Zustand werden zurückgesetzt.';
+
+function confirmMcsRedefine() {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined') {
+      resolve('cancel');
+      return;
+    }
+    const existing = document.querySelector('.homing-gate-overlay');
+    if (existing) {
+      resolve('cancel');
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'homing-gate-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.innerHTML = `
+      <div class="homing-gate-dialog">
+        <h3>${MCS_REDEFINE_TITLE}</h3>
+        <p>${MCS_REDEFINE_MESSAGE}</p>
+        <div class="homing-gate-actions">
+          <button type="button" class="homing-gate-yes">Weiter</button>
+          <button type="button" class="homing-gate-no">Zurück</button>
+        </div>
+      </div>
+    `;
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector('.homing-gate-yes').addEventListener('click', () => cleanup('continue'));
+    overlay.querySelector('.homing-gate-no').addEventListener('click', () => cleanup('cancel'));
+    document.body.appendChild(overlay);
+  });
+}
 
 function formatCoord(v) {
   return Number(v).toFixed(3);
@@ -212,11 +252,26 @@ export function renderCalibrate(container) {
         feedbackEl.textContent = '';
         feedbackEl.classList.remove('command-feedback--error');
         if (chosen.value === 'full') {
-          selectedMode = MODE.FULL;
-          mcsCommittedThisSession = false;
-          savedPlateOrigin = null;
-          savedProbeCenter = null;
-          setStep(STEPS.DEFINE_MCS);
+          void (async () => {
+            const decision = await confirmMcsRedefine();
+            if (decision !== 'continue') {
+              return;
+            }
+            try {
+              await invalidateHoming();
+              await pollMachineStatus();
+              liveStatus = { ...getStatus(), isHomed: false };
+            } catch (err) {
+              feedbackEl.textContent = err.message || String(err);
+              feedbackEl.classList.add('command-feedback--error');
+              return;
+            }
+            selectedMode = MODE.FULL;
+            mcsCommittedThisSession = false;
+            savedPlateOrigin = null;
+            savedProbeCenter = null;
+            setStep(STEPS.DEFINE_MCS);
+          })();
           return;
         }
         if (chosen.value === 'geometry') {

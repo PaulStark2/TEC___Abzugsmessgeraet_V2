@@ -347,6 +347,52 @@ button:hover {
   font-size: 1rem;
 }
 
+.jog-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+
+.jog-mode-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.jog-mode-btn.is-active {
+  border-color: var(--accent, #3d8bfd);
+  background: #1a2330;
+  font-weight: 600;
+}
+
+.jog-step-form {
+  margin-bottom: 0.5rem;
+}
+
+.jog-step-form input[type='number'] {
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+  max-width: 8rem;
+}
+
+.jog-step-hint {
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.jog-mode-hint {
+  margin: 0 0 0.65rem;
+}
+
 .jog-grid {
   display: grid;
   gap: 0.5rem;
@@ -363,6 +409,11 @@ button:hover {
   min-width: 1.25rem;
   font-weight: 600;
   color: var(--muted);
+}
+
+.btn-jog {
+  touch-action: none;
+  user-select: none;
 }
 
 .capability-card,
@@ -648,4 +699,26 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.param-sync-status {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  line-height: 1.4;
+}
+
+.param-sync-status p {
+  margin: 0.25rem 0;
+}
+
+.param-sync-status--warn {
+  border-color: var(--clr-err, #b00020);
+  background: rgba(176, 0, 32, 0.06);
+}
+
+.param-sync-status--ok {
+  border-color: var(--clr-ok, #2e7d32);
+  background: rgba(46, 125, 50, 0.06);
 }

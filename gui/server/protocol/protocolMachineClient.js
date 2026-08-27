@@ -657,6 +657,18 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdDefineMcs, encoded.frame);
   }
 
+  /** Clear Homed latch without STOP (CmdInvalidateHoming). */
+  async function invalidateHoming() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdInvalidateHoming);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode INVALIDATE_HOMING' };
+    }
+    return sendFrameAndWait(MessageId.CmdInvalidateHoming, encoded.frame);
+  }
+
   /**
    * Restore persisted MCS without motion (CmdRestoreMcs).
    * @param {number} x
@@ -838,6 +850,7 @@ function createProtocolMachineClient(options = {}) {
     pneumaticClose,
     home,
     defineMcs,
+    invalidateHoming,
     restoreMcs,
     clearFault,
     setSpeed,

@@ -28,6 +28,7 @@ function run() {
   assert.strictEqual(cfg.phase2_corner, 0);
   assert.strictEqual(cfg.tool_offset_z, 0);
   assert.strictEqual(cfg.safe_z_buffer, 30);
+  assert.strictEqual(cfg.jog_min_step_mm, 0.1);
   assert.strictEqual(cfg.heartbeat_timeout_s, 0.3);
   assert.strictEqual(cfg.measuring_head_diameter, 8);
   assert.strictEqual(cfg.tool_cylindrical_height, 15);

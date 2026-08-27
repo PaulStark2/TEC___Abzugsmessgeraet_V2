@@ -28,6 +28,7 @@ enum class MessageId : uint8_t
     CmdSetProbeCenter = 0x55,
     CmdDefineMcs = 0x56,
     CmdRestoreMcs = 0x57,
+    CmdInvalidateHoming = 0x58,
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.

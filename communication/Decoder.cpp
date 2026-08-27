@@ -24,6 +24,7 @@ bool isEmptyCommandId(uint8_t message_id)
     case MessageId::CmdGetMachineConfig:
     case MessageId::CmdStartProbeCalib:
     case MessageId::CmdDefineMcs:
+    case MessageId::CmdInvalidateHoming:
     case MessageId::CmdRequestStatus:
         return true;
     default:
@@ -61,6 +62,7 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdStartProbeCalib:
     case MessageId::CmdDefineMcs:
     case MessageId::CmdRestoreMcs:
+    case MessageId::CmdInvalidateHoming:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
     case MessageId::RspNack:

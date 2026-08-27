@@ -447,6 +447,7 @@ function isEmptyCommandId(messageId) {
     case MessageId.CmdGetMachineConfig:
     case MessageId.CmdStartProbeCalib:
     case MessageId.CmdDefineMcs:
+    case MessageId.CmdInvalidateHoming:
     case MessageId.CmdRequestStatus:
       return true;
     default:

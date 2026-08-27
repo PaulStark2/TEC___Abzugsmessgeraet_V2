@@ -254,6 +254,23 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdInvalidateHoming:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.machineState() == MachineState::Homing)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        machine_.invalidateHoming();
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
     case tecomm::MessageId::CmdRestoreMcs:
     {
         if (executor_.processState() == ProcessState::Running)

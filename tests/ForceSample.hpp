@@ -138,21 +138,46 @@ inline bool homeMachine(Machine& machine)
             }
             return;
         }
-        // DefineMcs: seek briefly so the limit is not asserted at the start pose.
-        for (int i = 0; i < 80 && machine.homingState() == seek_phase; ++i)
+        // DefineMcs: virtual +max 1 mm ahead of the axis start pose (bit only).
+        // Creep flank find then Retract-R — same sensor model as production sim.
+        float trip = 0.0f;
+        switch (seek_phase)
         {
-            limit_flag = false;
-            machine.setHostInputs(withFreshForce(in));
-            machine.tick(0.05f);
+        case HomingState::HomingZ:
+            trip = machine.rawZ() + 1.0f;
+            break;
+        case HomingState::HomingX:
+            trip = machine.rawX() + 1.0f;
+            break;
+        case HomingState::HomingY:
+            trip = machine.rawY() + 1.0f;
+            break;
+        default:
+            break;
         }
-        limit_flag = true;
-        machine.setHostInputs(withFreshForce(in));
-        machine.tick(0.05f);
-        limit_flag = false;
-        for (int i = 0; i < 400 && machine.homingState() == seek_phase; ++i)
+        for (int i = 0; i < 4000 && machine.homingState() == seek_phase; ++i)
         {
+            switch (seek_phase)
+            {
+            case HomingState::HomingZ:
+                limit_flag = machine.rawZ() >= trip;
+                break;
+            case HomingState::HomingX:
+                limit_flag = machine.rawX() >= trip;
+                break;
+            case HomingState::HomingY:
+                limit_flag = machine.rawY() >= trip;
+                break;
+            default:
+                limit_flag = false;
+                break;
+            }
             machine.setHostInputs(withFreshForce(in));
             machine.tick(0.05f);
+            if (machine.homingState() == HomingState::HomingError)
+            {
+                return;
+            }
         }
     };
 

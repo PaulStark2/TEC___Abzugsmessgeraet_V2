@@ -13,7 +13,9 @@ const procedureStore = require('./procedure/procedureStore');
 const { createProcedureService } = require('./procedure/procedureService');
 const { createPlantClient } = require('./simulation/plantClient');
 const machineConfigStore = require('./config/machineConfigStore');
+const { compareCriticalMachineConfig } = require('./config/machineConfigSync');
 const { GROUPS: parameterGroups, validateMachineConfigPayload } = require('./config/parameterCatalog');
+const { isJogStepAllowed } = require('./config/jogStep');
 const calibrationStore = require('./config/calibrationStore');
 const { pushCommittedCalibration } = require('./config/pushCommittedCalibration');
 const { MCS_REQUIRED_MESSAGE } = require('./config/mcsMessages');
@@ -27,6 +29,9 @@ const STATUS_HZ = 5;
 const STATUS_INTERVAL_MS = 1000 / STATUS_HZ;
 const TICK_HZ = 20;
 const TICK_INTERVAL_MS = 1000 / TICK_HZ;
+
+/** Last failed connect-time MachineConfig push (cleared on success). */
+let lastMachineConfigPushError = null;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -165,7 +170,23 @@ async function handleCommand(body) {
       if (typeof machineClient.jog !== 'function') {
         return { ok: false, error: 'jog not supported by client' };
       }
-      result = await machineClient.jog(body.axis, body.direction, body.step);
+      {
+        const diskCfg = machineConfigStore.load();
+        const minStep = Number(diskCfg && diskCfg.jog_min_step_mm);
+        const step =
+          body.step === undefined || body.step === null || body.step === ''
+            ? minStep
+            : Number(body.step);
+        if (!isJogStepAllowed(step, minStep > 0 ? minStep : 0.1)) {
+          return {
+            ok: false,
+            error:
+              `Ungültige Jog-Schrittweite ${step} mm ` +
+              `(Mindestschritt / Raster: ${minStep > 0 ? minStep : 0.1} mm)`,
+          };
+        }
+        result = await machineClient.jog(body.axis, body.direction, step);
+      }
       break;
     case 'pneumaticOpen':
       if (typeof machineClient.pneumaticOpen !== 'function') {
@@ -265,7 +286,10 @@ if (typeof machineClient.onSessionReady === 'function') {
     if (typeof machineClient.setMachineConfig === 'function') {
       const pushed = await machineClient.setMachineConfig(cfg);
       if (!pushed.ok) {
-        console.error(`[CONFIG] push on connect failed: ${pushed.error || 'unknown'}`);
+        lastMachineConfigPushError = pushed.error || 'CmdSetMachineConfig failed';
+        console.error(`[CONFIG] push on connect failed: ${lastMachineConfigPushError}`);
+      } else {
+        lastMachineConfigPushError = null;
       }
     }
     const pushedCalib = await pushCommittedCalibration(machineClient);
@@ -322,13 +346,23 @@ const server = http.createServer(async (req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
 
   if (req.method === 'POST' && urlPath === '/api/command') {
+    let body;
     try {
-      const body = await readJsonBody(req);
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+      return;
+    }
+    try {
       const result = await handleCommand(body);
       broadcastStatus();
       sendJson(res, result.ok ? 200 : 400, result);
-    } catch {
-      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    } catch (err) {
+      console.error('[api/command]', err);
+      sendJson(res, 500, {
+        ok: false,
+        error: (err && err.message) || 'Command handler failed',
+      });
     }
     return;
   }
@@ -523,7 +557,41 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && urlPath === '/api/machine-config') {
-    sendJson(res, 200, { ok: true, unlocked: parametersUnlocked, config: machineConfigStore.load() });
+    const diskConfig = machineConfigStore.load();
+    const status =
+      typeof machineClient.getStatus === 'function' ? machineClient.getStatus() : { connected: false };
+    const connected = status.connected === true;
+    let coreConfig = null;
+    let coreError = null;
+    let drift = false;
+    let mismatchedKeys = [];
+    if (typeof machineClient.getMachineConfig === 'function' && connected) {
+      try {
+        const coreResult = await machineClient.getMachineConfig();
+        if (coreResult && coreResult.ok && coreResult.config) {
+          coreConfig = coreResult.config;
+          const cmp = compareCriticalMachineConfig(diskConfig, coreConfig);
+          drift = cmp.drift;
+          mismatchedKeys = cmp.mismatchedKeys;
+        } else {
+          coreError = (coreResult && coreResult.error) || 'CmdGetMachineConfig failed';
+        }
+      } catch (err) {
+        coreError = err.message || String(err);
+      }
+    }
+    sendJson(res, 200, {
+      ok: true,
+      unlocked: parametersUnlocked,
+      config: diskConfig,
+      coreConfig,
+      coreConnected: connected,
+      coreError,
+      configDrift: drift,
+      mismatchedKeys,
+      lastConnectPushError: lastMachineConfigPushError,
+      machineClientMode: machineClient.machineClientMode || process.env.MACHINE_CLIENT || 'mock',
+    });
     return;
   }
 
@@ -540,7 +608,23 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: check.error });
         return;
       }
-      if (typeof machineClient.setMachineConfig === 'function' && machineClient.getStatus().connected) {
+
+      const canPush = typeof machineClient.setMachineConfig === 'function';
+      const connected =
+        typeof machineClient.getStatus === 'function' && machineClient.getStatus().connected === true;
+
+      if (canPush && !connected) {
+        sendJson(res, 503, {
+          ok: false,
+          error:
+            'Controller nicht verbunden — Konfiguration wurde nicht gespeichert. Bitte verbinden und erneut speichern.',
+        });
+        return;
+      }
+
+      let coreConfig = null;
+      let mismatchedKeys = [];
+      if (canPush && connected) {
         const result = await machineClient.setMachineConfig(incoming);
         if (!result.ok) {
           sendJson(res, 400, {
@@ -549,12 +633,59 @@ const server = http.createServer(async (req, res) => {
           });
           return;
         }
+        if (typeof machineClient.getMachineConfig === 'function') {
+          const roundtrip = await machineClient.getMachineConfig();
+          if (roundtrip && roundtrip.ok && roundtrip.config) {
+            coreConfig = roundtrip.config;
+            const cmp = compareCriticalMachineConfig(incoming, coreConfig);
+            mismatchedKeys = cmp.mismatchedKeys;
+            if (cmp.drift) {
+              sendJson(res, 400, {
+                ok: false,
+                error: `Controller-Roundtrip weicht ab (${mismatchedKeys.join(', ')}). Disk nicht geschrieben.`,
+                coreConfig,
+                mismatchedKeys,
+              });
+              return;
+            }
+          } else {
+            sendJson(res, 400, {
+              ok: false,
+              error:
+                (roundtrip && roundtrip.error) ||
+                'Konfiguration gesendet, aber Roundtrip-Lesen fehlgeschlagen. Disk nicht geschrieben.',
+            });
+            return;
+          }
+        }
+        lastMachineConfigPushError = null;
       }
+
       const saved = machineConfigStore.save(incoming);
-      sendJson(res, 200, { ok: true, config: saved });
+      sendJson(res, 200, {
+        ok: true,
+        config: saved,
+        coreConfig,
+        mismatchedKeys,
+        pushedToController: Boolean(canPush && connected),
+      });
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
     }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/machine/invalidate-homing') {
+    if (typeof machineClient.invalidateHoming !== 'function') {
+      sendJson(res, 400, { ok: false, error: 'Homing-Reset ist auf diesem Backend nicht verfügbar' });
+      return;
+    }
+    const result = await machineClient.invalidateHoming();
+    sendJson(res, result.ok ? 200 : 400, {
+      ok: Boolean(result.ok),
+      error: result.error,
+      status: result.status || (typeof machineClient.getStatus === 'function' ? machineClient.getStatus() : null),
+    });
     return;
   }
 
