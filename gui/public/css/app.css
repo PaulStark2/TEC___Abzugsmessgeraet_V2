@@ -73,6 +73,11 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.status-value--alarm {
+  color: #e57373;
+  font-weight: 600;
+}
+
 .status-bar__force--pending dd {
   color: var(--muted);
 }

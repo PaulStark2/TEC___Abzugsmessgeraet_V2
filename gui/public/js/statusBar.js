@@ -1,6 +1,7 @@
 'use strict';
 
 import { sendCommand } from './api.js';
+import { applyFixtureStateDisplay } from './fixtureStateDisplay.js';
 import { setTcpPose } from './tcpView.js';
 import { deriveDisplayState, formatHomingStatus } from './machineGuiState.js';
 import { applyFaultPanel } from './components/faultPanel.js';
@@ -75,6 +76,7 @@ export function applyStatus(status) {
   const plateCalibEl = $('plate-calib');
   const probeCalibEl = $('probe-calib');
   const spreaderStateEl = $('spreader-state');
+  const fixtureEl = $('fixture-state');
   const fxEl = $('force-fx');
   const fyEl = $('force-fy');
   const fzEl = $('force-fz');
@@ -147,6 +149,11 @@ export function applyStatus(status) {
   if (spreaderStateEl) {
     spreaderStateEl.textContent = status.spreaderState || '—';
   }
+
+  const fixtureOpen =
+    typeof status.fixtureExtended === 'boolean' ? status.fixtureExtended : undefined;
+  applyFixtureStateDisplay(fixtureEl, fixtureOpen);
+  applyFixtureStateDisplay($('plate-fixture-state'), fixtureOpen);
 
   const fx = readForce(status, ['fx', 'forceX', 'forceFx']);
   const fy = readForce(status, ['fy', 'forceY', 'forceFy']);

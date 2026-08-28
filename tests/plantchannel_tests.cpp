@@ -189,6 +189,10 @@ static int testResponseFormat()
     {
         return 21;
     }
+    if (!contains(response, "\"fixtureOpen\":false"))
+    {
+        return 40;
+    }
     if (!contains(response, "\"diameter\":8.0000") || !contains(response, "\"toolDiameter\":2.5000") ||
         !contains(response, "\"toolCylindricalHeight\":15.0000"))
     {
@@ -304,11 +308,35 @@ static int testSetInjectedForce()
     return 0;
 }
 
+static int testFixtureOpenInStateJson()
+{
+    SimPlant plant;
+    plant.setFixtureValve(true);
+    const auto state = plant.state(0.0f, 0.0f, 0.0f);
+    if (!state.fixture_open)
+    {
+        return 60;
+    }
+    const std::string json = simplant::formatPlantStateResponse(state, 0.0f, 0.0f, 0.0f);
+    if (!contains(json, "\"fixtureOpen\":true"))
+    {
+        return 61;
+    }
+    plant.setFixtureValve(false);
+    const std::string closed = simplant::formatPlantStateResponse(plant.state(0.0f, 0.0f, 0.0f),
+                                                                 0.0f, 0.0f, 0.0f);
+    if (!contains(closed, "\"fixtureOpen\":false"))
+    {
+        return 62;
+    }
+    return 0;
+}
+
 int main()
 {
     const int results[] = {
         testParseUnknown(), testSetLimits(), testTriggerProbe(), testSetEStop(), testSetProbeDisc(),
-        testSetForceStiffness(), testSetInjectedForce(), testResponseFormat(),
+        testSetForceStiffness(), testSetInjectedForce(), testResponseFormat(), testFixtureOpenInStateJson(),
     };
 
     for (const int result : results)

@@ -3,6 +3,7 @@
  * Program points are plate-frame; machine overlay only after plate_origin is valid.
  */
 import { connectStatus, fetchCalibration, fetchMachineConfig } from '/js/api.js';
+import { applyFixtureStateDisplay } from '/js/fixtureStateDisplay.js';
 import { toMachinePoints } from '/js/coord/coordinateTransform.js';
 import { resolveProgramSafeZ } from '/js/coord/safeZ.js';
 import { createGantryView } from '/js/sim/gantryView.js';
@@ -52,6 +53,8 @@ const dom = {
   procedurePhase: el('sim-procedure-phase'),
   faultReason: el('sim-fault-reason'),
   spreaderState: el('sim-spreader-state'),
+  fixtureState: el('sim-fixture-state'),
+  fixturePlant: el('sim-fixture-plant'),
   commWatchdog: el('sim-comm-watchdog'),
   forceFresh: el('sim-force-fresh'),
   plantFeedback: el('sim-plant-feedback'),
@@ -589,6 +592,10 @@ function renderPlantState(state) {
     const fmt = (v) => (Number.isFinite(v) ? v.toFixed(1) : '0.0');
     dom.injectedForce.textContent = `${fmt(fx)} / ${fmt(fy)} / ${fmt(fz)}`;
   }
+  const fixtureOpen =
+    typeof state.fixtureOpen === 'boolean' ? state.fixtureOpen : undefined;
+  applyFixtureStateDisplay(dom.fixturePlant, fixtureOpen);
+  applyFixtureStateDisplay(dom.fixtureState, fixtureOpen);
   if (state.probe) {
     gantry.setProbeDisc(
       probeVisualFromSources({ plantProbe: state.probe, machineConfig: machineConfigSnapshot })

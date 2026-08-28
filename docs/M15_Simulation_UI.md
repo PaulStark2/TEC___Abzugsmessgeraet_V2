@@ -116,7 +116,7 @@ channel is PC-simulation only and carries no machine commands.
 
 | Request | Effect |
 | --- | --- |
-| `{"cmd":"getState"}` | read plant state + Core pose + Core referenceOffset (display) |
+| `{"cmd":"getState"}` | read plant state + Core pose + Core referenceOffset (display). `state.fixtureOpen` is the plant latch of the Core fixture valve output (not a Core sensor). |
 | `{"cmd":"setLimits","xMax":190,"yMax":140,"zMax":110}` | set trip points (omitted axes keep their value) |
 | `{"cmd":"triggerProbe","pulseMs":100}` | one probe pulse (debug) |
 | `{"cmd":"setProbeDisc","x":40,"y":40,"z":10,"diameter":8,"thickness":3,"toolDiameter":2.5,"toolCylindricalHeight":15}` | virtual measuring disc |

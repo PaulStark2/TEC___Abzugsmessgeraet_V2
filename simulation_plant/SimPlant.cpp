@@ -86,6 +86,16 @@ ForceVector SimPlant::injectedForce() const
     return injected_force_;
 }
 
+void SimPlant::setFixtureValve(bool extend)
+{
+    fixture_open_ = extend;
+}
+
+bool SimPlant::fixtureOpen() const
+{
+    return fixture_open_;
+}
+
 void SimPlant::advance(float dt)
 {
     if (dt <= 0.0f)
@@ -182,6 +192,7 @@ PlantState SimPlant::state(float x, float y, float z) const
     snapshot.injected_fx = injected_force_.fx;
     snapshot.injected_fy = injected_force_.fy;
     snapshot.injected_fz = injected_force_.fz;
+    snapshot.fixture_open = fixture_open_;
     snapshot.tcp_x = x;
     snapshot.tcp_y = y;
     snapshot.tcp_z = z;

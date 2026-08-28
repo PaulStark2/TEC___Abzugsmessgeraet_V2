@@ -274,7 +274,7 @@ Navigation:
 | `#procedure` | Prüf-/Alterungsprozedur (G8) |
 | `#results` | Prüfergebnisse (G9) |
 | `#manual` | Handmodus (G3 + G7) |
-| `#plate` | Bauplatte wechseln (Stub G11) |
+| `#plate` | Bauplatte wechseln (G11 Spannsystem) |
 | `#calibrate` | Kalibrieren (Stub G12) |
 
 Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss laufen).
@@ -336,9 +336,13 @@ HMI-Nacharbeit vor der nächsten größeren Prüfprozedur-Arbeit. Keine Controll
 - Anzeige-Mapping: OFFLINE, IDLE, RUNNING, PAUSED, WARNING, FAULT, HOMING, HOMED, STOPPED (Rohwerte bleiben sichtbar)
 - Test: `npm run smoke:g10`
 
-### G11 — Bauplatte wechseln (offen)
+### G11 — Bauplatte wechseln
 
-- UI `#plate`: Platzhalter; Spannsystem folgt später
+- UI `#plate`: **Spannsystem öffnen/lösen** / **Spannsystem schließen** über `fixtureOpen` / `fixtureClose` (`CmdSetFixture`)
+- HMI-Statusleiste **Spannsystem**: `fixtureExtended` — **Offen** rot, **Geschlossen** normal
+- Sim-UI zeigt denselben Vorgang über Plant-`fixtureOpen` (Aktor-Output vom Core, eigener Plant-Zustand, kein HostInputs-Rückkanal)
+- Spreizer (`pneumaticOpen`/`Close`) bleibt unabhängig
+- Test: `npm run smoke:g11`
 
 ### G12 — Kalibrieren (offen)
 
@@ -352,7 +356,8 @@ HMI-Nacharbeit vor der nächsten größeren Prüfprozedur-Arbeit. Keine Controll
 - Virtuelle Außenwelt in C++ (`simulation_plant/SimPlant`): positionsabhängige Max-Endschalter, `probeTriggered`-Impuls, E-Stop-Eingang, `fx = fy = fz = 0`
 - Reaktion auf Endschalter/E-Stop entscheidet allein die Core-Safety-Logik (latched `Fault`)
 - Separater Plant-Kanal auf Port 8767 (TCP/JSON-Zeilen), **keine** M12-Erweiterung
-- APIs: `GET /api/simulation/state`, `POST /api/simulation/limits|probe|probe-disc|estop`
+| `GET /api/simulation/state` | plant sensors + pose + `fixtureOpen` (Plant-Latch des Core-Aktor-Outputs) |
+
 - Tests: `simplant_tests`, `plantchannel_tests` (CTest), `smoke:m15`
 
 ## Simulations-API (M15)
@@ -412,6 +417,8 @@ Pfad: `/ws/status`
 { "command": "jog", "axis": "X", "direction": 1, "step": 1 }
 { "command": "pneumaticOpen" }
 { "command": "pneumaticClose" }
+{ "command": "fixtureOpen" }
+{ "command": "fixtureClose" }
 { "command": "home" }
 ```
 

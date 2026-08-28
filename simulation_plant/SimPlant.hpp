@@ -60,6 +60,8 @@ struct PlantState
     float injected_fx = 0.0f;
     float injected_fy = 0.0f;
     float injected_fz = 0.0f;
+    // Independent plant latch of the Core fixture valve command (no HostInputs feedback).
+    bool fixture_open = false;
 };
 
 class SimPlant
@@ -87,6 +89,11 @@ public:
     bool setInjectedForce(float fx, float fy, float fz);
     ForceVector injectedForce() const;
 
+    // Core actuator output only: true = valve energized (holder open). Plant latches
+    // its own pose; it does not write fixture state back into HostInputs.
+    void setFixtureValve(bool extend);
+    bool fixtureOpen() const;
+
     void advance(float dt);
 
     HostInputs sample(float x, float y, float z) const;
@@ -107,6 +114,7 @@ private:
     mutable bool prev_probe_contact_ = false;
     mutable std::uint32_t probe_trigger_sequence_ = 0;
     mutable TestPoint latched_trigger_pose_{};
+    bool fixture_open_ = false;
 };
 
 } // namespace simplant

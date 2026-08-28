@@ -319,6 +319,26 @@ static int testGeometricTriggerLatchesPose()
     return 0;
 }
 
+static int testFixtureValveLatch()
+{
+    SimPlant plant;
+    if (plant.fixtureOpen() || plant.state(0.0f, 0.0f, 0.0f).fixture_open)
+    {
+        return 40;
+    }
+    plant.setFixtureValve(true);
+    if (!plant.fixtureOpen() || !plant.state(0.0f, 0.0f, 0.0f).fixture_open)
+    {
+        return 41;
+    }
+    plant.setFixtureValve(false);
+    if (plant.fixtureOpen() || plant.state(0.0f, 0.0f, 0.0f).fixture_open)
+    {
+        return 43;
+    }
+    return 0;
+}
+
 int main()
 {
     const int results[] = {
@@ -331,6 +351,7 @@ int main()
         testCoreDecidesLimitReaction(),
         testStateReadback(),
         testGeometricTriggerLatchesPose(),
+        testFixtureValveLatch(),
     };
 
     for (const int result : results)

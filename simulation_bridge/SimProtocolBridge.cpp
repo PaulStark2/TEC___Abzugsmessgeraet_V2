@@ -195,6 +195,8 @@ void SimProtocolBridge::tick(float dt)
     }
 
     plant_.advance(dt);
+    // Core emits the valve command only. Plant latches its own fixture pose.
+    plant_.setFixtureValve(machine_.hostOutputs().fixtureExtend);
 }
 
 } // namespace simbridge

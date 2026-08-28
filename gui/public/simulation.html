@@ -100,6 +100,10 @@
           <dd id="sim-spreader-state">—</dd>
         </div>
         <div>
+          <dt>Spannsystem</dt>
+          <dd id="sim-fixture-state">—</dd>
+        </div>
+        <div>
           <dt>CommWD</dt>
           <dd id="sim-comm-watchdog">—</dd>
         </div>
@@ -163,6 +167,14 @@
           <h3>Not-Halt (Hardware-Eingang)</h3>
           <button type="button" id="btn-estop-toggle" class="sim-estop-btn">E-Stop</button>
           <p class="sim-readout">E-Stop: <span id="sim-estop-plant">—</span></p>
+        </section>
+
+        <section class="sim-group">
+          <h3>Spannsystem</h3>
+          <p class="placeholder-note">
+            Plant-Zustand aus dem Core-Aktor-Output. Kein Endlagensensor zurück in den Core.
+          </p>
+          <p class="sim-readout">Spannsystem: <span id="sim-fixture-plant">—</span></p>
         </section>
 
         <section class="sim-group">

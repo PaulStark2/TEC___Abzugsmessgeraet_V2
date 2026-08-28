@@ -342,6 +342,8 @@ std::string formatPlantStateResponse(const PlantState& state, float x, float y, 
     json += ",\"injectedFx\":" + formatFloat(state.injected_fx);
     json += ",\"injectedFy\":" + formatFloat(state.injected_fy);
     json += ",\"injectedFz\":" + formatFloat(state.injected_fz);
+    json += ",\"fixtureOpen\":";
+    json += boolLiteral(state.fixture_open);
     json += "},\"pose\":{\"x\":" + formatFloat(x);
     json += ",\"y\":" + formatFloat(y);
     json += ",\"z\":" + formatFloat(z) + "}";

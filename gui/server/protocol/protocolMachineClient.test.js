@@ -493,6 +493,32 @@ async function testPneumaticAndSetSpeed() {
   }
 }
 
+async function testFixtureOpen() {
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId === MessageId.CmdSetFixture) {
+      const bool = decodeBoolPayload(frame.payload);
+      assert.strictEqual(bool.value, 1);
+      replyAck(socket, MessageId.CmdSetFixture);
+      const status = encodeFrame(
+        MessageId.MsgStatusReport,
+        makeStatusPayload({ fixtureExtend: 1, fixtureExtended: 1 })
+      );
+      socket.write(status.frame);
+    }
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      const open = await client.fixtureOpen();
+      assert.ok(open.ok, open.error);
+      assert.strictEqual(client.getStatus().fixtureExtended, true);
+      assert.strictEqual(client.getStatus().pneumaticExtended, false);
+    });
+  } finally {
+    server.close();
+  }
+}
+
 async function testJogMapsToMoveTo() {
   const { server, port } = await startMockHost((socket, frame) => {
     assert.strictEqual(frame.messageId, MessageId.CmdMoveTo);
@@ -804,6 +830,7 @@ async function main() {
   await testDisconnectThenMoveRejected();
   await testReconnectAllowsCommandsAgain();
   await testPneumaticAndSetSpeed();
+  await testFixtureOpen();
   await testJogMapsToMoveTo();
   await testMeasuredHomeLatchFromHomingComplete();
   await testAlreadyHomedDoesNotLatchLivePose();
