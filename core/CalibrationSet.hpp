@@ -18,12 +18,13 @@ struct CalibrationSet
     // legacy probe_offset_reference. Applied as: machine = plate + point + tool_offset.
     TestPoint tool_offset{0.0f, 0.0f, 0.0f};
 
-    // Calibrated MCS home pose (machine frame) after defineMachineCoordinateSystem /
-    // first successful MCS definition. Normal home() returns here without redefining MCS.
+    // Derived MCS home pose: +Max switch = (0,0,0), home = (-Rx,-Ry,-Rz).
+    // Not measured. Follows MachineConfig.calibration.home_offset (retract R) so changing R
+    // does not require re-defining MCS. Normal home() returns here without redefining MCS.
     TestPoint home_offset{0.0f, 0.0f, 0.0f};
-    // Not MachineConfig.calibration.home_offset (that field is retract distance R only).
 
-    // True after MCS has been defined once; normal home() re-applies this frame at the switches.
+    // True after MCS has been defined once (origin at +max switches).
+    // Normal home() re-applies this frame at the switches.
     bool machine_coordinate_system_valid = false;
 };
 

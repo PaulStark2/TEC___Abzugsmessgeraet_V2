@@ -107,15 +107,18 @@ channel is PC-simulation only and carries no machine commands.
 
 | Request | Effect |
 | --- | --- |
-| `{"cmd":"getState"}` | read plant state + Core pose |
+| `{"cmd":"getState"}` | read plant state + Core pose + Core referenceOffset (display) |
 | `{"cmd":"setLimits","xMax":190,"yMax":140,"zMax":110}` | set trip points (omitted axes keep their value) |
 | `{"cmd":"triggerProbe","pulseMs":100}` | one probe pulse (debug) |
 | `{"cmd":"setProbeDisc","x":40,"y":40,"z":10,"diameter":8,"thickness":3,"toolDiameter":2.5,"toolCylindricalHeight":15}` | virtual measuring disc |
 | `{"cmd":"setEStop","active":true}` | set/clear the virtual e-stop input |
 | `{"cmd":"setForceStiffness","nPerMm":1}` | sim Z-spring stiffness (N/mm) |
 
-Response: `{"ok":true,"state":{...},"pose":{"x":…,"y":…,"z":…}}` or
+Response: `{"ok":true,"state":{...},"pose":{"x":…,"y":…,"z":…},"referenceOffset":{"x":…,"y":…,"z":…}}` or
 `{"ok":false,"error":"…"}`. Unknown commands (for example `moveTo`) are rejected.
+
+`pose` is Core raw TCP for the gantry. `referenceOffset` is Core MCS
+(`machine = raw − offset`) for overlay conversion only — not a plant sensor.
 
 Node exposes it as `GET /api/simulation/state` and
 `POST /api/simulation/{limits,probe,probe-disc,estop,force-stiffness}`. If the simulation host is down, the

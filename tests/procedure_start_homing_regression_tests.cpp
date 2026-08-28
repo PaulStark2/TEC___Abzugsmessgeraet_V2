@@ -80,26 +80,22 @@ static int testA_defineMcsPlantHome()
     {
         return 11;
     }
-    // Identity define: home ≈ plant_max - R
-    const float rx = bridge.plant().limits().x_max - 2.0f;
-    const float ry = bridge.plant().limits().y_max - 2.0f;
-    const float rz = bridge.plant().limits().z_max - 2.0f;
-    if (!nearEqual(m.x(), rx, 0.5f) || !nearEqual(m.y(), ry, 0.5f) || !nearEqual(m.z(), rz, 0.5f))
+    // Switch-origin define: home = (-R,-R,-R), offset ≈ plant +max (raw at switch).
+    const float r = 2.0f;
+    if (!nearEqual(m.x(), -r, 0.5f) || !nearEqual(m.y(), -r, 0.5f) || !nearEqual(m.z(), -r, 0.5f))
     {
-        std::fprintf(stderr, "A machine=(%.3f,%.3f,%.3f) expected~(%.3f,%.3f,%.3f)\n", m.x(), m.y(),
-                     m.z(), rx, ry, rz);
+        std::fprintf(stderr, "A machine=(%.3f,%.3f,%.3f) expected~(-%.3f,-%.3f,-%.3f)\n", m.x(),
+                     m.y(), m.z(), r, r, r);
         return 12;
     }
-    if (!nearEqual(m.rawX(), m.x(), 0.5f)) // after define, offset≈0 on each axis at home
+    const float ox = bridge.plant().limits().x_max;
+    const float oy = bridge.plant().limits().y_max;
+    const float oz = bridge.plant().limits().z_max;
+    if (std::fabs(m.referenceOffsetX() - ox) > 0.5f || std::fabs(m.referenceOffsetY() - oy) > 0.5f ||
+        std::fabs(m.referenceOffsetZ() - oz) > 0.5f)
     {
-        // raw should equal machine when offsets cleared per-axis at switch then retract together
-        // Actually after retract: raw = switch-R, machine = switch-R, offset = 0. Yes.
-    }
-    if (std::fabs(m.referenceOffsetX()) > 0.5f || std::fabs(m.referenceOffsetY()) > 0.5f ||
-        std::fabs(m.referenceOffsetZ()) > 0.5f)
-    {
-        std::fprintf(stderr, "A offset=(%.3f,%.3f,%.3f) expected ~0 after identity MCS\n",
-                     m.referenceOffsetX(), m.referenceOffsetY(), m.referenceOffsetZ());
+        std::fprintf(stderr, "A offset=(%.3f,%.3f,%.3f) expected ~(%.3f,%.3f,%.3f)\n",
+                     m.referenceOffsetX(), m.referenceOffsetY(), m.referenceOffsetZ(), ox, oy, oz);
         return 13;
     }
     return 0;
@@ -114,8 +110,8 @@ static int testB_normalHomeKeepsCalib()
         return 20;
     }
     const TestPoint home = m.calibrationSet().home_offset;
-    m.setPlateOrigin(TestPoint{55.0f, 57.0f, 17.0f});
-    m.setProbeCenter(TestPoint{40.0f, 40.0f, 10.0f});
+    m.setPlateOrigin(TestPoint{-45.0f, -43.0f, -33.0f});
+    m.setProbeCenter(TestPoint{-60.0f, -60.0f, -40.0f});
     m.setToolOffset(TestPoint{-0.0001f, -0.0001f, 0.0001f});
 
     m.moveTo(home.x - 5.0f, home.y - 5.0f, home.z - 5.0f);
@@ -136,8 +132,8 @@ static int testB_normalHomeKeepsCalib()
     {
         return 23;
     }
-    if (!nearEqual(m.calibrationSet().plate_origin.x, 55.0f) ||
-        !nearEqual(m.calibrationSet().probe_center.x, 40.0f) ||
+    if (!nearEqual(m.calibrationSet().plate_origin.x, -45.0f) ||
+        !nearEqual(m.calibrationSet().probe_center.x, -60.0f) ||
         !m.calibrationSet().plate_origin_valid || !m.calibrationSet().probe_center_valid)
     {
         return 24;
@@ -154,8 +150,8 @@ static int testC_stepLoss()
         return 30;
     }
     const TestPoint home = m.calibrationSet().home_offset;
-    m.setPlateOrigin(TestPoint{55.0f, 57.0f, 17.0f});
-    m.setProbeCenter(TestPoint{40.0f, 40.0f, 10.0f});
+    m.setPlateOrigin(TestPoint{-45.0f, -43.0f, -33.0f});
+    m.setProbeCenter(TestPoint{-60.0f, -60.0f, -40.0f});
     m.shiftRawPose(5.0f, -3.0f, 4.0f);
     m.invalidateHoming();
     if (!homeViaPlant(bridge))
@@ -169,8 +165,8 @@ static int testC_stepLoss()
                      m.x(), m.y(), m.z(), home.x, home.y, home.z);
         return 32;
     }
-    if (!nearEqual(m.calibrationSet().probe_center.x, 40.0f) ||
-        !nearEqual(m.calibrationSet().plate_origin.x, 55.0f))
+    if (!nearEqual(m.calibrationSet().probe_center.x, -60.0f) ||
+        !nearEqual(m.calibrationSet().plate_origin.x, -45.0f))
     {
         return 33;
     }
@@ -194,9 +190,9 @@ static int testD_procedureStartWithPersistedStyleCalib()
     {
         return 40;
     }
-    // GUI calibration.json style numbers — valid under identity MCS (home ~ max-R).
-    m.setPlateOrigin(TestPoint{55.0f, 57.0f, 17.0f});
-    m.setProbeCenter(TestPoint{40.0f, 40.0f, 10.0f});
+    // Plate/probe in machine frame (workspace is negative; origin at +max switches).
+    m.setPlateOrigin(TestPoint{-45.0f, -43.0f, -33.0f});
+    m.setProbeCenter(TestPoint{-60.0f, -60.0f, -40.0f});
     if (!loadAndStart(bridge, TestPoint{5.0f, 2.0f, 0.0f}))
     {
         std::fprintf(stderr, "D start failed process=%u\n",

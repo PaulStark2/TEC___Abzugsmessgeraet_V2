@@ -256,7 +256,8 @@ int main(int argc, char** argv)
 
         // Sensor configuration/injection from the simulation UI (no motion here).
         plant_channel.poll(bridge.plant(), bridge.machine().rawX(), bridge.machine().rawY(),
-                           bridge.machine().rawZ());
+                           bridge.machine().rawZ(), bridge.machine().referenceOffsetX(),
+                           bridge.machine().referenceOffsetY(), bridge.machine().referenceOffsetZ());
 
         const auto now = clock::now();
         if (now >= next_tick)

@@ -25,6 +25,7 @@ const { syncCalibrationFromController } = require('../config/syncCalibrationFrom
 const { validateProcedureStartPreconditions } = require('./startPreconditions');
 const { validateCoreNotRunningForProcedureStart } = require('./coreProcessGuard');
 const { derivePointProgress } = require('./procedureProgress');
+const { isFinitePose } = require('../coord/workspaceReferenceOffset');
 
 function referenceOffsetFromPoses(plantPose, machinePose) {
   if (
@@ -55,9 +56,12 @@ async function loadWorkspaceFromPlant(plantClient, machineStatus) {
   const startPose = [status.x, status.y, status.z].every(Number.isFinite)
     ? { x: status.x, y: status.y, z: status.z }
     : null;
+  const coreOffset = isFinitePose(result.referenceOffset)
+    ? { x: result.referenceOffset.x, y: result.referenceOffset.y, z: result.referenceOffset.z }
+    : referenceOffsetFromPoses(result.pose, startPose);
   return {
     limits: result.state.limits,
-    referenceOffset: referenceOffsetFromPoses(result.pose, startPose),
+    referenceOffset: coreOffset,
     startPose,
   };
 }
@@ -512,14 +516,10 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     }
 
     const mcs = calib.machineCoordinateSystem;
-    if (
-      mcs &&
-      mcs.valid &&
-      mcs.homePosition &&
-      typeof machineClient.restoreMcs === 'function'
-    ) {
+    if (mcs && mcs.valid && typeof machineClient.restoreMcs === 'function') {
+      const home = mcs.homePosition || { x: 0, y: 0, z: 0 };
       const restored = await runStartCommand('CmdRestoreMcs', () =>
-        machineClient.restoreMcs(mcs.homePosition.x, mcs.homePosition.y, mcs.homePosition.z)
+        machineClient.restoreMcs(home.x, home.y, home.z)
       );
       if (!restored || !restored.ok) {
         const detail = (restored && restored.error) || 'CmdRestoreMcs failed';

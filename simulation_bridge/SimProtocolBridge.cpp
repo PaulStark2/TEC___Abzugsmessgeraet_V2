@@ -133,6 +133,14 @@ void SimProtocolBridge::applyHostInputs()
     plant_.setProbeDisc(disc);
 
     HostInputs inputs = plant_.sample(machine_.rawX(), machine_.rawY(), machine_.rawZ());
+    // SimPlant latches trigger XYZ in raw/plant. Core ProbeSearch/backoff treats
+    // HostInputs.probeTrigger* as machine-frame (same as Machine::x/y/z).
+    if (inputs.probeTriggerPoseValid)
+    {
+        inputs.probeTriggerX -= machine_.referenceOffsetX();
+        inputs.probeTriggerY -= machine_.referenceOffsetY();
+        inputs.probeTriggerZ -= machine_.referenceOffsetZ();
+    }
 
     const ProcedurePhase phase = executor_.procedurePhase();
     const bool coupled = machine_.hostOutputs().spreaderExtended;

@@ -100,8 +100,8 @@ plant channel on port 8767, and the hierarchical gantry visualization.
 ## Soft limits and homing (M16)
 
 End stops block only the affected axis direction. Homing is Z+ → X+ → Y+.
-At each +max switch the software axis pose is re-referenced (open-loop); after
-retract the axis is at the calibrated MCS home. **`CmdHome` (`0x15`) never
+At each +max switch the software axis is re-referenced to machine 0 (open-loop, no raw teleport);
+after retract the axis is at the derived MCS home (−R). **`CmdHome` (`0x15`) never
 defines MCS** — use `CmdDefineMcs` (`0x56`) / `CmdRestoreMcs` (`0x57`). See
 [`docs/Homing.md`](Homing.md) and [`docs/Calibration.md`](Calibration.md).
 The M12 StatusReport is 41 bytes (`homingState`, `blockedDirections`, `flags`,

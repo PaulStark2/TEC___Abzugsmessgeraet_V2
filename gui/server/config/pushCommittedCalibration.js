@@ -22,7 +22,7 @@ async function pushCommittedCalibration(machineClient, calibOverride) {
   const calib = calibOverride || calibrationStore.load();
   const mcs = calib.machineCoordinateSystem;
 
-  if (!mcs || mcs.valid !== true || !mcs.homePosition) {
+  if (!mcs || mcs.valid !== true) {
     return {
       ok: true,
       restored: false,
@@ -39,7 +39,7 @@ async function pushCommittedCalibration(machineClient, calibOverride) {
     };
   }
 
-  const home = mcs.homePosition;
+  const home = mcs.homePosition || { x: 0, y: 0, z: 0 };
   const restored = await machineClient.restoreMcs(home.x, home.y, home.z);
   if (!restored || !restored.ok) {
     return {

@@ -21,15 +21,15 @@ Abort nach Commit     → neues MCS bleibt; Geometrie unvollständig
 
 | Begriff | Bedeutung |
 |---------|-----------|
-| **MCS definieren** | Endanschläge + Latch `home_offset`; invalidiert Plate/Probe **im Core** |
-| **MCS committen** | Persistenz von `home_offset` / `mcs_valid` in `calibration.json` |
-| **Reference Homing** | Nur Pose an bestehendes MCS binden; nie MCS neu |
+| **MCS definieren** | +Max-Anschläge als Ursprung (0,0,0); Home = (−R,−R,−R); invalidiert Plate/Probe **im Core** |
+| **MCS committen** | Persistenz von `valid` / `origin=positiveMaxSwitches` / abgeleitetem `homePosition` |
+| **Reference Homing** | Nur Pose an bestehendes MCS binden (Schalter = 0); nie MCS neu |
 | **Plate Calibration** | Teach aktueller Machine-Pose als `plateOrigin` |
 | **Probe Calibration** | M19: Install setzt dauerhaftes `probeCenter` + `toolOffset=0`; Procedure-OffsetOnly aktualisiert nur `toolOffset` |
 
 ## Invariante
 
-> Einmal definiertes MCS bleibt bei normalem Homing unverändert. Nur die explizite Full-Kalibrierung darf das MCS neu definieren.
+> Einmal definiertes MCS (Ursprung an den +Max-Anschlägen) bleibt bei normalem Homing und bei Änderung von R unverändert. Nur die explizite Full-Kalibrierung darf das MCS neu definieren.
 > `CmdHome` ohne gültiges MCS wird abgelehnt; die GUI führt zur Full Calibration (kein generischer Core-Reject).
 
 ## Protocol
@@ -38,7 +38,7 @@ Abort nach Commit     → neues MCS bleibt; Geometrie unvollständig
 |---------|-----|---------|
 | `CmdHome` | `0x15` | Reference Home (Rejected ohne MCS) |
 | `CmdDefineMcs` | `0x56` | MCS neu definieren (nur Core bis Commit) |
-| `CmdRestoreMcs` | `0x57` | Persistiertes MCS laden (xyz = homePosition) |
+| `CmdRestoreMcs` | `0x57` | Persistiertes MCS laden (xyz ignoriert; Home aus R) |
 
 ## Connect
 
@@ -46,7 +46,7 @@ Abort nach Commit     → neues MCS bleibt; Geometrie unvollständig
 load calibration.json → CmdRestoreMcs → SetPlate/SetProbe (wenn gültig)
 ```
 
-Legacy-Dateien ohne MCS-Block: `mcs_valid = false` (kein erfundenes `homePosition`).
+Legacy-Dateien ohne MCS-Block oder ohne `origin=positiveMaxSwitches`: `mcs_valid = false` (kein Identity-MCS).
 
 ## Hand-Jog (Kalibrier-Wizard)
 

@@ -176,11 +176,11 @@ int main()
     std::printf("============================================================\n");
     std::printf("Code paths:\n");
     std::printf("  DEFINE:  CmdDefineMcs -> Machine::defineMachineCoordinateSystem()\n");
-    std::printf("           beginHomingRetract: machine := raw (identity)\n");
-    std::printf("           finishHomingSuccess: latch home_offset, mcs_valid=true,\n");
+    std::printf("           beginHomingRetract: machine := 0 at +max (no raw teleport)\n");
+    std::printf("           finishHomingSuccess: latch derived home (-R,-R,-R), mcs_valid=true,\n");
     std::printf("                                clear plate/probe validity + tool_offset\n");
     std::printf("  REFERENCE: CmdHome -> Machine::home() when mcs_valid (else Rejected)\n");
-    std::printf("           beginHomingRetract: machine := home_offset + R\n");
+    std::printf("           beginHomingRetract: machine := 0; retract to -R\n");
     std::printf("           finishHomingSuccess: leave home/plate/probe/tool unchanged\n");
     std::printf("============================================================\n");
 
@@ -201,8 +201,8 @@ int main()
     const Snapshot after_define = snap(m);
 
     // --- Step 2: Calibration (GUI-persist style, machine frame) ---
-    m.setPlateOrigin(TestPoint{55.0f, 57.0f, 17.0f});
-    m.setProbeCenter(TestPoint{40.0f, 40.0f, 10.0f});
+    m.setPlateOrigin(TestPoint{-45.0f, -43.0f, -33.0f});
+    m.setProbeCenter(TestPoint{-60.0f, -60.0f, -40.0f});
     m.setToolOffset(TestPoint{-0.000072f, -0.000061f, 0.000049f});
     const Snapshot calib = snap(m);
     std::printf("\n=== STEP2_CALIBRATION ===\n");
@@ -284,8 +284,8 @@ int main()
         ++fails;
     }
 
-    // Offsets: after identity define they are ~0; after Reference they are recomputed
-    // from raw_at_switch - (home+R). With step loss, offset changes to correct MCS.
+    // Offsets: after switch-origin define they are ≈ raw_at_switch. After Reference they
+    // are recomputed from raw_at_switch − 0. With step loss, offset changes to correct MCS.
     // Semantically MCS is the SAME if home_offset unchanged and machine returns to home.
     const bool c2_home = nearPoint(after_rehome.home, home_before, 1e-4f);
     const bool c2_mcs = after_rehome.mcs;

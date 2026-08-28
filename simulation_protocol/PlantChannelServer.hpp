@@ -19,13 +19,16 @@ public:
     bool start(int port);
 
     // Non-blocking service step: accept, read requests, answer with plant state.
-    void poll(simplant::SimPlant& plant, float x, float y, float z);
+    // x/y/z = Core raw TCP. offset_* = Core referenceOffset (display; not a sensor).
+    void poll(simplant::SimPlant& plant, float x, float y, float z, float offset_x, float offset_y,
+              float offset_z);
 
     void stop();
 
 private:
     void closeClient();
-    void handleLine(const std::string& line, simplant::SimPlant& plant, float x, float y, float z);
+    void handleLine(const std::string& line, simplant::SimPlant& plant, float x, float y, float z,
+                    float offset_x, float offset_y, float offset_z);
     bool sendLine(const std::string& line);
 
     // Platform socket handles kept as intptr_t so this header stays socket-free.

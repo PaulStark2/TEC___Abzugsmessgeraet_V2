@@ -154,7 +154,7 @@ bool PlantChannelServer::sendLine(const std::string& line)
 }
 
 void PlantChannelServer::handleLine(const std::string& line, simplant::SimPlant& plant, float x,
-                                    float y, float z)
+                                    float y, float z, float offset_x, float offset_y, float offset_z)
 {
     const simplant::PlantCommand command = simplant::parsePlantCommand(line);
     if (!simplant::applyPlantCommand(plant, command))
@@ -163,10 +163,12 @@ void PlantChannelServer::handleLine(const std::string& line, simplant::SimPlant&
         return;
     }
 
-    sendLine(simplant::formatPlantStateResponse(plant.state(x, y, z), x, y, z));
+    sendLine(simplant::formatPlantStateResponse(plant.state(x, y, z), x, y, z, offset_x, offset_y,
+                                               offset_z));
 }
 
-void PlantChannelServer::poll(simplant::SimPlant& plant, float x, float y, float z)
+void PlantChannelServer::poll(simplant::SimPlant& plant, float x, float y, float z, float offset_x,
+                              float offset_y, float offset_z)
 {
     if (listen_sock_ == kNoSocket)
     {
@@ -238,7 +240,7 @@ void PlantChannelServer::poll(simplant::SimPlant& plant, float x, float y, float
             }
             if (!line.empty())
             {
-                handleLine(line, plant, x, y, z);
+                handleLine(line, plant, x, y, z, offset_x, offset_y, offset_z);
             }
         }
     }

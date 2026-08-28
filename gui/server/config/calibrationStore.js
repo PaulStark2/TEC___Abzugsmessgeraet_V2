@@ -5,9 +5,13 @@ const path = require('path');
 
 const FILE_PATH = path.join(__dirname, '..', 'data', 'calibration.json');
 
+/** MCS origin at the +max mechanical switches (machine = 0). Home is derived (-R,-R,-R). */
+const MCS_ORIGIN_POS_MAX_SWITCHES = 'positiveMaxSwitches';
+
 function emptyMcs() {
   return {
     valid: false,
+    origin: null,
     homePosition: null,
   };
 }
@@ -46,14 +50,17 @@ function normalize(parsed) {
   const mcsIn = parsed.machineCoordinateSystem;
   let mcs = emptyMcs();
   if (mcsIn && typeof mcsIn === 'object') {
+    const origin = mcsIn.origin === MCS_ORIGIN_POS_MAX_SWITCHES ? MCS_ORIGIN_POS_MAX_SWITCHES : null;
     const home = finitePose(mcsIn.homePosition);
-    const valid = mcsIn.valid === true && home !== null;
+    // Legacy identity MCS (valid + home, no origin) is rejected — wrong frame.
+    const valid = mcsIn.valid === true && origin !== null;
     mcs = {
       valid,
-      homePosition: valid ? home : null,
+      origin: valid ? origin : null,
+      homePosition: valid && home ? home : null,
     };
   }
-  // Legacy file without MCS block → mcs_valid = false (never invent home).
+  // Legacy file without MCS block or without origin → mcs_valid = false.
 
   const plate = finitePose(parsed.plateOrigin);
   const probe = finitePose(parsed.probeCenter);
@@ -102,7 +109,11 @@ function setMachineCoordinateSystem(homePosition) {
     throw new Error('homePosition x,y,z must be finite');
   }
   return save({
-    machineCoordinateSystem: { valid: true, homePosition: home },
+    machineCoordinateSystem: {
+      valid: true,
+      origin: MCS_ORIGIN_POS_MAX_SWITCHES,
+      homePosition: home,
+    },
     plateOrigin: null,
     plateOriginValid: false,
     probeCenter: null,
@@ -178,6 +189,7 @@ function isLegacyToolOffsetSemantics(calib, reference = { x: 40, y: 40, z: 10 })
 }
 
 module.exports = {
+  MCS_ORIGIN_POS_MAX_SWITCHES,
   load,
   save,
   normalize,

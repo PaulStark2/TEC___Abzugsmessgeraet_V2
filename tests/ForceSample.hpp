@@ -58,9 +58,9 @@ inline HostInputs withPlantInputs(const Machine& machine, HostInputs in = HostIn
         constexpr float kXMax = 100.0f;
         constexpr float kYMax = 100.0f;
         constexpr float kZMax = 50.0f;
-        in.limitXMax = machine.x() >= kXMax;
-        in.limitYMax = machine.y() >= kYMax;
-        in.limitZMax = machine.z() >= kZMax;
+        in.limitXMax = machine.rawX() >= kXMax;
+        in.limitYMax = machine.rawY() >= kYMax;
+        in.limitZMax = machine.rawZ() >= kZMax;
     }
     return withFreshForce(withVirtualProbe(machine, in));
 }

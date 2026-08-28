@@ -44,10 +44,6 @@ Machine::Machine()
     , homing_mode_(HomingMode::DefineMcs)
     , homing_axis_leg_(HomingAxisLeg::FastSeek)
     , homing_creep_back_traveled_(0.0f)
-    , homing_have_creep_pre_(false)
-    , homing_creep_pre_raw_x_(0.0f)
-    , homing_creep_pre_raw_y_(0.0f)
-    , homing_creep_pre_raw_z_(0.0f)
     , collision_context_(CollisionContext::Approach)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
@@ -95,10 +91,6 @@ Machine::Machine(const ForceControlParams& params)
     , homing_mode_(HomingMode::DefineMcs)
     , homing_axis_leg_(HomingAxisLeg::FastSeek)
     , homing_creep_back_traveled_(0.0f)
-    , homing_have_creep_pre_(false)
-    , homing_creep_pre_raw_x_(0.0f)
-    , homing_creep_pre_raw_y_(0.0f)
-    , homing_creep_pre_raw_z_(0.0f)
     , collision_context_(CollisionContext::Approach)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
@@ -433,7 +425,7 @@ bool Machine::defineMachineCoordinateSystem()
     return startHomingSequence(HomingMode::DefineMcs);
 }
 
-bool Machine::restoreMachineCoordinateSystem(const TestPoint& home_position)
+bool Machine::restoreMachineCoordinateSystem(const TestPoint& /*home_position*/)
 {
     if (machine_state_ == MachineState::Fault || machine_state_ == MachineState::Homing)
     {
@@ -443,7 +435,8 @@ bool Machine::restoreMachineCoordinateSystem(const TestPoint& home_position)
     {
         return false;
     }
-    calibration_set_.home_offset = home_position;
+    // Payload xyz is unused: MCS origin is the +max switches, home follows current R.
+    applyDerivedHomeFromRetractR();
     calibration_set_.machine_coordinate_system_valid = true;
     return true;
 }
@@ -558,6 +551,18 @@ float Machine::homingRetractDistance(float configured) const
     return distance > 1.0e-4f ? distance : kDefaultHomingRetract;
 }
 
+TestPoint Machine::derivedMachineHomePose() const
+{
+    const TestPoint& cfg_r = machine_config_.calibration.home_offset;
+    return TestPoint{-homingRetractDistance(cfg_r.x), -homingRetractDistance(cfg_r.y),
+                     -homingRetractDistance(cfg_r.z)};
+}
+
+void Machine::applyDerivedHomeFromRetractR()
+{
+    calibration_set_.home_offset = derivedMachineHomePose();
+}
+
 float Machine::homingCreepVelocity() const
 {
     const float from_cfg = machine_config_.motion.v_homing * kHomingCreepSpeedFactor;
@@ -613,14 +618,12 @@ void Machine::beginCreepForward()
 {
     homing_axis_leg_ = HomingAxisLeg::CreepForward;
     homing_retracting_ = false;
-    homing_have_creep_pre_ = false;
     motion_planner_.stopMotion();
     setHomingMotionSpeed(homingCreepVelocity());
     commandActiveAxisToward(kHomingOvershoot);
 }
 
-void Machine::beginHomingRetract(HomingState phase, float switch_raw_x, float switch_raw_y,
-                                 float switch_raw_z)
+void Machine::beginHomingRetract(HomingState phase)
 {
     homing_axis_leg_ = HomingAxisLeg::RetractR;
     homing_retracting_ = true;
@@ -633,42 +636,20 @@ void Machine::beginHomingRetract(HomingState phase, float switch_raw_x, float sw
     float z = motion_planner_.z();
 
     // Snap machine frame at the physical +max switch without moving raw (no teleport).
-    // DefineMcs: identity on this axis at the creep rising-edge raw pose.
-    // Reference: snap to calibrated switch pose (home + R) — corrects step loss, same MCS.
+    // Both DefineMcs and Reference: this axis becomes MCS origin (0). Retract to -R.
     switch (phase)
     {
     case HomingState::HomingZ:
         retract = homingRetractDistance(cfg_r.z);
-        if (homing_mode_ == HomingMode::DefineMcs)
-        {
-            z = switch_raw_z;
-        }
-        else
-        {
-            z = calibration_set_.home_offset.z + retract;
-        }
+        z = 0.0f;
         break;
     case HomingState::HomingX:
         retract = homingRetractDistance(cfg_r.x);
-        if (homing_mode_ == HomingMode::DefineMcs)
-        {
-            x = switch_raw_x;
-        }
-        else
-        {
-            x = calibration_set_.home_offset.x + retract;
-        }
+        x = 0.0f;
         break;
     case HomingState::HomingY:
         retract = homingRetractDistance(cfg_r.y);
-        if (homing_mode_ == HomingMode::DefineMcs)
-        {
-            y = switch_raw_y;
-        }
-        else
-        {
-            y = calibration_set_.home_offset.y + retract;
-        }
+        y = 0.0f;
         break;
     default:
         break;
@@ -686,17 +667,14 @@ void Machine::beginHomingRetract(HomingState phase, float switch_raw_x, float sw
     switch (phase)
     {
     case HomingState::HomingZ:
-        stored_target_z_ =
-            (homing_mode_ == HomingMode::DefineMcs) ? (z - retract) : calibration_set_.home_offset.z;
+        stored_target_z_ = -retract;
         break;
     case HomingState::HomingX:
-        stored_target_x_ =
-            (homing_mode_ == HomingMode::DefineMcs) ? (x - retract) : calibration_set_.home_offset.x;
+        stored_target_x_ = -retract;
         commanded_target_x_ = stored_target_x_;
         break;
     case HomingState::HomingY:
-        stored_target_y_ =
-            (homing_mode_ == HomingMode::DefineMcs) ? (y - retract) : calibration_set_.home_offset.y;
+        stored_target_y_ = -retract;
         commanded_target_y_ = stored_target_y_;
         break;
     default:
@@ -724,10 +702,7 @@ bool Machine::homingPhaseLimitReached(HomingState phase) const
 
 void Machine::finishHomingSuccess()
 {
-    // Commanded retract targets after HomingY — preferred over live pose for DefineMcs latch.
-    const float home_x = stored_target_x_;
-    const float home_y = stored_target_y_;
-    const float home_z = stored_target_z_;
+    const TestPoint home = derivedMachineHomePose();
 
     homing_state_ = HomingState::Homed;
     is_homed_ = true;
@@ -738,9 +713,9 @@ void Machine::finishHomingSuccess()
 
     if (homing_mode_ == HomingMode::DefineMcs)
     {
-        // Latch calibrated home pose. Intentional MCS (re)definition requires re-teach
+        // Latch derived home. Intentional MCS (re)definition requires re-teach
         // of plate/probe in the new frame — home() never takes this path.
-        calibration_set_.home_offset = TestPoint{home_x, home_y, home_z};
+        calibration_set_.home_offset = home;
         calibration_set_.machine_coordinate_system_valid = true;
         calibration_set_.plate_origin_valid = false;
         calibration_set_.probe_center_valid = false;
@@ -749,9 +724,9 @@ void Machine::finishHomingSuccess()
     }
     // Reference mode: home_offset / plate / probe / tool_offset unchanged.
 
-    stored_target_x_ = home_x;
-    stored_target_y_ = home_y;
-    stored_target_z_ = home_z;
+    stored_target_x_ = home.x;
+    stored_target_y_ = home.y;
+    stored_target_z_ = home.z;
     commanded_target_x_ = stored_target_x_;
     commanded_target_y_ = stored_target_y_;
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
@@ -846,50 +821,11 @@ void Machine::tickHoming(float dt)
     // DefineMcs creep-forward: rising edge of +max at creep speed.
     if (homing_axis_leg_ == HomingAxisLeg::CreepForward)
     {
-        auto latchCreepRisingEdge = [&](float pre_x, float pre_y, float pre_z, float post_x,
-                                        float post_y, float post_z) {
-            float sx = post_x;
-            float sy = post_y;
-            float sz = post_z;
-            switch (homing_state_)
-            {
-            case HomingState::HomingX:
-                sx = 0.5f * (pre_x + post_x);
-                break;
-            case HomingState::HomingY:
-                sy = 0.5f * (pre_y + post_y);
-                break;
-            case HomingState::HomingZ:
-                sz = 0.5f * (pre_z + post_z);
-                break;
-            default:
-                break;
-            }
-            beginHomingRetract(homing_state_, sx, sy, sz);
-        };
-
-        // Limit already true at tick start: rising edge was the previous step.
         if (homingPhaseLimitReached(homing_state_))
         {
-            const float post_x = motion_planner_.rawX();
-            const float post_y = motion_planner_.rawY();
-            const float post_z = motion_planner_.rawZ();
-            if (homing_have_creep_pre_)
-            {
-                latchCreepRisingEdge(homing_creep_pre_raw_x_, homing_creep_pre_raw_y_,
-                                     homing_creep_pre_raw_z_, post_x, post_y, post_z);
-            }
-            else
-            {
-                beginHomingRetract(homing_state_, post_x, post_y, post_z);
-            }
+            beginHomingRetract(homing_state_);
             return;
         }
-
-        homing_creep_pre_raw_x_ = motion_planner_.rawX();
-        homing_creep_pre_raw_y_ = motion_planner_.rawY();
-        homing_creep_pre_raw_z_ = motion_planner_.rawZ();
-        homing_have_creep_pre_ = true;
 
         blocked_directions_ = 0;
         motion_planner_.moveTo(stored_target_x_, stored_target_y_, stored_target_z_);
@@ -898,9 +834,7 @@ void Machine::tickHoming(float dt)
 
         if (homingPhaseLimitReached(homing_state_))
         {
-            latchCreepRisingEdge(homing_creep_pre_raw_x_, homing_creep_pre_raw_y_,
-                                 homing_creep_pre_raw_z_, motion_planner_.rawX(),
-                                 motion_planner_.rawY(), motion_planner_.rawZ());
+            beginHomingRetract(homing_state_);
         }
         return;
     }
@@ -914,8 +848,7 @@ void Machine::tickHoming(float dt)
         }
         else
         {
-            beginHomingRetract(homing_state_, motion_planner_.rawX(), motion_planner_.rawY(),
-                               motion_planner_.rawZ());
+            beginHomingRetract(homing_state_);
         }
         return;
     }
@@ -959,8 +892,7 @@ void Machine::tickHoming(float dt)
         }
         else
         {
-            beginHomingRetract(homing_state_, motion_planner_.rawX(), motion_planner_.rawY(),
-                               motion_planner_.rawZ());
+            beginHomingRetract(homing_state_);
         }
     }
 }
@@ -1365,14 +1297,28 @@ bool Machine::trySetMachineConfig(const MachineConfig& incoming, ConfigValidatio
     {
         return false;
     }
-    // MachineConfig.calibration.home_offset is the Homing retract distance from +max.
-    // CalibrationSet.home_offset is the measured home pose after Homing (Safe-End XY).
-    // Never overwrite the measured pose when applying machine config (e.g. CmdSetMachineConfig
-    // at procedure start would otherwise park Safe-End at (0,0) / retract defaults).
+    // MachineConfig.calibration.home_offset is the Homing retract distance R from +max.
+    // When MCS is valid, CalibrationSet.home_offset is derived as (-R,-R,-R) so a parameter
+    // change of R updates the park pose without re-defining MCS.
     calibration_set_.tool_offset = machine_config_.calibration.tool_offset;
     default_max_velocity_ = machine_config_.motion.v_approach_testpoints;
     default_acceleration_ = machine_config_.motion.a_testpoints;
     default_corner_radius_ = machine_config_.motion.corner_testpoints;
+    if (calibration_set_.machine_coordinate_system_valid)
+    {
+        applyDerivedHomeFromRetractR();
+        if (is_homed_)
+        {
+            const TestPoint& home = calibration_set_.home_offset;
+            constexpr float kTol = 0.5f;
+            if (std::fabs(motion_planner_.x() - home.x) > kTol ||
+                std::fabs(motion_planner_.y() - home.y) > kTol ||
+                std::fabs(motion_planner_.z() - home.z) > kTol)
+            {
+                is_homed_ = false;
+            }
+        }
+    }
     return true;
 }
 

@@ -287,6 +287,12 @@ add_executable(m19_frame_diagnose
 )
 target_link_libraries(m19_frame_diagnose PRIVATE simulation_bridge)
 
+add_executable(m19_trigger_frame_tests
+    m19_trigger_frame_tests.cpp
+)
+target_link_libraries(m19_trigger_frame_tests PRIVATE simulation_bridge)
+add_test(NAME m19_trigger_frame_tests COMMAND m19_trigger_frame_tests)
+
 add_executable(procedure_start_homing_regression_tests
     procedure_start_homing_regression_tests.cpp
 )

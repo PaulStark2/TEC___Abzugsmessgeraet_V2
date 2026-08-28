@@ -11,8 +11,8 @@
 
 ## Paket 3 — Homing
 - Physisches Retract; `MachineConfig.calibration.home_offset` = Abstand R vom +Max (0 → 2 mm)
-- Bei +Max: Software-Achse := +R (`setCurrentPose`); nach Retract: Achse := 0
-- `CalibrationSet.home_offset` = definierte Home-Pose nach Erfolg (typisch 0,0,0)
+- Bei +Max: `referenceMachinePose` setzt die Achse auf MCS-Ursprung 0 (kein Raw-Teleport); nach Retract: Home = (−R,−R,−R)
+- `CalibrationSet.home_offset` = aus R abgeleitete Home-Pose (nicht eingemessen)
 - Details: [`docs/Homing.md`](Homing.md)
 - Kein `limitWarning` während Homing
 - GUI-Popup vor Prozedur-Start
@@ -44,3 +44,9 @@
 - probe_center Marker nur bei Core `probeCenterValid`
 - plate overlay nur bei Core+Store gültig
 - Homing-Marker: `CalibrationSet.home_offset` (Latch Homing*→Homed), nicht live TCP-Pose
+
+## Paket 11 — Overlay-Offset
+- Sim-Gantry bleibt Plant/Raw; Overlay-Marker (Home/Plate/Punkte) sind Machine-Frame
+- `referenceOffset` kommt als Core-Anzeigefeld neben `pose` aus Plant-`getState` (nicht aus asynchronem `plant − status`)
+- Fallback: Latch aus Plant/Status, wenn das Feld fehlt
+- Test: `gui/server/coord/workspaceReferenceOffset.test.js`

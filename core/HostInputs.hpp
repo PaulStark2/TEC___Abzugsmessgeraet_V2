@@ -47,6 +47,9 @@ struct HostInputs
     // Probe/touch sensor (authoritative host: STM32 or SimPlant).
     // The host latches pose at the trigger instant. Core consumes the event;
     // it does not reconstruct pose from a later tick or from the Pi UART time.
+    // probeTriggerX/Y/Z are machine-frame TCP (same as Machine::x/y/z). SimPlant
+    // latches raw plant TCP; SimProtocolBridge converts with referenceOffset.
+    // An STM32 adapter must present machine-frame (or convert equivalently).
     bool probeTriggered; // measuring probe contact (level)
     bool probeTriggerPoseValid = false; // host provided XYZ at the trigger edge
     std::uint32_t probeTriggerSequence = 0; // incremented on each new trigger event

@@ -283,6 +283,12 @@ bool applyPlantCommand(SimPlant& plant, const PlantCommand& command)
 
 std::string formatPlantStateResponse(const PlantState& state, float x, float y, float z)
 {
+    return formatPlantStateResponse(state, x, y, z, 0.0f, 0.0f, 0.0f);
+}
+
+std::string formatPlantStateResponse(const PlantState& state, float x, float y, float z,
+                                     float offset_x, float offset_y, float offset_z)
+{
     std::string json = "{\"ok\":true,\"state\":{";
     json += "\"limits\":{\"xMin\":" + formatFloat(state.limits.x_min);
     json += ",\"xMax\":" + formatFloat(state.limits.x_max);
@@ -321,7 +327,10 @@ std::string formatPlantStateResponse(const PlantState& state, float x, float y, 
     json += ",\"forceStiffnessNPerMm\":" + formatFloat(state.force_stiffness_n_per_mm);
     json += "},\"pose\":{\"x\":" + formatFloat(x);
     json += ",\"y\":" + formatFloat(y);
-    json += ",\"z\":" + formatFloat(z) + "}}";
+    json += ",\"z\":" + formatFloat(z) + "}";
+    json += ",\"referenceOffset\":{\"x\":" + formatFloat(offset_x);
+    json += ",\"y\":" + formatFloat(offset_y);
+    json += ",\"z\":" + formatFloat(offset_z) + "}}";
     return json;
 }
 

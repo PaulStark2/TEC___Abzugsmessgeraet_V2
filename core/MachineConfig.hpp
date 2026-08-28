@@ -111,10 +111,10 @@ struct MachineConfig
 
     struct Calibration
     {
-        TestPoint home_offset{0.0f, 0.0f, 0.0f}; // retract distance from +max switch [mm] per axis;
+        TestPoint home_offset{0.0f, 0.0f, 0.0f}; // retract distance R from +max switch [mm] per axis;
                                                  // 0 → Machine uses kDefaultHomingRetract (2 mm).
-                                                 // At switch: software axis := +R; after retract: axis := 0.
-                                                 // Not the measured home pose (see CalibrationSet.home_offset).
+                                                 // MCS origin is the +max switch (machine = 0). Home is (-R,-R,-R).
+                                                 // Changing R updates CalibrationSet.home_offset; MCS is not redefined.
         TestPoint tool_offset{0.0f, 0.0f, 0.0f}; // TCP correction in machine coordinates
     };
 

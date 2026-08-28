@@ -29,9 +29,9 @@ async function withTempCalibAsync(fn) {
 
 async function testPushRestoresCommitted() {
   await withTempCalibAsync(async () => {
-    store.setMachineCoordinateSystem({ x: 98, y: 98, z: 48 });
-    store.setPlateOrigin({ x: 55, y: 57, z: 17 });
-    store.setProbeCenter({ x: 40, y: 40, z: 10 }, { x: 0.1, y: 0.2, z: 0.3 });
+    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
+    store.setPlateOrigin({ x: -45, y: -43, z: -33 });
+    store.setProbeCenter({ x: -60, y: -60, z: -40 }, { x: 0.1, y: 0.2, z: 0.3 });
     const diskBefore = fs.readFileSync(calibFile, 'utf8');
 
     const calls = [];
@@ -53,9 +53,9 @@ async function testPushRestoresCommitted() {
     const result = await pushCommittedCalibration(client);
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.restored, true);
-    assert.deepStrictEqual(calls[0], ['restoreMcs', 98, 98, 48]);
-    assert.deepStrictEqual(calls[1], ['setPlateOrigin', 55, 57, 17]);
-    assert.deepStrictEqual(calls[2], ['setProbeCenter', 40, 40, 10]);
+    assert.deepStrictEqual(calls[0], ['restoreMcs', -2, -2, -2]);
+    assert.deepStrictEqual(calls[1], ['setPlateOrigin', -45, -43, -33]);
+    assert.deepStrictEqual(calls[2], ['setProbeCenter', -60, -60, -40]);
     assert.strictEqual(fs.readFileSync(calibFile, 'utf8'), diskBefore);
   });
 }

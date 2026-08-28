@@ -164,14 +164,21 @@ Simulation:
 ```text
 SimPlant erkennt geometrischen Kontakt
         ↓
-SimPlant latcht TCP-Pose
+SimPlant latcht TCP-Pose in Raw/Plant
         ↓
-HostInputs.probeTriggered
+SimProtocolBridge wandelt nach Machine (raw − referenceOffset)
+        ↓
+HostInputs.probeTriggered + probeTriggerX/Y/Z (Maschinenframe)
         ↓
 Machine::consumeProbeTrigger()
         ↓
 ProbeCalibration übernimmt Messpunkt
 ```
+
+`HostInputs.probeTriggerX/Y/Z` are machine-frame, the same as `Machine::x/y/z()`.
+SimPlant remains a raw-world sensor; the conversion belongs at the plant→Core
+boundary. A later STM32 adapter must present machine-frame trigger poses (or
+apply the same `raw − referenceOffset` step).
 
 `consumeProbeTrigger()` consumes a host-provided event. It does not create the
 trigger. A later TCP move must not overwrite the latched pose. Sequence numbers

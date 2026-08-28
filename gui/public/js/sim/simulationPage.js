@@ -9,6 +9,7 @@ import { createGantryView } from '/js/sim/gantryView.js';
 import { buildProcedurePlannedPath, findWorkspaceViolation } from '/js/sim/safeZPath.js';
 import { collectOverlayLabels } from '/js/sim/overlayLabels.js';
 import { homeMarkerPose } from '/js/sim/homeMarker.js';
+import { latchWorkspaceReferenceOffset, pickWorkspaceReferenceOffset } from '/js/sim/workspaceReferenceOffset.js';
 import {
   physicalGeometryFromMachineConfig,
   plantProbeDiscCenterOnly,
@@ -69,6 +70,11 @@ let calibrationSnapshot = null;
 let machineConfigSnapshot = null;
 let lastStatus = null;
 let lastPlantPose = null;
+/** Latched raw−machine offset for overlays; fallback if Core offset missing. */
+let latchedWorkspaceOffset = null;
+/** Core MCS offset from plant getState (display field, not a sensor). */
+let lastCoreReferenceOffset = null;
+let previousHomingStateForOffset = null;
 let lastPlantLimits = null;
 let lastPlannedSegments = [];
 let traveledSamples = [];
@@ -161,6 +167,8 @@ function updateReferenceMarkers(status) {
   }
 
   // Core measured home (latched at Homing* → Homed). Never live TCP pose.
+  // Markers are machine-frame; gantry scene is raw — apply reference offset.
+  const offset = workspaceReferenceOffset(st);
   const home =
     st?.isHomed === true ? homeMarkerPose({ isHomed: true, measuredHome: st.measuredHome }) : null;
 
@@ -178,9 +186,9 @@ function updateReferenceMarkers(status) {
       : null;
 
   gantry.setReferenceMarkers({
-    home: showHome ? home : null,
-    plateOrigin: showPlate ? plate : null,
-    probeCenter: showProbe ? probe : null,
+    home: showHome ? toRawPose(home, offset) : null,
+    plateOrigin: showPlate ? toRawPose(plate, offset) : null,
+    probeCenter: showProbe ? toRawPose(probe, offset) : null,
     showHome,
     showPlate,
     showProbe,
@@ -242,7 +250,7 @@ function refreshMachineOverlay(status) {
   }
 
   machineProgramPoints = transformed;
-  gantry.setTestPoints(machineProgramPoints);
+  gantry.setTestPoints(toRawPoses(machineProgramPoints, workspaceReferenceOffset(st)));
   setProgramFrameNote(
     `Prüfpunkte als Maschinenkoordinaten (plate_origin + Platepunkt + tool_offset), ${machineProgramPoints.length} Punkt(e).`,
     false
@@ -297,32 +305,62 @@ function updateOverlayLabels() {
   const showPointLabels = el('toggle-point-labels')?.checked === true;
   const showSegmentLabels =
     el('toggle-trajectory')?.checked !== false && el('toggle-segment-labels')?.checked === true;
-  gantry.setOverlayLabels(
-    collectOverlayLabels({
-      points: machineProgramPoints,
-      segments: lastPlannedSegments,
-      machineConfig: machineConfigSnapshot,
-      showPointLabels,
-      showSegmentLabels,
-    })
-  );
+  const offset = workspaceReferenceOffset(lastStatus);
+  const labels = collectOverlayLabels({
+    points: machineProgramPoints,
+    segments: lastPlannedSegments,
+    machineConfig: machineConfigSnapshot,
+    showPointLabels,
+    showSegmentLabels,
+  });
+  gantry.setOverlayLabels(toRawPoses(labels, offset));
 }
 
 function workspaceReferenceOffset(status) {
-  if (
-    !lastPlantPose ||
-    !status ||
-    ![lastPlantPose.x, lastPlantPose.y, lastPlantPose.z, status.x, status.y, status.z].every(
-      Number.isFinite
-    )
-  ) {
-    return { x: 0, y: 0, z: 0 };
+  const st = status || lastStatus;
+  const homingState = st && st.homingState ? st.homingState : 'None';
+  latchedWorkspaceOffset = latchWorkspaceReferenceOffset({
+    plantPose: lastPlantPose,
+    statusPose: st,
+    previousOffset: latchedWorkspaceOffset,
+    motionState: st && st.motionState,
+    processState: st && st.processState,
+    homingState,
+    previousHomingState: previousHomingStateForOffset,
+  });
+  if (st) {
+    previousHomingStateForOffset = homingState;
   }
-  return {
-    x: lastPlantPose.x - status.x,
-    y: lastPlantPose.y - status.y,
-    z: lastPlantPose.z - status.z,
-  };
+  return pickWorkspaceReferenceOffset(lastCoreReferenceOffset, latchedWorkspaceOffset);
+}
+
+/** Machine-frame pose → raw/plant for the gantry scene (raw = machine + offset). */
+function toRawPose(pose, offset) {
+  if (!pose || ![pose.x, pose.y, pose.z].every(Number.isFinite)) {
+    return pose;
+  }
+  const ox = offset && Number.isFinite(offset.x) ? offset.x : 0;
+  const oy = offset && Number.isFinite(offset.y) ? offset.y : 0;
+  const oz = offset && Number.isFinite(offset.z) ? offset.z : 0;
+  return { ...pose, x: pose.x + ox, y: pose.y + oy, z: pose.z + oz };
+}
+
+function toRawPoses(list, offset) {
+  if (!Array.isArray(list)) {
+    return list;
+  }
+  return list.map((pose) => toRawPose(pose, offset));
+}
+
+function toRawSegments(segments, offset) {
+  if (!Array.isArray(segments)) {
+    return segments;
+  }
+  return segments.map((seg) => ({
+    ...seg,
+    from: toRawPose(seg.from, offset),
+    to: toRawPose(seg.to, offset),
+  }));
 }
 
 function updateSafeZNote(plannedVertices) {
@@ -430,7 +468,7 @@ function updateTrajectory(status) {
     );
     lastPlannedSegments = planned.segments;
     plannedVertices = planned.vertices;
-    gantry.setPlannedSegments(planned.segments);
+    gantry.setPlannedSegments(toRawSegments(planned.segments, workspaceReferenceOffset(status)));
   } else {
     // Do not invent a direct polyline when Safe-Z/start are unknown.
     lastPlannedSegments = [];
@@ -454,7 +492,7 @@ function updateTrajectory(status) {
       }
     }
   }
-  gantry.setTraveledSamples(traveledSamples);
+  gantry.setTraveledSamples(toRawPoses(traveledSamples, workspaceReferenceOffset(status)));
   updateOverlayLabels();
   updateSafeZNote(plannedVertices);
 }
@@ -605,9 +643,17 @@ async function pollPlantState() {
       Number.isFinite(result.pose.z)
     ) {
       lastPlantPose = { x: result.pose.x, y: result.pose.y, z: result.pose.z };
+      const coreOff = result.referenceOffset;
+      if (
+        coreOff &&
+        [coreOff.x, coreOff.y, coreOff.z].every((v) => typeof v === 'number' && Number.isFinite(v))
+      ) {
+        lastCoreReferenceOffset = { x: coreOff.x, y: coreOff.y, z: coreOff.z };
+      }
       if (lastStatus && lastStatus.connected !== false) {
         gantry.setPose(lastPlantPose);
-        updateTrajectory(lastStatus);
+        refreshMachineOverlay(lastStatus);
+        updateReferenceMarkers(lastStatus);
       }
     }
   } catch (err) {

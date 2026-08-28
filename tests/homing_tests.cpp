@@ -55,7 +55,7 @@ int main()
     constexpr float kR = 2.0f;
     constexpr float kTrip = 5.0f;
 
-    // A — home() without MCS is rejected; DefineMcs establishes MCS near trip − R.
+    // A — home() without MCS is rejected; DefineMcs origin at +max, home = (-R,-R,-R).
     {
         Machine m;
         m.setCurrentPose(1.0f, 1.0f, 1.0f);
@@ -78,17 +78,20 @@ int main()
         {
             return 4;
         }
-        // Creep rising-edge residual ≪ one fast-seek step (v_homing·dt).
-        const float ideal = kTrip - kR;
-        const float creep_v = m.machineConfig().motion.v_homing * 0.1f;
-        const float creep_step = ((creep_v > 0.2f) ? creep_v : 0.2f) * kDt + 1e-3f;
-        // Midpoint of creep rising edge → residual ≤ ~½ creep step.
-        const float tol = 0.5f * creep_step + 1e-3f;
-        if (!nearEqual(home.x, ideal, tol) || !nearEqual(home.y, ideal, tol) ||
-            !nearEqual(home.z, ideal, tol))
+        if (!nearEqual(home.x, -kR, 1e-3f) || !nearEqual(home.y, -kR, 1e-3f) ||
+            !nearEqual(home.z, -kR, 1e-3f))
         {
-            std::fprintf(stderr, "A home=(%.4f,%.4f,%.4f) expected ~%.4f (tol=%.4f)\n", home.x,
-                         home.y, home.z, ideal, tol);
+            std::fprintf(stderr, "A home=(%.4f,%.4f,%.4f) expected ~%.4f\n", home.x, home.y, home.z,
+                         -kR);
+            return 5;
+        }
+        // Offset binds raw switch ≈ trip to machine 0 (residual: creep/step).
+        if (std::fabs(m.referenceOffsetX() - kTrip) > 0.5f ||
+            std::fabs(m.referenceOffsetY() - kTrip) > 0.5f ||
+            std::fabs(m.referenceOffsetZ() - kTrip) > 0.5f)
+        {
+            std::fprintf(stderr, "A offset=(%.4f,%.4f,%.4f) expected ~%.4f\n", m.referenceOffsetX(),
+                         m.referenceOffsetY(), m.referenceOffsetZ(), kTrip);
             return 5;
         }
         if (m.calibrationSet().plate_origin_valid || m.calibrationSet().probe_center_valid)
@@ -157,13 +160,11 @@ int main()
         {
             return 16;
         }
-        const float ideal = kTrip - kR;
-        const float creep_v = cfg.motion.v_homing * 0.1f;
-        const float creep_step = ((creep_v > 0.2f) ? creep_v : 0.2f) * kDt + 1e-3f;
         const TestPoint home = m.calibrationSet().home_offset;
-        if (!nearEqual(home.z, ideal, creep_step))
+        if (!nearEqual(home.z, -kR, 1e-3f) || !nearEqual(m.z(), -kR, 0.2f))
         {
-            std::fprintf(stderr, "B home.z=%.4f expected ~%.4f\n", home.z, ideal);
+            std::fprintf(stderr, "B home.z=%.4f machine.z=%.4f expected ~%.4f\n", home.z, m.z(),
+                         -kR);
             return 17;
         }
     }
@@ -299,14 +300,14 @@ int main()
         const float hx = m.x();
         HostInputs in = makeSafeInputs();
         m.setHostInputs(in);
-        m.moveTo(hx + 4.0f, m.y(), m.z());
+        m.moveTo(hx - 4.0f, m.y(), m.z());
         for (int i = 0; i < 800 && m.motionState() != MotionState::AtTarget; ++i)
         {
             in.forceSampleSequence++;
             m.setHostInputs(in);
             m.tick(kDt);
         }
-        if (!nearEqual(m.x(), hx + 4.0f, 0.15f))
+        if (!nearEqual(m.x(), hx - 4.0f, 0.15f))
         {
             return 51;
         }
@@ -364,6 +365,53 @@ int main()
             !nearEqual(m2.calibrationSet().plate_origin.x, 7.0f))
         {
             return 69;
+        }
+    }
+
+    // G — changing R updates derived home without re-defining MCS.
+    {
+        Machine m;
+        if (!runHomingToHomed(m, true, kTrip, kDt))
+        {
+            return 70;
+        }
+        m.setPlateOrigin(TestPoint{-10.0f, -11.0f, -12.0f});
+        MachineConfig cfg = m.machineConfig();
+        cfg.calibration.home_offset = TestPoint{5.0f, 5.0f, 5.0f};
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 71;
+        }
+        if (!m.machineCoordinateSystemValid())
+        {
+            return 72;
+        }
+        const TestPoint home = m.calibrationSet().home_offset;
+        if (!nearEqual(home.x, -5.0f) || !nearEqual(home.y, -5.0f) || !nearEqual(home.z, -5.0f))
+        {
+            std::fprintf(stderr, "G home=(%.3f,%.3f,%.3f) expected -5\n", home.x, home.y, home.z);
+            return 73;
+        }
+        if (!m.calibrationSet().plate_origin_valid)
+        {
+            return 74;
+        }
+        if (m.isHomed())
+        {
+            std::fprintf(stderr, "G isHomed should clear when TCP is not at new home\n");
+            return 75;
+        }
+        Machine m2;
+        if (!m2.restoreMachineCoordinateSystem(TestPoint{99.0f, 99.0f, 99.0f}))
+        {
+            return 76;
+        }
+        if (!nearEqual(m2.calibrationSet().home_offset.x, -kR) ||
+            !nearEqual(m2.calibrationSet().home_offset.y, -kR) ||
+            !nearEqual(m2.calibrationSet().home_offset.z, -kR))
+        {
+            return 77;
         }
     }
 

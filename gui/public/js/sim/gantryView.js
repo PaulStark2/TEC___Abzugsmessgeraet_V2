@@ -47,6 +47,14 @@ function isFinitePose(pose) {
   );
 }
 
+function overlaySignature(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
 function box(width, depth, height, color) {
   return new THREE.Mesh(
     new THREE.BoxGeometry(width, depth, height),
@@ -111,6 +119,22 @@ export function createGantryView(canvas, geometry = {}) {
   let showLimitMarkers = true;
   let showTrajectory = true;
   let storedLimits = null;
+  const overlaySigs = {
+    testPoints: '',
+    referenceMarkers: '',
+    plannedSegments: '',
+    traveledSamples: '',
+    overlayLabels: '',
+  };
+
+  function skipUnchangedOverlay(key, value) {
+    const sig = overlaySignature(value);
+    if (sig === overlaySigs[key]) {
+      return true;
+    }
+    overlaySigs[key] = sig;
+    return false;
+  }
 
   function clearGroup(group) {
     for (const child of [...group.children]) {
@@ -355,6 +379,8 @@ export function createGantryView(canvas, geometry = {}) {
       showTrajectory = Boolean(visible);
       plannedTrajectoryGroup.visible = showTrajectory;
       traveledTrajectoryGroup.visible = showTrajectory;
+      overlaySigs.plannedSegments = '';
+      overlaySigs.traveledSamples = '';
     },
 
     setTestPointsVisible(visible) {
@@ -362,6 +388,9 @@ export function createGantryView(canvas, geometry = {}) {
     },
 
     setTestPoints(points) {
+      if (skipUnchangedOverlay('testPoints', points || [])) {
+        return;
+      }
       clearGroup(testPointGroup);
       if (!Array.isArray(points)) {
         return;
@@ -392,6 +421,9 @@ export function createGantryView(canvas, geometry = {}) {
      * }} markers
      */
     setReferenceMarkers(markers = {}) {
+      if (skipUnchangedOverlay('referenceMarkers', markers || {})) {
+        return;
+      }
       clearGroup(referenceMarkerGroup);
       const addMarker = (pose, color, axisLen = 8) => {
         if (!pose || ![pose.x, pose.y, pose.z].every(Number.isFinite)) {
@@ -442,6 +474,9 @@ export function createGantryView(canvas, geometry = {}) {
      * @param {Array<{type:string, from:{x,y,z}, to:{x,y,z}}>} segments
      */
     setPlannedSegments(segments) {
+      if (skipUnchangedOverlay('plannedSegments', segments || [])) {
+        return;
+      }
       clearGroup(plannedTrajectoryGroup);
       if (!showTrajectory || !Array.isArray(segments) || segments.length === 0) {
         return;
@@ -492,8 +527,11 @@ export function createGantryView(canvas, geometry = {}) {
       );
     },
 
-    /** Append-only TCP samples for traveled path (machine frame). */
+    /** Append-only TCP samples for traveled path (drawn in raw / plant frame). */
     setTraveledSamples(samples) {
+      if (skipUnchangedOverlay('traveledSamples', samples || [])) {
+        return;
+      }
       clearGroup(traveledTrajectoryGroup);
       if (!showTrajectory || !Array.isArray(samples) || samples.length < 2) {
         return;
@@ -520,6 +558,9 @@ export function createGantryView(canvas, geometry = {}) {
      * @param {Array<{x:number,y:number,z:number,text:string,kind?:string}>} labels
      */
     setOverlayLabels(labels) {
+      if (skipUnchangedOverlay('overlayLabels', labels || [])) {
+        return;
+      }
       clearOverlay(overlayLabelGroup);
       if (!Array.isArray(labels)) {
         return;

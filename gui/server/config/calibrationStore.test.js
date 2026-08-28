@@ -48,12 +48,13 @@ function testLegacyWithoutMcs() {
 
 function testCommitReplacesMcsAndClearsGeometry() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: 98, y: 98, z: 48 });
-    store.setPlateOrigin({ x: 10, y: 20, z: 30 });
-    store.setProbeCenter({ x: 40, y: 40, z: 10 }, { x: 0, y: 0, z: 0 });
+    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
+    store.setPlateOrigin({ x: -10, y: -20, z: -30 });
+    store.setProbeCenter({ x: -40, y: -40, z: -10 }, { x: 0, y: 0, z: 0 });
     let c = store.load();
     assert.strictEqual(c.plateOriginValid, true);
     assert.strictEqual(c.probeCenterValid, true);
+    assert.strictEqual(c.machineCoordinateSystem.origin, store.MCS_ORIGIN_POS_MAX_SWITCHES);
 
     // Early invalidate must NOT destroy committed state (no-op).
     const before = fs.readFileSync(calibFile, 'utf8');
@@ -64,10 +65,11 @@ function testCommitReplacesMcsAndClearsGeometry() {
     assert.strictEqual(c.plateOriginValid, true);
 
     // Commit of a new MCS clears geometry.
-    store.setMachineCoordinateSystem({ x: 97, y: 97, z: 47 });
+    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
     c = store.load();
     assert.strictEqual(c.machineCoordinateSystem.valid, true);
-    assert.deepStrictEqual(c.machineCoordinateSystem.homePosition, { x: 97, y: 97, z: 47 });
+    assert.strictEqual(c.machineCoordinateSystem.origin, store.MCS_ORIGIN_POS_MAX_SWITCHES);
+    assert.deepStrictEqual(c.machineCoordinateSystem.homePosition, { x: -2, y: -2, z: -2 });
     assert.strictEqual(c.plateOriginValid, false);
     assert.strictEqual(c.probeCenterValid, false);
   });
@@ -75,7 +77,7 @@ function testCommitReplacesMcsAndClearsGeometry() {
 
 function testDefineDoesNotTouchDiskViaInvalidate() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: 90, y: 91, z: 45 });
+    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
     store.setPlateOrigin({ x: 1, y: 2, z: 3 });
     const snap = JSON.parse(fs.readFileSync(calibFile, 'utf8'));
     store.invalidateForDefineMcs();
@@ -85,9 +87,30 @@ function testDefineDoesNotTouchDiskViaInvalidate() {
   });
 }
 
+function testLegacyIdentityMcsWithoutOriginIsRejected() {
+  withTempCalib(() => {
+    fs.writeFileSync(
+      calibFile,
+      JSON.stringify({
+        machineCoordinateSystem: { valid: true, homePosition: { x: 98, y: 98, z: 48 } },
+        plateOrigin: { x: 55, y: 57, z: 17 },
+        plateOriginValid: true,
+        probeCenter: { x: 40, y: 40, z: 10 },
+        probeCenterValid: true,
+      }),
+      'utf8'
+    );
+    const c = store.load();
+    assert.strictEqual(c.machineCoordinateSystem.valid, false);
+    assert.strictEqual(c.machineCoordinateSystem.origin, null);
+    assert.strictEqual(c.plateOriginValid, false);
+    assert.strictEqual(c.probeCenterValid, false);
+  });
+}
+
 function testLegacyToolOffsetSemantics() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: 100, y: 100, z: 50 });
+    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
     store.setProbeCenter({ x: 50, y: 60, z: 60 }, { x: -10, y: -20, z: -50 });
     assert.strictEqual(store.isLegacyToolOffsetSemantics(store.load()), true);
     store.setProbeCenter({ x: 100, y: 120, z: 40 }, { x: 0, y: 0, z: 0 });
@@ -97,7 +120,7 @@ function testLegacyToolOffsetSemantics() {
 
 function testInstallPersistKeepsProbeCenter() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: 100, y: 100, z: 50 });
+    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
     store.setProbeCenter({ x: 100, y: 120, z: 40 }, { x: 0, y: 0, z: 0 });
     let c = store.load();
     assert.strictEqual(c.probeCenter.x, 100);
@@ -118,6 +141,7 @@ function testInstallPersistKeepsProbeCenter() {
 testLegacyWithoutMcs();
 testCommitReplacesMcsAndClearsGeometry();
 testDefineDoesNotTouchDiskViaInvalidate();
+testLegacyIdentityMcsWithoutOriginIsRejected();
 testLegacyToolOffsetSemantics();
 testInstallPersistKeepsProbeCenter();
 console.log('calibrationStore.test.js: PASS');

@@ -10,14 +10,20 @@ Machine (MotionPlanner::x/y/z, Status, Kalibrierung)
 Plate (Programmpunkte)
 ```
 
+Achsen sind parallel und gleichsinnig: **+Machine = +Raw = Richtung +Max-Schalter**.
+Der Arbeitsraum liegt daher in **negativen** Maschinenkoordinaten.
+
 | Variable | Frame | Bedeutung |
 |----------|-------|-----------|
 | `rawX/Y/Z` | Raw | Kontinuierliche Open-Loop-Integration; **kein Teleport** |
 | `x/y/z` | Machine | `raw − offset` |
-| `MachineConfig.calibration.home_offset` | Skalar **R** | Nur Retract-Distanz vom +Max-Schalter |
-| `CalibrationSet.home_offset` | Machine | Kalibrierter Homing-Punkt nach MCS-Definition |
-| `machine_coordinate_system_valid` | Flag | MCS wurde einmal definiert |
+| `MachineConfig.calibration.home_offset` | Skalar **R** | Nur Retract-Distanz vom +Max-Schalter (0 → 2 mm) |
+| `CalibrationSet.home_offset` | Machine | Abgeleitet: `(-Rx, -Ry, -Rz)` — nicht eingemessen |
+| `machine_coordinate_system_valid` | Flag | MCS wurde einmal definiert (Ursprung an den +Max-Anschlägen) |
 | `probe_center` / `plate_origin` / `tool_offset` | Machine | Geometrie; unverändert bei normalem `home()` |
+
+**MCS-Ursprung** ist der mechanische +Max-Anschlag: `machine = (0, 0, 0)`.
+**Homingpunkt** ist `(-R, -R, -R)`. Ein Wechsel von R in den Parametern ändert nur den Homingpunkt, nicht das MCS.
 
 ## Drei getrennte Operationen
 
@@ -32,18 +38,16 @@ Abbruch vor Commit: Core wird aus dem committed Store zurückgespielt (`pushComm
 Seek +Max (schnell) bis limit*Max == true
 → Kriech zurück (−Achse) bis limit*Max == false
 → Kriech vor (+Achse) bis limit*Max == true   ← steigende Flanke = Schalterbezug
-→ reference: machine := raw (Identity auf der Achse)  [nur Bit + eigene Pose]
-→ Retract um R
-→ nach Z/X/Y AtTarget: home_offset = kommandierte Retract-Targets
+→ referenceMachinePose: diese Achse machine := 0   (kein Raw-Teleport)
+→ Retract um R nach −R
+→ nach Z/X/Y: home_offset := (-Rx, -Ry, -Rz) aus Config
 → machine_coordinate_system_valid = true
 → plate_origin_valid / probe_center_valid = false
 → tool_offset = 0
 ```
 
-Nur das **Endschalter-Bit** und die eigene Open-Loop-Pose — keine Plant-`+max`-Koordinaten.
-Die Kriechgeschwindigkeit ist `max(0.1·v_homing, 0.2 mm/s)`. An der steigenden Kriech-Flanke wird der Schalterbezug als **Mittelpunkt** der Core-Raw-Pose vor/nach dem Bit-Wechsel geschätzt (weiterhin nur Bit + eigene Pose). Restfehler ≈ ½·`v_creep·dt`.
-
-`home_offset` wird erst nach erfolgreichem Retract-AtTarget gesetzt.
+Nur das **Endschalter-Bit** — keine Plant-`+max`-Koordinaten.
+Die Kriechgeschwindigkeit ist `max(0.1·v_homing, 0.2 mm/s)`. Der Latch erfolgt an der steigenden Kriech-Flanke; Restfehler ≈ ein Kriechschritt sitzt im `reference_offset`, nicht in den Home-Zahlen.
 
 ### 2. Reference Homing — `home()` / `CmdHome`
 
@@ -53,18 +57,20 @@ Voraussetzung: `mcs_valid == true`, sonst Rejected.
 
 ```text
 Seek +Max → Stop (raw bleibt)
-→ reference: machine := home_offset + R   (gespeicherter Schalterpunkt)
-→ Retract auf home_offset
+→ reference: machine := 0 auf der aktiven Achse
+→ Retract auf (-R, …) aus aktueller Config
 → isHomed = true
 ```
 
-`probe_center`, `plate_origin`, `tool_offset`, `home_offset` bleiben unverändert.
+`probe_center`, `plate_origin`, `tool_offset` bleiben unverändert.
+`home_offset` folgt dem aktuellen R (bereits bei `trySetMachineConfig` nachgezogen).
 
-Korrigiert Schrittverlust: Software-Pose wird am realen Schalter wieder an die kalibrierte Machine-Koordinate gebunden.
+Korrigiert Schrittverlust: Software-Pose wird am realen Schalter wieder an MCS-Ursprung 0 gebunden.
 
 ### 3. Restore nach Neustart — `restoreMachineCoordinateSystem()` / `CmdRestoreMcs`
 
-Lädt persistiertes `home_offset` + `mcs_valid` **ohne Bewegung** und **ohne** Geometrie zu invalidieren.
+Setzt `mcs_valid` **ohne Bewegung** und **ohne** Geometrie zu invalidieren.
+Das Wire-Payload xyz wird **nicht** als Ursprung verwendet; Home wird aus dem aktuellen R abgeleitet.
 `reference_offset` wird **nicht** persistiert; er entsteht wieder beim nächsten Reference-Home.
 
 ## Persistenz
@@ -72,17 +78,19 @@ Lädt persistiertes `home_offset` + `mcs_valid` **ohne Bewegung** und **ohne** G
 Host speichert in `calibration.json`:
 
 - `machineCoordinateSystem.valid`
-- `machineCoordinateSystem.homePosition` (= `CalibrationSet.home_offset`)
+- `machineCoordinateSystem.origin = "positiveMaxSwitches"`
+- `machineCoordinateSystem.homePosition` (abgeleitetes Snapshot `(-R,-R,-R)`, nicht die MCS-Definition)
 - plate / probe / tool (+ Valid-Flags)
 
 Connect-Reihenfolge: Restore MCS → ggf. Plate/Probe push.
 
-Alte Dateien ohne MCS-Block → `mcs_valid = false` (kein Auto-Define).
+Legacy-Dateien ohne `origin` (Identity-MCS, Home ≈ Plant-Max − R) → `mcs_valid = false`. MCS und Geometrie müssen neu kalibriert werden.
 
 ## Simulation
 
-- Gantry / Plant: **raw** (kontinuierlich, kein Teleport am Schalter).
-- Statuszahlen: **Machine**.
+- Gantry-TCP / Plant: **raw** (kontinuierlich, kein Teleport am Schalter).
+- Statuszahlen: **Machine** (Home ≈ −2, Anschlag ≈ 0). Der Zahlensprung am Latch ist die Frame-Definition.
+- Overlay (Home/Plate/Probe/Bahn): Machine + `reference_offset` → Raw-Szene.
 - Plant-Limits gegen raw → nur **`limit*Max` Bits** an den Core (keine numerische +Max-Ebene).
 - StatusFlag `McsValid` (Bit 6).
-- DefineMcs-Kriechsuche reagiert ausschließlich auf diese Bits + eigene Pose.
+- DefineMcs-Kriechsuche reagiert ausschließlich auf diese Bits.

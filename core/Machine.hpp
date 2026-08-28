@@ -96,11 +96,12 @@ public:
     // touching home_offset / probe / plate / tool_offset.
     bool home();
 
-    // Explicit MCS definition (same motion SM as home). Latches CalibrationSet.home_offset,
-    // sets machine_coordinate_system_valid, clears plate/probe validity (and tool_offset).
+    // Explicit MCS definition (same motion SM as home). Origin at +max switches (machine = 0);
+    // latches derived home (-R,-R,-R), sets machine_coordinate_system_valid, clears plate/probe.
     bool defineMachineCoordinateSystem();
 
     // Host restore after restart: latch MCS without motion and without invalidating geometry.
+    // home_position is ignored (wire compatibility); home is derived from current retract R.
     bool restoreMachineCoordinateSystem(const TestPoint& home_position);
 
     bool machineCoordinateSystemValid() const;
@@ -295,8 +296,8 @@ private:
     // M16 homing tick and phase transitions.
     enum class HomingMode : uint8_t
     {
-        DefineMcs = 0, // establish MCS at switches (identity snap); latch home_offset
-        Reference = 1  // re-apply stored MCS (switch = home + R); keep probe/plate
+        DefineMcs = 0, // establish MCS at +max switches (machine = 0); latch derived home
+        Reference = 1  // re-apply stored MCS (switch = 0); keep probe/plate
     };
 
     void tickHoming(float dt);
@@ -304,10 +305,10 @@ private:
     void beginHomingPhase(HomingState phase);
     void beginCreepBack();
     void beginCreepForward();
-    // DefineMcs: switch_raw_* = raw at creep rising edge (identity snap).
-    // Reference: switch_raw_* ignored; snap uses home_offset + R.
-    void beginHomingRetract(HomingState phase, float switch_raw_x, float switch_raw_y,
-                            float switch_raw_z);
+    // Snap the active axis to MCS origin (0) at the +max switch; retract to -R.
+    void beginHomingRetract(HomingState phase);
+    TestPoint derivedMachineHomePose() const;
+    void applyDerivedHomeFromRetractR();
     float homingRetractDistance(float configured) const;
     float homingCreepVelocity() const;
     void setHomingMotionSpeed(float velocity);
@@ -319,11 +320,6 @@ private:
     HomingMode homing_mode_;
     HomingAxisLeg homing_axis_leg_;
     float homing_creep_back_traveled_;
-    // Last CreepForward pose while +max was still false (rising-edge bracket).
-    bool homing_have_creep_pre_;
-    float homing_creep_pre_raw_x_;
-    float homing_creep_pre_raw_y_;
-    float homing_creep_pre_raw_z_;
 
     void tickActiveMotion(float dt);
 };

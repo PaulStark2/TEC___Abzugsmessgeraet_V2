@@ -124,11 +124,12 @@ function withPreparedStores(fn) {
       ...previousCalib,
       machineCoordinateSystem: {
         valid: true,
-        homePosition: { x: 98, y: 98, z: 48 },
+        origin: 'positiveMaxSwitches',
+        homePosition: { x: -2, y: -2, z: -2 },
       },
-      plateOrigin: { x: 0, y: 0, z: 0 },
+      plateOrigin: { x: -45, y: -43, z: -33 },
       plateOriginValid: true,
-      probeCenter: { x: 100, y: 120, z: 40 },
+      probeCenter: { x: -60, y: -60, z: -40 },
       probeCenterValid: true,
       toolOffset: { x: 0, y: 0, z: 0 },
     });
@@ -287,9 +288,9 @@ async function testOffsetOnlyCompletionPersistsToolOnly() {
     assert.ok(client.sent.includes('CmdGetMachineConfig'), 'OffsetOnly must GetMachineConfig');
     const calib = calibrationStore.load();
     const cfg = machineConfigStore.load();
-    assert.strictEqual(calib.probeCenter.x, 100);
-    assert.strictEqual(calib.probeCenter.y, 120);
-    assert.strictEqual(calib.probeCenter.z, 40);
+    assert.strictEqual(calib.probeCenter.x, -60);
+    assert.strictEqual(calib.probeCenter.y, -60);
+    assert.strictEqual(calib.probeCenter.z, -40);
     assert.ok(Math.abs(calib.toolOffset.x - -0.2) < 1e-9);
     assert.ok(Math.abs(calib.toolOffset.y - 0.1) < 1e-9);
     assert.ok(Math.abs(calib.toolOffset.z - -0.1) < 1e-9);

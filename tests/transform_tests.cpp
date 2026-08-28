@@ -87,7 +87,7 @@ int main()
         }
     }
 
-    // Homing: retract from +max, keep continuous pose (no snap to absolute home_offset).
+    // Homing: retract from +max, no raw teleport; home is derived (-R,-R,-R).
     {
         Machine machine;
         MachineConfig cfg = machine.machineConfig();

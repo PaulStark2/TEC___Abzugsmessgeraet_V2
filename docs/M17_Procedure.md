@@ -56,8 +56,8 @@ active `CollisionContext`. Trip → latched `Fault`.
 
 `machine = plateOrigin + platePoint + toolOffset` (`core/CoordinateTransform.hpp`).
 `TestExecutor::start()` and `CmdStart` require a valid `plateOrigin`.
-Successful homing re-references each axis at the +max switch (`setCurrentPose` to
-+retract R) then retracts to the machine home (axis = 0). See
+Successful homing re-references each axis at the +max switch (`referenceMachinePose` to
+machine 0, no raw teleport) then retracts to the derived home (−R). See
 [`docs/Homing.md`](Homing.md).
 
 ## M17.5 — ProbeCalibration

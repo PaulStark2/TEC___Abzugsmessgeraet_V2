@@ -198,6 +198,18 @@ static int testResponseFormat()
     {
         return 22;
     }
+    if (!contains(response, "\"referenceOffset\":{\"x\":0.0000"))
+    {
+        return 36;
+    }
+
+    const std::string withOffset = simplant::formatPlantStateResponse(
+        plant.state(11.0f, 1.0f, 2.0f), 11.0f, 1.0f, 2.0f, 100.0f, 100.0f, 50.0f);
+    if (!contains(withOffset, "\"referenceOffset\":{\"x\":100.0000") ||
+        !contains(withOffset, "\"y\":100.0000") || !contains(withOffset, "\"z\":50.0000"))
+    {
+        return 37;
+    }
 
     const std::string error = simplant::formatPlantErrorResponse("Unknown plant command");
     if (!contains(error, "\"ok\":false") || !contains(error, "Unknown plant command"))

@@ -61,7 +61,10 @@ struct PlantCommand
 
 PlantCommand parsePlantCommand(const std::string& line);
 bool applyPlantCommand(SimPlant& plant, const PlantCommand& command);
+// pose = Core raw TCP (gantry). referenceOffset = Core MCS (display only, not a plant sensor).
 std::string formatPlantStateResponse(const PlantState& state, float x, float y, float z);
+std::string formatPlantStateResponse(const PlantState& state, float x, float y, float z,
+                                     float offset_x, float offset_y, float offset_z);
 std::string formatPlantErrorResponse(const std::string& error);
 
 } // namespace simplant
