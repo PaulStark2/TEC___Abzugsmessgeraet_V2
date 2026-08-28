@@ -54,3 +54,11 @@ export function setPlantEStop(active) {
 export function setPlantForceStiffness(nPerMm) {
   return post('/api/simulation/force-stiffness', { nPerMm });
 }
+
+export function setPlantInjectedForce(force) {
+  return post('/api/simulation/injected-force', {
+    fx: Number(force && force.fx),
+    fy: Number(force && force.fy),
+    fz: Number(force && force.fz),
+  });
+}

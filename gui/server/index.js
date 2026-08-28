@@ -1033,6 +1033,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && urlPath === '/api/simulation/injected-force') {
+    try {
+      const body = await readJsonBody(req);
+      const fx = body.fx === undefined ? 0 : Number(body.fx);
+      const fy = body.fy === undefined ? 0 : Number(body.fy);
+      const fz = body.fz === undefined ? 0 : Number(body.fz);
+      const maxAbs = 200;
+      if (![fx, fy, fz].every(Number.isFinite)) {
+        sendJson(res, 400, { ok: false, error: 'fx/fy/fz must be finite numbers' });
+        return;
+      }
+      if (Math.abs(fx) > maxAbs || Math.abs(fy) > maxAbs || Math.abs(fz) > maxAbs) {
+        sendJson(res, 400, { ok: false, error: 'each |F| must be <= 200 N' });
+        return;
+      }
+      sendPlantResult(res, await plantClient.setInjectedForce({ fx, fy, fz }));
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Method Not Allowed');

@@ -219,5 +219,20 @@ int main()
         }
     }
 
+    // Idle injected plant force must reach Machine hostInputs unchanged.
+    {
+        simbridge::SimProtocolBridge bridge;
+        if (!bridge.plant().setInjectedForce(12.5f, 0.0f, -3.0f))
+        {
+            return 40;
+        }
+        bridge.applyHostInputs();
+        const ForceVector force = bridge.machine().hostInputs().force;
+        if (!nearEqual(force.fx, 12.5f) || !nearEqual(force.fy, 0.0f) || !nearEqual(force.fz, -3.0f))
+        {
+            return 41;
+        }
+    }
+
     return 0;
 }

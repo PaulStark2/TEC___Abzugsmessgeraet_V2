@@ -253,11 +253,62 @@ static int testSetForceStiffness()
     return 0;
 }
 
+static int testSetInjectedForce()
+{
+    SimPlant plant;
+    const PlantCommand cmd =
+        simplant::parsePlantCommand("{\"cmd\":\"setInjectedForce\",\"fx\":25,\"fy\":0}");
+    if (cmd.type != PlantCommandType::SetInjectedForce || !cmd.has_injected_fx || cmd.has_injected_fz)
+    {
+        return 50;
+    }
+    if (!simplant::applyPlantCommand(plant, cmd))
+    {
+        return 51;
+    }
+    if (!nearEqual(plant.injectedForce().fx, 25.0f) || !nearEqual(plant.injectedForce().fy, 0.0f) ||
+        !nearEqual(plant.injectedForce().fz, 0.0f))
+    {
+        return 52;
+    }
+
+    const auto state = plant.state(0.0f, 0.0f, 0.0f);
+    if (!nearEqual(state.injected_fx, 25.0f))
+    {
+        return 53;
+    }
+    const std::string json = simplant::formatPlantStateResponse(state, 0.0f, 0.0f, 0.0f);
+    if (!contains(json, "\"injectedFx\":25.0000") || !contains(json, "\"injectedFy\":0.0000"))
+    {
+        return 54;
+    }
+
+    if (simplant::applyPlantCommand(
+            plant, simplant::parsePlantCommand("{\"cmd\":\"setInjectedForce\",\"fx\":201}")))
+    {
+        return 55;
+    }
+    if (!nearEqual(plant.injectedForce().fx, 25.0f))
+    {
+        return 56;
+    }
+
+    if (!simplant::applyPlantCommand(plant, simplant::parsePlantCommand("{\"cmd\":\"setInjectedForce\"}")))
+    {
+        return 57;
+    }
+    if (!nearEqual(plant.injectedForce().fx, 0.0f))
+    {
+        return 58;
+    }
+    return 0;
+}
+
 int main()
 {
     const int results[] = {
         testParseUnknown(), testSetLimits(), testTriggerProbe(), testSetEStop(), testSetProbeDisc(),
-        testSetForceStiffness(), testResponseFormat(),
+        testSetForceStiffness(), testSetInjectedForce(), testResponseFormat(),
     };
 
     for (const int result : results)

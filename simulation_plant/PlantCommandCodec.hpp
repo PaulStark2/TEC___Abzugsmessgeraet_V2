@@ -15,7 +15,8 @@ enum class PlantCommandType
     TriggerProbe,
     SetEStop,
     SetProbeDisc,
-    SetForceStiffness
+    SetForceStiffness,
+    SetInjectedForce
 };
 
 struct PlantCommand
@@ -57,6 +58,13 @@ struct PlantCommand
 
     bool has_force_stiffness = false;
     float force_stiffness_n_per_mm = 5.0f;
+
+    bool has_injected_fx = false;
+    bool has_injected_fy = false;
+    bool has_injected_fz = false;
+    float injected_fx = 0.0f;
+    float injected_fy = 0.0f;
+    float injected_fz = 0.0f;
 };
 
 PlantCommand parsePlantCommand(const std::string& line);

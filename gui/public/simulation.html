@@ -168,8 +168,8 @@
         <section class="sim-group">
           <h3>Kraftsimulation (nur Prüfphasen)</h3>
           <p class="placeholder-note">
-            Lineare Z-Feder <code>Fz = k · (z<sub>contact</sub> − z)</code> nur in
-            InsertInitial / OptimizeInsert / TestOrAge. Fx/Fy bleiben 0. Kein MachineConfig-Parameter.
+            Lineare Z-Feder nur in InsertInitial / OptimizeInsert / TestOrAge.
+            Fx/Fy der Feder bleiben 0. Zusätzliche Hold-Kraft am TCP siehe unten.
           </p>
           <div class="sim-field">
             <label for="input-force-stiffness">Steifigkeit k [N/mm]</label>
@@ -177,6 +177,29 @@
           </div>
           <button type="button" id="btn-apply-force-stiffness">Kraftparameter übernehmen</button>
           <p class="sim-readout">aktiv: <span id="sim-force-stiffness">—</span> N/mm</p>
+        </section>
+
+        <section class="sim-group">
+          <h3>Externe Kraft am TCP (Hold)</h3>
+          <p class="placeholder-note">
+            Halten legt eine konstante Kraft in Maschinenachsenrichtung an. Der Core entscheidet:
+            Idle-Kontext Approach 20&nbsp;N → <code>ForceCollision</code>;
+            |F| &gt; 50&nbsp;N → <code>ForceHardLimit</code>.
+            Fault bleibt latched, bis <code>clearFault</code> in der Maschinen-GUI.
+          </p>
+          <div class="sim-field">
+            <label for="input-injected-force-n">Betrag [N]</label>
+            <input type="number" id="input-injected-force-n" min="0" max="200" step="0.5" value="25" />
+          </div>
+          <div class="sim-force-pad" role="group" aria-label="TCP-Kraftrichtung">
+            <button type="button" class="sim-force-btn" data-axis="x" data-sign="1">+X</button>
+            <button type="button" class="sim-force-btn" data-axis="x" data-sign="-1">−X</button>
+            <button type="button" class="sim-force-btn" data-axis="y" data-sign="1">+Y</button>
+            <button type="button" class="sim-force-btn" data-axis="y" data-sign="-1">−Y</button>
+            <button type="button" class="sim-force-btn" data-axis="z" data-sign="1">+Z</button>
+            <button type="button" class="sim-force-btn" data-axis="z" data-sign="-1">−Z</button>
+          </div>
+          <p class="sim-readout">injiziert: <span id="sim-injected-force">0 / 0 / 0</span> N</p>
         </section>
 
         <section class="sim-group">

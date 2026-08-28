@@ -2,6 +2,8 @@
 
 #include "ProbeGeometry.hpp"
 
+#include <cmath>
+
 namespace simplant
 {
 
@@ -61,17 +63,53 @@ float SimPlant::forceStiffnessNPerMm() const
     return force_stiffness_n_per_mm_;
 }
 
+bool SimPlant::setInjectedForce(float fx, float fy, float fz)
+{
+    if (!std::isfinite(fx) || !std::isfinite(fy) || !std::isfinite(fz))
+    {
+        return false;
+    }
+    if (std::fabs(fx) > kMaxInjectedForceAbs_N || std::fabs(fy) > kMaxInjectedForceAbs_N ||
+        std::fabs(fz) > kMaxInjectedForceAbs_N)
+    {
+        return false;
+    }
+
+    injected_force_ = ForceVector{fx, fy, fz};
+    const bool cleared = (fx == 0.0f && fy == 0.0f && fz == 0.0f);
+    injected_remaining_ = cleared ? 0.0f : kInjectedForceHoldSeconds;
+    return true;
+}
+
+ForceVector SimPlant::injectedForce() const
+{
+    return injected_force_;
+}
+
 void SimPlant::advance(float dt)
 {
-    if (dt <= 0.0f || probe_remaining_ <= 0.0f)
+    if (dt <= 0.0f)
     {
         return;
     }
 
-    probe_remaining_ -= dt;
-    if (probe_remaining_ < 0.0f)
+    if (probe_remaining_ > 0.0f)
     {
-        probe_remaining_ = 0.0f;
+        probe_remaining_ -= dt;
+        if (probe_remaining_ < 0.0f)
+        {
+            probe_remaining_ = 0.0f;
+        }
+    }
+
+    if (injected_remaining_ > 0.0f)
+    {
+        injected_remaining_ -= dt;
+        if (injected_remaining_ <= 0.0f)
+        {
+            injected_remaining_ = 0.0f;
+            injected_force_ = ForceVector{0.0f, 0.0f, 0.0f};
+        }
     }
 }
 
@@ -86,7 +124,7 @@ HostInputs SimPlant::sample(float x, float y, float z) const
 {
     HostInputs inputs{};
 
-    inputs.force = ForceVector{0.0f, 0.0f, 0.0f};
+    inputs.force = injected_force_;
 
     inputs.limitXMin = x <= limits_.x_min;
     inputs.limitXMax = x >= limits_.x_max;
@@ -141,6 +179,9 @@ PlantState SimPlant::state(float x, float y, float z) const
     snapshot.probe_trigger_z = inputs.probeTriggerZ;
     snapshot.probe_trigger_sequence = inputs.probeTriggerSequence;
     snapshot.force_stiffness_n_per_mm = force_stiffness_n_per_mm_;
+    snapshot.injected_fx = injected_force_.fx;
+    snapshot.injected_fy = injected_force_.fy;
+    snapshot.injected_fz = injected_force_.fz;
     snapshot.tcp_x = x;
     snapshot.tcp_y = y;
     snapshot.tcp_z = z;

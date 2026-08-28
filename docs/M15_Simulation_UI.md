@@ -53,8 +53,8 @@ Simulation UI
 Sensor evaluation inside the simulation host (~20 Hz tick):
 
 ```text
-SimPlant.sample(machine.x(), machine.y(), machine.z())
-  → HostInputs (force = 0, limitX/Y/ZMax by position, probeTriggered, e_stop)
+SimPlant.sample(machine.rawX(), machine.rawY(), machine.rawZ())
+  → HostInputs (injected force, limitX/Y/Z by position, probeTriggered, e_stop)
   → Machine::setHostInputs()
   → Machine::tick() / TestExecutor::tick()   ← CORE SAFETY DECIDES
   → StatusSnapshot
@@ -81,19 +81,28 @@ The simulation UI can move the disc with `setProbeDisc`. See
 
 ## Force
 
-`SimPlant::sample()` still reports `fx = fy = fz = 0` (limits/probe/e-stop only).
+`SimPlant::sample()` reports the **injected TCP force** from the Sim-UI hold buttons
+(default `fx = fy = fz = 0`). The plant does not compute process physics.
 
-`SimProtocolBridge::applyHostInputs()` overlays a **simulation-only** linear Z spring
-during procedure phases `InsertInitial`, `OptimizeInsert`, and `TestOrAge`:
+`SimProtocolBridge::applyHostInputs()` adds a **simulation-only** linear Z spring
+during procedure phases `InsertInitial`, `OptimizeInsert`, and `TestOrAge` while
+the spreader is coupled:
 
 ```text
-Fz = k * (z_contact - z)     // N, with Z+ up
-fx = fy = 0
+HostInputs.force = injected + (0, 0, Fz_spring)
+Fz_spring = processFzZ(...)     // N, with Z+ up
 ```
 
-- `z_contact` is latched to the TCP Z when entering the first of those phases.
-- Default `k = 1 N/mm`, adjustable via plant command `setForceStiffness` / Sim-UI.
-- Outside those phases (approach, probe calib, Safe-Z, …) force stays 0.
+- `z_contact` / `z_test` is latched to the TCP Z when entering the first of those phases.
+- Default `k = 5 N/mm`, adjustable via plant command `setForceStiffness` / Sim-UI.
+- Outside those phases (approach, probe calib, Safe-Z, idle, jog) only the injected
+  vector is present (usually 0).
+
+Hold injection (`setInjectedForce`) is momentary: `{0,0,0}` clears immediately.
+A non-zero vector expires after ~0.4 s unless the UI refreshes it. Magnitude per
+axis is limited to ±200 N so `ForceHardLimit` (> 50 N) remains testable. The Core
+ForceWatchdog decides Fault (`ForceCollision` vs `ForceHardLimit`); the plant never
+clears `MachineState::Fault`.
 
 Sign convention matches Core Phase 1 (`Fz >= targetForce` on compression while Z decreases).
 
@@ -113,6 +122,7 @@ channel is PC-simulation only and carries no machine commands.
 | `{"cmd":"setProbeDisc","x":40,"y":40,"z":10,"diameter":8,"thickness":3,"toolDiameter":2.5,"toolCylindricalHeight":15}` | virtual measuring disc |
 | `{"cmd":"setEStop","active":true}` | set/clear the virtual e-stop input |
 | `{"cmd":"setForceStiffness","nPerMm":1}` | sim Z-spring stiffness (N/mm) |
+| `{"cmd":"setInjectedForce","fx":25,"fy":0,"fz":0}` | hold TCP disturbance [N]; omitted axes = 0; `{0,0,0}` clears |
 
 Response: `{"ok":true,"state":{...},"pose":{"x":…,"y":…,"z":…},"referenceOffset":{"x":…,"y":…,"z":…}}` or
 `{"ok":false,"error":"…"}`. Unknown commands (for example `moveTo`) are rejected.
@@ -121,7 +131,7 @@ Response: `{"ok":true,"state":{...},"pose":{"x":…,"y":…,"z":…},"referenceO
 (`machine = raw − offset`) for overlay conversion only — not a plant sensor.
 
 Node exposes it as `GET /api/simulation/state` and
-`POST /api/simulation/{limits,probe,probe-disc,estop,force-stiffness}`. If the simulation host is down, the
+`POST /api/simulation/{limits,probe,probe-disc,estop,force-stiffness,injected-force}`. If the simulation host is down, the
 proxy answers HTTP 503 with a readable message.
 
 ## 3D gantry hierarchy
@@ -166,7 +176,7 @@ ctest --test-dir build       # C++ unit tests incl. simplant/plantchannel
 
 ## Deliberately not implemented in M15
 
-- No force simulation and no probe-based measuring/calibration logic.
+- No detailed force physics and no TCP displacement from injected force.
 - No min limit switches.
 - No M12 extension (no new message IDs, unchanged frame layout).
 - No simulation of collisions or drive dynamics.

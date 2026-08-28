@@ -6,11 +6,12 @@
  * Proves:
  *   1) /simulation is served as a standalone page
  *   2) plant channel state is reachable through the Node proxy
- *   3) force stays zero (force simulation disabled in M15)
+ *   3) force stays zero while idle (no injected force)
  *   4) probe delivers a short pulse and returns to LOW on its own
  *   5) X/Y/Z pose comes from the Core status (controller-driven)
- *   6) position-based limit switch trips and CORE decides the reaction (Fault)
- *   7) offline: simulation UI data + machine commands fail clearly, pose freezes
+ *   6) position-based limit switch trips and CORE decides the reaction (soft block)
+ *   7) injected TCP force: Core ForceWatchdog → Fault (ForceCollision)
+ *   8) offline: simulation UI data + machine commands fail clearly, pose freezes
  *
  * Usage (from gui/):
  *   npm run smoke:m15
@@ -189,7 +190,7 @@ async function main() {
     assert.strictEqual(initial.body.state.probeTriggered, false, 'probe LOW at start');
     console.log('  PASS: plant channel answers through /api/simulation/state');
 
-    console.log('[3] force is zero (M15 force simulation disabled)');
+    console.log('[3] force is zero while idle (no injected force)');
     const idleStatus = await request(guiPort, 'GET', '/api/machine');
     assert.strictEqual(idleStatus.body.status.fx, 0, 'fx = 0');
     assert.strictEqual(idleStatus.body.status.fy, 0, 'fy = 0');
@@ -253,7 +254,31 @@ async function main() {
     assert.strictEqual(plantAtLimit.body.state.limitXMax, true, 'plant keeps sensor HIGH');
     console.log(`  PASS: sensor HIGH at x=${blocked.x.toFixed(2)}, Core blocked X+ (no Fault)`);
 
-    console.log('[7] offline behaviour');
+    console.log('[7] injected TCP force, Core ForceWatchdog');
+    const inject = await request(guiPort, 'POST', '/api/simulation/injected-force', {
+      fx: 25,
+      fy: 0,
+      fz: 0,
+    });
+    assert.strictEqual(inject.status, 200, 'injected-force accepted');
+    assert.ok(Math.abs(inject.body.state.injectedFx - 25) < 0.01, 'plant reports injectedFx=25');
+    const forceFault = await waitStatus(
+      guiPort,
+      (status) => status.machineState === 'Fault' && status.faultReason === 'ForceCollision',
+      'Core Fault ForceCollision from injected Fx'
+    );
+    assert.strictEqual(forceFault.machineState, 'Fault', 'machine latched Fault');
+    const clearInject = await request(guiPort, 'POST', '/api/simulation/injected-force', {
+      fx: 0,
+      fy: 0,
+      fz: 0,
+    });
+    assert.strictEqual(clearInject.status, 200, 'injected-force clear accepted');
+    const afterClear = await request(guiPort, 'GET', '/api/machine');
+    assert.strictEqual(afterClear.body.status.machineState, 'Fault', 'Fault stays latched after release');
+    console.log('  PASS: 25 N Fx → ForceCollision; release does not clear Fault');
+
+    console.log('[8] offline behaviour');
     const beforeStop = (await request(guiPort, 'GET', '/api/machine')).body.status;
     killChild(sim);
     await waitStatus(guiPort, (status) => status.connected === false, 'controller offline');

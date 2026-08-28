@@ -155,9 +155,8 @@ void SimProtocolBridge::applyHostInputs()
 
         const float target = machine_.testConfiguration().target_force_N;
         const float k = plant_.forceStiffnessNPerMm();
-        inputs.force.fx = 0.0f;
-        inputs.force.fy = 0.0f;
-        inputs.force.fz =
+        // Keep Sim-UI injected Fx/Fy/Fz and add the process Z-spring on top.
+        inputs.force.fz +=
             simplant::processFzZ(machine_.z(), process_z_test_, target, k, true, process_force_unloaded_);
 
         const float tol = machine_.machineConfig().phase2.force_tolerance_N;
@@ -174,9 +173,7 @@ void SimProtocolBridge::applyHostInputs()
             process_force_latched_ = false;
             process_force_unloaded_ = false;
         }
-        inputs.force.fx = 0.0f;
-        inputs.force.fy = 0.0f;
-        inputs.force.fz = 0.0f;
+        // Idle/jog: plant injected force (default 0) is the HostInputs vector.
     }
 
     machine_.setHostInputs(inputs);

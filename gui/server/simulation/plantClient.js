@@ -86,6 +86,13 @@ function createPlantClient(options = {}) {
     setEStop: (active) => request({ cmd: 'setEStop', active: Boolean(active) }),
     setProbeDisc: (disc) => request({ cmd: 'setProbeDisc', ...disc }),
     setForceStiffness: (nPerMm) => request({ cmd: 'setForceStiffness', nPerMm: Number(nPerMm) }),
+    setInjectedForce: (force) =>
+      request({
+        cmd: 'setInjectedForce',
+        fx: Number(force && force.fx),
+        fy: Number(force && force.fy),
+        fz: Number(force && force.fz),
+      }),
   };
 }
 

@@ -9,6 +9,10 @@ namespace simplant
 {
 
 constexpr float kDefaultProbePulseSeconds = 0.1f;
+// Hold-to-apply failsafe: UI must refresh the injected TCP force within this window.
+constexpr float kInjectedForceHoldSeconds = 0.4f;
+// Plant-side sanity bound. Above SafetyLimits (50 N) so ForceHardLimit remains testable.
+constexpr float kMaxInjectedForceAbs_N = 200.0f;
 
 // Trip points of the virtual limit switches [machine position units].
 struct PlantLimits
@@ -52,6 +56,10 @@ struct PlantState
     float probe_trigger_z = 0.0f;
     std::uint32_t probe_trigger_sequence = 0;
     float force_stiffness_n_per_mm = 5.0f;
+    // Last accepted Sim-UI hold vector [N]. Zero when idle or after hold timeout.
+    float injected_fx = 0.0f;
+    float injected_fy = 0.0f;
+    float injected_fz = 0.0f;
 };
 
 class SimPlant
@@ -74,6 +82,11 @@ public:
     void setForceStiffnessNPerMm(float k);
     float forceStiffnessNPerMm() const;
 
+    // Simulation-only TCP disturbance [N]. Rejects non-finite values and |Fi| > 200 N.
+    // {0,0,0} clears immediately. Non-zero vectors arm the hold timeout.
+    bool setInjectedForce(float fx, float fy, float fz);
+    ForceVector injectedForce() const;
+
     void advance(float dt);
 
     HostInputs sample(float x, float y, float z) const;
@@ -88,6 +101,8 @@ private:
     float probe_remaining_ = 0.0f;
     bool e_stop_ = false;
     float force_stiffness_n_per_mm_ = 5.0f; // default: 50 N within 10 mm insert search
+    ForceVector injected_force_{};
+    float injected_remaining_ = 0.0f;
     mutable std::uint32_t force_sample_sequence_ = 0;
     mutable bool prev_probe_contact_ = false;
     mutable std::uint32_t probe_trigger_sequence_ = 0;

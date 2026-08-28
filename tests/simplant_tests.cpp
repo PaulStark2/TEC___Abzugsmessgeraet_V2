@@ -16,7 +16,7 @@ static bool nearEqual(float a, float b, float eps = 1e-5f)
     return std::fabs(a - b) <= eps;
 }
 
-// Force stays zero in M15 regardless of pose.
+// Default injected force is zero regardless of pose.
 static int testForceIsZero()
 {
     SimPlant plant;
@@ -25,6 +25,78 @@ static int testForceIsZero()
         !nearEqual(inputs.force.fz, 0.0f))
     {
         return 1;
+    }
+    return 0;
+}
+
+static int testInjectedForceSampleAndTimeout()
+{
+    SimPlant plant;
+    if (plant.setInjectedForce(12.5f, -4.0f, 0.0f) != true)
+    {
+        return 40;
+    }
+    const HostInputs held = plant.sample(0.0f, 0.0f, 0.0f);
+    if (!nearEqual(held.force.fx, 12.5f) || !nearEqual(held.force.fy, -4.0f) ||
+        !nearEqual(held.force.fz, 0.0f))
+    {
+        return 41;
+    }
+    const simplant::PlantState state = plant.state(0.0f, 0.0f, 0.0f);
+    if (!nearEqual(state.injected_fx, 12.5f) || !nearEqual(state.injected_fy, -4.0f))
+    {
+        return 42;
+    }
+
+    plant.advance(0.39f);
+    if (!nearEqual(plant.sample(0.0f, 0.0f, 0.0f).force.fx, 12.5f))
+    {
+        return 43;
+    }
+    plant.advance(0.02f);
+    const HostInputs after = plant.sample(0.0f, 0.0f, 0.0f);
+    if (!nearEqual(after.force.fx, 0.0f) || !nearEqual(after.force.fy, 0.0f) ||
+        !nearEqual(after.force.fz, 0.0f))
+    {
+        return 44;
+    }
+
+    if (plant.setInjectedForce(201.0f, 0.0f, 0.0f))
+    {
+        return 45;
+    }
+    if (!nearEqual(plant.injectedForce().fx, 0.0f))
+    {
+        return 46;
+    }
+    if (!plant.setInjectedForce(0.0f, 0.0f, 0.0f))
+    {
+        return 47;
+    }
+    return 0;
+}
+
+// Injected force is a plant sensor; Core ForceWatchdog decides Fault.
+static int testCoreDecidesInjectedForceFault()
+{
+    Machine machine;
+    SimPlant plant;
+    if (!plant.setInjectedForce(25.0f, 0.0f, 0.0f))
+    {
+        return 48;
+    }
+
+    const HostInputs inputs = plant.sample(0.0f, 0.0f, 0.0f);
+    machine.setHostInputs(inputs);
+    machine.tick(0.05f);
+
+    if (machine.machineState() != MachineState::Fault)
+    {
+        return 49;
+    }
+    if (machine.lastFaultReason() != FaultReason::ForceCollision)
+    {
+        return 50;
     }
     return 0;
 }
@@ -251,6 +323,8 @@ int main()
 {
     const int results[] = {
         testForceIsZero(),
+        testInjectedForceSampleAndTimeout(),
+        testCoreDecidesInjectedForceFault(),
         testPositionBasedMaxLimits(),
         testProbePulse(),
         testEStopPassthrough(),

@@ -193,6 +193,15 @@ PlantCommand parsePlantCommand(const std::string& line)
         return command;
     }
 
+    if (name == "setInjectedForce")
+    {
+        command.type = PlantCommandType::SetInjectedForce;
+        command.has_injected_fx = extractNumber(line, "fx", command.injected_fx);
+        command.has_injected_fy = extractNumber(line, "fy", command.injected_fy);
+        command.has_injected_fz = extractNumber(line, "fz", command.injected_fz);
+        return command;
+    }
+
     return command;
 }
 
@@ -275,6 +284,11 @@ bool applyPlantCommand(SimPlant& plant, const PlantCommand& command)
         plant.setForceStiffnessNPerMm(command.force_stiffness_n_per_mm);
         return true;
 
+    case PlantCommandType::SetInjectedForce:
+        return plant.setInjectedForce(command.has_injected_fx ? command.injected_fx : 0.0f,
+                                      command.has_injected_fy ? command.injected_fy : 0.0f,
+                                      command.has_injected_fz ? command.injected_fz : 0.0f);
+
     case PlantCommandType::Unknown:
     default:
         return false;
@@ -325,6 +339,9 @@ std::string formatPlantStateResponse(const PlantState& state, float x, float y, 
     json += ",\"eStop\":";
     json += boolLiteral(state.e_stop);
     json += ",\"forceStiffnessNPerMm\":" + formatFloat(state.force_stiffness_n_per_mm);
+    json += ",\"injectedFx\":" + formatFloat(state.injected_fx);
+    json += ",\"injectedFy\":" + formatFloat(state.injected_fy);
+    json += ",\"injectedFz\":" + formatFloat(state.injected_fz);
     json += "},\"pose\":{\"x\":" + formatFloat(x);
     json += ",\"y\":" + formatFloat(y);
     json += ",\"z\":" + formatFloat(z) + "}";

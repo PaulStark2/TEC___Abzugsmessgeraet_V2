@@ -19,6 +19,7 @@ import {
   fetchPlantState,
   setPlantEStop,
   setPlantForceStiffness,
+  setPlantInjectedForce,
   setPlantLimits,
   setPlantProbeDisc,
   triggerPlantProbe,
@@ -27,6 +28,8 @@ import {
 const PLANT_POLL_MS = 200;
 const PROGRAM_POLL_MS = 2000;
 const PROBE_PULSE_MS = 100;
+const INJECTED_FORCE_MAX_N = 200;
+const INJECTED_HOLD_REFRESH_MS = 200;
 
 const el = (id) => document.getElementById(id);
 
@@ -56,6 +59,7 @@ const dom = {
   limitState: el('sim-limit-state'),
   estopPlant: el('sim-estop-plant'),
   forceStiffness: el('sim-force-stiffness'),
+  injectedForce: el('sim-injected-force'),
   programFrameNote: el('sim-program-frame-note'),
   safeZNote: el('sim-safe-z-note'),
 };
@@ -121,6 +125,8 @@ function syncTrajectorySession(status) {
 let estopActive = false;
 let limitInputsTouched = false;
 let probeInputsTouched = false;
+let injectedHold = null;
+let injectedHoldTimer = null;
 
 const LIMIT_LABELS = ['X-', 'X+', 'Y-', 'Y+', 'Z-', 'Z+'];
 
@@ -576,6 +582,13 @@ function renderPlantState(state) {
       input.value = String(state.forceStiffnessNPerMm);
     }
   }
+  if (dom.injectedForce) {
+    const fx = Number(state.injectedFx);
+    const fy = Number(state.injectedFy);
+    const fz = Number(state.injectedFz);
+    const fmt = (v) => (Number.isFinite(v) ? v.toFixed(1) : '0.0');
+    dom.injectedForce.textContent = `${fmt(fx)} / ${fmt(fy)} / ${fmt(fz)}`;
+  }
   if (state.probe) {
     gantry.setProbeDisc(
       probeVisualFromSources({ plantProbe: state.probe, machineConfig: machineConfigSnapshot })
@@ -744,6 +757,139 @@ async function runPlantAction(action, successMessage) {
   }
 }
 
+function readInjectedMagnitude() {
+  const value = Number(el('input-injected-force-n').value);
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+  return Math.min(value, INJECTED_FORCE_MAX_N);
+}
+
+function injectedVectorFor(axis, sign, magnitude) {
+  const vector = { fx: 0, fy: 0, fz: 0 };
+  if (axis === 'x') {
+    vector.fx = sign * magnitude;
+  } else if (axis === 'y') {
+    vector.fy = sign * magnitude;
+  } else if (axis === 'z') {
+    vector.fz = sign * magnitude;
+  }
+  return vector;
+}
+
+function clearInjectedHoldTimer() {
+  if (injectedHoldTimer != null) {
+    window.clearInterval(injectedHoldTimer);
+    injectedHoldTimer = null;
+  }
+}
+
+async function sendInjectedForce(vector, successMessage) {
+  try {
+    const result = await setPlantInjectedForce(vector);
+    if (result && result.state) {
+      renderPlantState(result.state);
+    }
+    if (successMessage) {
+      setPlantFeedback(successMessage, false);
+    }
+  } catch (err) {
+    setPlantFeedback(err.message, true);
+  }
+}
+
+async function stopInjectedHold() {
+  const active = injectedHold;
+  if (!active) {
+    clearInjectedHoldTimer();
+    return;
+  }
+  injectedHold = null;
+  clearInjectedHoldTimer();
+  active.btn.classList.remove('sim-force-btn--active');
+  try {
+    if (active.pointerId != null) {
+      active.btn.releasePointerCapture(active.pointerId);
+    }
+  } catch {
+    // already released
+  }
+  await sendInjectedForce({ fx: 0, fy: 0, fz: 0 }, 'Externe Kraft gelöst (0 N)');
+}
+
+async function startInjectedHold(btn, event) {
+  const axis = btn.dataset.axis;
+  const sign = Number(btn.dataset.sign);
+  if (!axis || !Number.isFinite(sign)) {
+    return;
+  }
+  if (injectedHold) {
+    await stopInjectedHold();
+  }
+  const magnitude = readInjectedMagnitude();
+  const vector = injectedVectorFor(axis, sign, magnitude);
+  injectedHold = { axis, sign, pointerId: event.pointerId, btn };
+  btn.classList.add('sim-force-btn--active');
+  try {
+    btn.setPointerCapture(event.pointerId);
+  } catch {
+    // capture optional
+  }
+  await sendInjectedForce(
+    vector,
+    `Externe Kraft ${sign > 0 ? '+' : '−'}${axis.toUpperCase()} ${magnitude} N`
+  );
+  clearInjectedHoldTimer();
+  injectedHoldTimer = window.setInterval(() => {
+    if (!injectedHold) {
+      return;
+    }
+    const refresh = injectedVectorFor(injectedHold.axis, injectedHold.sign, readInjectedMagnitude());
+    void sendInjectedForce(refresh);
+  }, INJECTED_HOLD_REFRESH_MS);
+}
+
+function bindInjectedForcePad() {
+  const buttons = document.querySelectorAll('.sim-force-btn');
+  const onPointerDown = (event) => {
+    if (event.button != null && event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    void startInjectedHold(event.currentTarget, event);
+  };
+  const onPointerUp = (event) => {
+    if (!injectedHold) {
+      return;
+    }
+    if (injectedHold.pointerId != null && event.pointerId !== injectedHold.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    void stopInjectedHold();
+  };
+  const onClick = (event) => {
+    event.preventDefault();
+  };
+  buttons.forEach((btn) => {
+    btn.addEventListener('pointerdown', onPointerDown);
+    btn.addEventListener('pointerup', onPointerUp);
+    btn.addEventListener('pointercancel', onPointerUp);
+    btn.addEventListener('lostpointercapture', onPointerUp);
+    btn.addEventListener('click', onClick);
+  });
+  window.addEventListener('blur', () => {
+    if (injectedHold) {
+      void stopInjectedHold();
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    if (injectedHold) {
+      void stopInjectedHold();
+    }
+  });
+}
+
 function bindPanel() {
   for (const id of [
     'input-limit-x-min', 'input-limit-x-max',
@@ -793,6 +939,8 @@ function bindPanel() {
       `Kraftsteifigkeit gesetzt: ${nPerMm} N/mm`
     );
   });
+
+  bindInjectedForcePad();
 
   el('toggle-trajectory').addEventListener('change', (event) => {
     gantry.setShowTrajectory(event.target.checked);
