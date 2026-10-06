@@ -164,6 +164,20 @@ export function renderParameters(container) {
     });
   }
 
+  function forcePlanHint(cfg) {
+    const range = Number(cfg.force_range_N);
+    const count = Number(cfg.force_calib_points);
+    const step = Number(cfg.force_calib_step_g);
+    if (!(range > 0) || !Number.isInteger(count) || !(step > 200)) {
+      return '';
+    }
+    const heaviest = (count * step / 1000) * 9.80665;
+    if (heaviest > range || heaviest >= range * 0.8) {
+      return '';
+    }
+    return `Die letzte Stufe liegt bei ${heaviest.toFixed(2)} N, der Messbereich bei ${range.toFixed(2)} N. Darüber wird die Ausgleichskurve nur fortgeschrieben.`;
+  }
+
   function readFormValues(baseConfig) {
     const next = { ...baseConfig };
     contentEl.querySelectorAll('input[data-key]').forEach((input) => {
@@ -181,16 +195,20 @@ export function renderParameters(container) {
     if (!hintEl) {
       return;
     }
-    const hints = evaluateCornerConsistencyHints(readFormValues(baseConfig), groups);
-    if (!hints.length) {
+    const values = readFormValues(baseConfig);
+    const hints = evaluateCornerConsistencyHints(values, groups);
+    const forceHint = forcePlanHint(values);
+    if (!hints.length && !forceHint) {
       hintEl.hidden = true;
       hintEl.innerHTML = '';
       return;
     }
     hintEl.hidden = false;
-    hintEl.innerHTML = `<strong>Corner-Konsistenz:</strong><ul>${hints
-      .map((h) => `<li>${escapeHtml(h)}</li>`)
-      .join('')}</ul>`;
+    const corner = hints.length
+      ? `<strong>Corner-Konsistenz:</strong><ul>${hints.map((h) => `<li>${escapeHtml(h)}</li>`).join('')}</ul>`
+      : '';
+    const force = forceHint ? `<p>${escapeHtml(forceHint)}</p>` : '';
+    hintEl.innerHTML = `${corner}${force}`;
   }
 
   function renderEditor(groups, config) {
@@ -312,8 +330,13 @@ export function renderParameters(container) {
       ev.preventDefault();
       const next = readFormValues(config);
       try {
-        await saveMachineConfig(next);
-        setFeedback('Konfiguration gespeichert.', false);
+        const saved = await saveMachineConfig(next);
+        setFeedback(
+          saved && saved.forceCurveCleared
+            ? 'Konfiguration gespeichert. Die gespeicherte Kraftkennlinie liegt außerhalb des neuen Messbereichs und wurde verworfen.'
+            : 'Konfiguration gespeichert.',
+          false
+        );
       } catch (err) {
         setFeedback(err.message || String(err), true);
       }

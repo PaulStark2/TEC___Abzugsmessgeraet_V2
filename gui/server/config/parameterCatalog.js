@@ -291,6 +291,38 @@ const GROUPS = [
     title: 'Force',
     fields: [
       {
+        key: 'force_range_N',
+        label: 'Messbereich',
+        unit: 'N',
+        minExclusive: 0,
+        max: 500,
+        info: 'Betrag des Messbereichs für alle Achsen. Default 30 N. Kalibrierpunkte und die Eingliederkraft dürfen ihn nicht überschreiten. Darüber liegt nur die Notbremse von 500 N gegen Tippfehler.',
+      },
+      {
+        key: 'force_hard_limit_N',
+        label: 'Harte Sicherheitsgrenze',
+        unit: 'N',
+        minExclusive: 0,
+        max: 500,
+        info: 'Auslöseschwelle des Kraft-Watchdogs, Betrag. Default 30 N. Muss kleiner oder gleich dem Messbereich sein.',
+      },
+      {
+        key: 'force_calib_points',
+        label: 'Kalibrierpunkte je Richtung',
+        unit: '—',
+        integer: true,
+        min: 1,
+        max: 16,
+        info: 'Anzahl der Zug- und der Druckstufen im nächsten Kalibrierlauf. Default 5. Steht nur in der Parameterdatei, nicht im MachineConfig-Frame.',
+      },
+      {
+        key: 'force_calib_step_g',
+        label: 'Kalibrierschritt',
+        unit: 'g',
+        minExclusive: 200,
+        info: 'Schrittweite der Sollmassen. Default 500 g. Muss größer als 200 g sein, weil das Eingabefenster ±100 g bleibt. Die Stufen sind 1×Schritt bis Anzahl×Schritt.',
+      },
+      {
         key: 'force_filter',
         label: 'forceFilter',
         unit: '—',
@@ -374,12 +406,12 @@ const GROUPS = [
     id: 'collision',
     title: 'Collision',
     fields: [
-      { key: 'collision_approach_N', label: 'collisionApproach', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Approach (unterhalb der festen SafetyLimits ±50 N).' },
-      { key: 'collision_retract_N', label: 'collisionRetract', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Retract.' },
-      { key: 'collision_clamp_N', label: 'collisionClamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Clamp.' },
-      { key: 'collision_unclamp_N', label: 'collisionUnclamp', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Unclamp.' },
-      { key: 'collision_contact_N', label: 'collisionContact', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Contact / Eingliedern (Phase 1).' },
-      { key: 'collision_measure_N', label: 'collisionMeasure', unit: 'N', minExclusive: 0, max: 50, info: 'Phasengrenze Measure / Prüfung (Phase 3).' },
+      { key: 'collision_approach_N', label: 'collisionApproach', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Approach. Darf den eingestellten Messbereich nicht überschreiten.' },
+      { key: 'collision_retract_N', label: 'collisionRetract', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Retract. Darf den eingestellten Messbereich nicht überschreiten.' },
+      { key: 'collision_clamp_N', label: 'collisionClamp', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Clamp. Darf den eingestellten Messbereich nicht überschreiten.' },
+      { key: 'collision_unclamp_N', label: 'collisionUnclamp', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Unclamp. Darf den eingestellten Messbereich nicht überschreiten.' },
+      { key: 'collision_contact_N', label: 'collisionContact', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Contact / Eingliedern (Phase 1). Darf den eingestellten Messbereich nicht überschreiten.' },
+      { key: 'collision_measure_N', label: 'collisionMeasure', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Measure / Prüfung (Phase 3). Darf den eingestellten Messbereich nicht überschreiten.' },
     ],
   },
   {
@@ -392,7 +424,7 @@ const GROUPS = [
         unit: 's',
         min: 0.01,
         max: 10,
-        info: 'Ventil „ausfahren“ für diese Zeit. Keine Endlagerrückmeldung; spreaderExtended ist ein Timer-Latch, kein mechanischer Beweis.',
+        info: 'Ventil „ausfahren“ für diese Zeit (STM32: PC8 High / PC12 Low). Keine Endlagerrückmeldung; spreaderExtended ist ein Timer-Latch, kein mechanischer Beweis.',
       },
       {
         key: 'spreader_retract_time_s',
@@ -400,7 +432,7 @@ const GROUPS = [
         unit: 's',
         min: 0.01,
         max: 10,
-        info: 'Ventil „einfahren“ für diese Zeit. STOP/Fault schaltet das Ventil stromlos (SafeDeenergized).',
+        info: 'Ventil „einfahren“ für diese Zeit (STM32: PC12 High / PC8 Low). STOP/Fault friert das letzte Ventilpaar ein (SafeDeenergized), schaltet also nicht zwingend stromlos.',
       },
     ],
   },
@@ -657,12 +689,16 @@ function defaultMachineConfigPayload() {
     xy_max_correction: 2,
     insertion_buffer: 1,
     insert_search_distance: 10,
+    force_range_N: 30,
+    force_hard_limit_N: 30,
+    force_calib_points: 5,
+    force_calib_step_g: 500,
     collision_approach_N: 20,
-    collision_retract_N: 50,
+    collision_retract_N: 30,
     collision_clamp_N: 20,
     collision_unclamp_N: 20,
-    collision_contact_N: 50,
-    collision_measure_N: 50,
+    collision_contact_N: 30,
+    collision_measure_N: 30,
     spreader_extend_time_s: 0.5,
     spreader_retract_time_s: 0.5,
     force_tolerance_N: 0.5,
@@ -787,6 +823,33 @@ function validateMachineConfigPayload(cfg) {
         return { ok: false, error: `${field.key} muss ≤ ${field.max} sein (SafetyLimits)` };
       }
     }
+  }
+  const range = cfg.force_range_N;
+  const hard = cfg.force_hard_limit_N;
+  if (!(hard > 0) || hard > range) {
+    return { ok: false, error: 'force_hard_limit_N muss größer als 0 und kleiner oder gleich dem Messbereich sein' };
+  }
+  const collisionKeys = [
+    'collision_approach_N',
+    'collision_retract_N',
+    'collision_clamp_N',
+    'collision_unclamp_N',
+    'collision_contact_N',
+    'collision_measure_N',
+  ];
+  for (const key of collisionKeys) {
+    if (cfg[key] > range) {
+      return { ok: false, error: `${key} darf den Messbereich ${range} N nicht überschreiten` };
+    }
+  }
+  const points = cfg.force_calib_points;
+  const step = cfg.force_calib_step_g;
+  const heaviest = (points * step / 1000) * 9.80665;
+  if (heaviest > range + 1e-6) {
+    return {
+      ok: false,
+      error: `Die letzte Kalibrierstufe liegt bei ${heaviest.toFixed(2)} N und überschreitet den Messbereich ${range} N`,
+    };
   }
   return { ok: true };
 }

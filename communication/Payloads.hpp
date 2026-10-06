@@ -165,6 +165,9 @@ struct MachineConfigPayload
     float probe_center_x;
     float probe_center_y;
     float probe_center_z;
+    // Measuring range and watchdog hard limit [N]. Both default to 30.
+    float force_range_N = 30.0f;
+    float force_hard_limit_N = 30.0f;
 };
 
 struct TestConfigurationPayload
@@ -173,6 +176,75 @@ struct TestConfigurationPayload
     float target_force_N;
     uint16_t iterations;
     uint8_t active_point_index;
+};
+
+struct ForceCalibPointPayload
+{
+    uint16_t adc_net = 0;
+    uint8_t direction = 0;
+    float mass_g = 0.0f;
+    float nominal_g = 0.0f;
+};
+
+struct SetForceCalibrationPayload
+{
+    uint8_t source = 0;
+    uint8_t confirm = 0;
+    uint8_t commit = 0;
+    uint8_t count = 0;
+    ForceCalibPointPayload points[kForceCalibMaxPoints]{};
+};
+
+struct SelectForceCurvePayload
+{
+    uint8_t source = 0;
+    uint8_t confirm = 0;
+    uint8_t unit = 0;
+    uint8_t commit = 0;
+    float beta0 = 0.0f;
+    float beta1 = 0.0f;
+    float beta2 = 0.0f;
+};
+
+struct RawAdcPayload
+{
+    uint16_t x = 0;
+    uint16_t y = 0;
+    uint16_t z = 0;
+    uint8_t valid = 0;
+};
+
+struct ForceCalibrationResultPayload
+{
+    uint8_t requested_source = 0;
+    uint8_t resolved_source = 0;
+    uint8_t committed = 0;
+    uint8_t reason = 0;
+    uint8_t degree = 0;
+    uint8_t needs_confirmation = 0;
+    uint8_t worst_index = 0xFF;
+    uint8_t point_count = 0;
+    float beta0 = 0.0f;
+    float beta1 = 0.0f;
+    float beta2 = 0.0f;
+    float pearson_r = 0.0f;
+    float r_squared = 0.0f;
+    float max_abs_residual_N = 0.0f;
+    float mean_residual_tension_N = 0.0f;
+    float mean_residual_compression_N = 0.0f;
+    float linear_max_abs_N = 0.0f;
+    float quadratic_max_abs_N = 0.0f;
+    float linear_r2 = 0.0f;
+    float quadratic_r2 = 0.0f;
+    float linear_beta0 = 0.0f;
+    float linear_beta1 = 0.0f;
+    float linear_beta2 = 0.0f;
+    float linear_valid = 0.0f;
+    float quadratic_beta0 = 0.0f;
+    float quadratic_beta1 = 0.0f;
+    float quadratic_beta2 = 0.0f;
+    float quadratic_valid = 0.0f;
+    float reference_force_N[kForceCalibMaxPoints]{};
 };
 
 struct ForcePathChunkPayload

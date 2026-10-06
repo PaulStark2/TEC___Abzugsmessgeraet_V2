@@ -164,14 +164,24 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
         return ConfigValidationError::FilterInvalid;
     }
 
+    if (!forceAbsOk(config.force.range_N, SafetyLimits::kMaxFzAbs_N) ||
+        !forceAbsOk(config.force.hard_limit_N, config.force.range_N))
+    {
+        if (!(config.force.range_N > 0.0f) || !(config.force.hard_limit_N > 0.0f))
+        {
+            return ConfigValidationError::ForceNotPositive;
+        }
+        return ConfigValidationError::ForceExceedsSafety;
+    }
+
     if (!forceAbsOk(config.force.xy_tolerance_N, SafetyLimits::kMaxFxAbs_N) ||
         !forceAbsOk(config.phase2.force_tolerance_N, SafetyLimits::kMaxFzAbs_N) ||
-        !forceAbsOk(config.collision.approach_N, SafetyLimits::kMaxFzAbs_N) ||
-        !forceAbsOk(config.collision.retract_N, SafetyLimits::kMaxFzAbs_N) ||
-        !forceAbsOk(config.collision.clamp_N, SafetyLimits::kMaxFzAbs_N) ||
-        !forceAbsOk(config.collision.unclamp_N, SafetyLimits::kMaxFzAbs_N) ||
-        !forceAbsOk(config.collision.contact_N, SafetyLimits::kMaxFzAbs_N) ||
-        !forceAbsOk(config.collision.measure_N, SafetyLimits::kMaxFzAbs_N))
+        !forceAbsOk(config.collision.approach_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.retract_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.clamp_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.unclamp_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.contact_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.measure_N, config.force.range_N))
     {
         if (config.force.xy_tolerance_N <= 0.0f || config.phase2.force_tolerance_N <= 0.0f ||
             config.collision.approach_N <= 0.0f || config.collision.retract_N <= 0.0f ||

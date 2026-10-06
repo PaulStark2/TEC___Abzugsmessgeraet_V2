@@ -14,8 +14,16 @@ const SPEED_OPTIONS = [5, 10, 15, 25, 40];
  */
 export function mountJogPanel(container, opts) {
   const getStatus = (opts && opts.getStatus) || (() => ({}));
+  const compact = Boolean(opts && opts.compact);
 
-  container.innerHTML = `
+  container.innerHTML = compact
+    ? `
+    <div class="jog-panel jog-panel--compact">
+      ${jogAxesMarkup(true)}
+      <p class="jog-position"></p>
+    </div>
+  `
+    : `
     <div class="manual-section">
       <div class="control-form manual-speed-form">
         <label>
@@ -26,7 +34,7 @@ export function mountJogPanel(container, opts) {
         </label>
         <button type="button" class="jog-apply-speed">Geschwindigkeit setzen</button>
       </div>
-      ${jogAxesMarkup()}
+      ${jogAxesMarkup(false)}
       <div class="jog-position" style="margin-top:8px;font-family:monospace;font-size:0.95rem;"></div>
       <p class="command-feedback jog-feedback" aria-live="polite"></p>
     </div>
@@ -64,12 +72,16 @@ export function mountJogPanel(container, opts) {
     }
   };
 
-  applySpeedBtn.addEventListener('click', onApplySpeed);
+  if (applySpeedBtn) {
+    applySpeedBtn.addEventListener('click', onApplySpeed);
+  }
   const unbindJog = bindJogAxes(container, { getStatus, setFeedback });
 
   return () => {
     window.clearInterval(posTimer);
-    applySpeedBtn.removeEventListener('click', onApplySpeed);
+    if (applySpeedBtn) {
+      applySpeedBtn.removeEventListener('click', onApplySpeed);
+    }
     unbindJog();
   };
 }

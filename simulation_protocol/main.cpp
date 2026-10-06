@@ -215,6 +215,8 @@ int main(int argc, char** argv)
 #endif
             std::cout << "Client connected" << std::endl;
 
+            // First RawAdc must already be a real sample (0 N → about 1.5 V).
+            bridge.applyHostInputs();
             std::vector<simbridge::OutboundFrame> hello;
             bridge.appendStatusPush(hello);
             if (!hello.empty())

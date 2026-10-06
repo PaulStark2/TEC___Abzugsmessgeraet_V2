@@ -21,6 +21,12 @@ const {
   TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE,
   FORCE_PATH_CHUNK_MAX_SAMPLES,
   FORCE_PATH_CHUNK_HEADER_WIRE_SIZE,
+  FORCE_CALIB_MAX_POINTS,
+  FORCE_CALIB_POINT_WIRE_SIZE,
+  SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE,
+  SELECT_FORCE_CURVE_WIRE_SIZE,
+  RAW_ADC_WIRE_SIZE,
+  FORCE_CALIB_RESULT_HEADER_WIRE_SIZE,
   MessageId,
   DecodeResult,
   NO_CURRENT_POINT_INDEX,
@@ -151,6 +157,8 @@ const MACHINE_CONFIG_FIELDS = [
   { key: 'probe_center_x', type: 'f32', optionalZero: true },
   { key: 'probe_center_y', type: 'f32', optionalZero: true },
   { key: 'probe_center_z', type: 'f32', optionalZero: true },
+  { key: 'force_range_N', type: 'f32', defaultValue: 30 },
+  { key: 'force_hard_limit_N', type: 'f32', defaultValue: 30 },
 ];
 
 function encodeMachineConfigPayload(cfg) {
@@ -169,6 +177,9 @@ function encodeMachineConfigPayload(cfg) {
     let value = cfg[field.key];
     if (field.optionalZero && !Number.isFinite(value)) {
       value = 0;
+    }
+    if (field.defaultValue !== undefined && !Number.isFinite(value)) {
+      value = field.defaultValue;
     }
     if (!writeF32LE(out, offset, value)) {
       return null;
@@ -465,6 +476,7 @@ function validatePayloadForMessage(messageId, payload) {
       return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
     case MessageId.CmdSetSpreader:
     case MessageId.CmdSetFixture:
+    case MessageId.CmdSetCollisionGuard:
       return length === BOOL_PAYLOAD_WIRE_SIZE && decodeBoolPayload(payload) !== null;
     case MessageId.RspAck:
       return length === ACK_PAYLOAD_WIRE_SIZE && decodeAckPayload(payload) !== null;
@@ -498,6 +510,14 @@ function validatePayloadForMessage(messageId, payload) {
       return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
     case MessageId.MsgForcePathChunk:
       return decodeForcePathChunkPayload(payload) !== null;
+    case MessageId.CmdSetForceCalibration:
+      return decodeSetForceCalibrationPayload(payload) !== null;
+    case MessageId.CmdSelectForceCurve:
+      return decodeSelectForceCurvePayload(payload) !== null;
+    case MessageId.MsgRawAdc:
+      return decodeRawAdcPayload(payload) !== null;
+    case MessageId.MsgForceCalibration:
+      return decodeForceCalibrationResultPayload(payload) !== null;
     default:
       return false;
   }
@@ -734,6 +754,230 @@ function decodeFrame(data) {
   return { result: DecodeResult.Ok, frame, bytesConsumed: frameSize };
 }
 
+const FORCE_RESULT_FLOATS = [
+  'beta0',
+  'beta1',
+  'beta2',
+  'pearsonR',
+  'rSquared',
+  'maxAbsResidualN',
+  'meanResidualTensionN',
+  'meanResidualCompressionN',
+  'linearMaxAbsN',
+  'quadraticMaxAbsN',
+  'linearR2',
+  'quadraticR2',
+  'linearBeta0',
+  'linearBeta1',
+  'linearBeta2',
+  'linearValid',
+  'quadraticBeta0',
+  'quadraticBeta1',
+  'quadraticBeta2',
+  'quadraticValid',
+];
+
+function encodeSetForceCalibrationPayload(command) {
+  const points = command.points || [];
+  if (points.length < 2 || points.length > FORCE_CALIB_MAX_POINTS) {
+    return null;
+  }
+  const out = Buffer.alloc(SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE + points.length * FORCE_CALIB_POINT_WIRE_SIZE);
+  out[0] = command.source & 0xff;
+  out[1] = command.confirm ? 1 : 0;
+  out[2] = command.commit ? 1 : 0;
+  out[3] = points.length;
+  let offset = 4;
+  for (const point of points) {
+    out.writeUInt16LE(point.adcNet & 0xffff, offset);
+    out[offset + 2] = point.direction & 0xff;
+    out[offset + 3] = 0;
+    if (!writeF32LE(out, offset + 4, point.massG) || !writeF32LE(out, offset + 8, point.nominalG)) {
+      return null;
+    }
+    offset += FORCE_CALIB_POINT_WIRE_SIZE;
+  }
+  return out;
+}
+
+function decodeSetForceCalibrationPayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length < SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE) {
+    return null;
+  }
+  const count = payload[3];
+  if (payload[0] > 2 || payload[1] > 1 || payload[2] > 1 || count < 2 || count > FORCE_CALIB_MAX_POINTS) {
+    return null;
+  }
+  if (payload.length !== SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE + count * FORCE_CALIB_POINT_WIRE_SIZE) {
+    return null;
+  }
+  const points = [];
+  let offset = 4;
+  for (let i = 0; i < count; i += 1) {
+    const mass = readF32LE(payload, offset + 4);
+    const nominal = readF32LE(payload, offset + 8);
+    if (!mass.ok || !nominal.ok || payload[offset + 2] > 2) {
+      return null;
+    }
+    points.push({
+      adcNet: payload.readUInt16LE(offset),
+      direction: payload[offset + 2],
+      massG: mass.value,
+      nominalG: nominal.value,
+    });
+    offset += FORCE_CALIB_POINT_WIRE_SIZE;
+  }
+  return { source: payload[0], confirm: payload[1] === 1, commit: payload[2] === 1, points };
+}
+
+function encodeSelectForceCurvePayload(command) {
+  const out = Buffer.alloc(SELECT_FORCE_CURVE_WIRE_SIZE);
+  out[0] = command.source & 0xff;
+  out[1] = command.confirm ? 1 : 0;
+  out[2] = command.unit & 0xff;
+  out[3] = command.commit ? 1 : 0;
+  if (
+    !writeF32LE(out, 4, command.beta0 || 0) ||
+    !writeF32LE(out, 8, command.beta1 || 0) ||
+    !writeF32LE(out, 12, command.beta2 || 0)
+  ) {
+    return null;
+  }
+  return out;
+}
+
+function decodeSelectForceCurvePayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length !== SELECT_FORCE_CURVE_WIRE_SIZE) {
+    return null;
+  }
+  if (payload[0] > 3 || payload[1] > 1 || payload[2] > 1 || payload[3] > 1) {
+    return null;
+  }
+  const beta0 = readF32LE(payload, 4);
+  const beta1 = readF32LE(payload, 8);
+  const beta2 = readF32LE(payload, 12);
+  if (!beta0.ok || !beta1.ok || !beta2.ok) {
+    return null;
+  }
+  return {
+    source: payload[0],
+    confirm: payload[1] === 1,
+    unit: payload[2],
+    commit: payload[3] === 1,
+    beta0: beta0.value,
+    beta1: beta1.value,
+    beta2: beta2.value,
+  };
+}
+
+function encodeRawAdcPayload(sample) {
+  const out = Buffer.alloc(RAW_ADC_WIRE_SIZE);
+  out.writeUInt16LE(sample.x & 0xffff, 0);
+  out.writeUInt16LE(sample.y & 0xffff, 2);
+  out.writeUInt16LE(sample.z & 0xffff, 4);
+  out[6] = sample.valid ? 1 : 0;
+  return out;
+}
+
+function decodeRawAdcPayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length !== RAW_ADC_WIRE_SIZE || payload[6] > 1) {
+    return null;
+  }
+  return {
+    x: payload.readUInt16LE(0),
+    y: payload.readUInt16LE(2),
+    z: payload.readUInt16LE(4),
+    valid: payload[6] === 1,
+  };
+}
+
+function encodeForceCalibrationResultPayload(result) {
+  const count = result.referenceForceN ? result.referenceForceN.length : 0;
+  if (count > FORCE_CALIB_MAX_POINTS) {
+    return null;
+  }
+  const out = Buffer.alloc(FORCE_CALIB_RESULT_HEADER_WIRE_SIZE + count * 4);
+  out[0] = result.requestedSource & 0xff;
+  out[1] = result.resolvedSource & 0xff;
+  out[2] = result.committed ? 1 : 0;
+  out[3] = result.reason & 0xff;
+  out[4] = result.degree & 0xff;
+  out[5] = result.needsConfirmation ? 1 : 0;
+  out[6] = result.worstIndex == null ? 0xff : result.worstIndex & 0xff;
+  out[7] = count;
+  let offset = 8;
+  for (const key of FORCE_RESULT_FLOATS) {
+    if (!writeF32LE(out, offset, result[key] || 0)) {
+      return null;
+    }
+    offset += 4;
+  }
+  for (const force of result.referenceForceN || []) {
+    if (!writeF32LE(out, offset, force)) {
+      return null;
+    }
+    offset += 4;
+  }
+  return out;
+}
+
+function decodeForceCalibrationResultPayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length < FORCE_CALIB_RESULT_HEADER_WIRE_SIZE) {
+    return null;
+  }
+  const count = payload[7];
+  if (payload[2] > 1 || payload[5] > 1 || count > FORCE_CALIB_MAX_POINTS) {
+    return null;
+  }
+  if (payload.length !== FORCE_CALIB_RESULT_HEADER_WIRE_SIZE + count * 4) {
+    return null;
+  }
+  const result = {
+    requestedSource: payload[0],
+    resolvedSource: payload[1],
+    committed: payload[2] === 1,
+    reason: payload[3],
+    degree: payload[4],
+    needsConfirmation: payload[5] === 1,
+    worstIndex: payload[6] === 0xff ? null : payload[6],
+    referenceForceN: [],
+  };
+  let offset = 8;
+  for (const key of FORCE_RESULT_FLOATS) {
+    const value = readF32LE(payload, offset);
+    if (!value.ok) {
+      return null;
+    }
+    result[key] = value.value;
+    offset += 4;
+  }
+  for (let i = 0; i < count; i += 1) {
+    const force = readF32LE(payload, offset);
+    if (!force.ok) {
+      return null;
+    }
+    result.referenceForceN.push(force.value);
+    offset += 4;
+  }
+  return result;
+}
+
+function encodeSetForceCalibrationMessage(command) {
+  const payload = encodeSetForceCalibrationPayload(command);
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdSetForceCalibration, payload);
+}
+
+function encodeSelectForceCurveMessage(command) {
+  const payload = encodeSelectForceCurvePayload(command);
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdSelectForceCurve, payload);
+}
+
 module.exports = {
   encodeFrame,
   encodeEmptyMessage,
@@ -765,4 +1009,8 @@ module.exports = {
   decodeTestConfigurationPayload,
   encodeForcePathChunkPayload,
   decodeForcePathChunkPayload,
+  encodeSetForceCalibrationMessage,
+  encodeSelectForceCurveMessage,
+  decodeRawAdcPayload,
+  decodeForceCalibrationResultPayload,
 };

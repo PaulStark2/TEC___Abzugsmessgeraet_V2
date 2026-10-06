@@ -7,6 +7,7 @@
 #include "PayloadCodec.hpp"
 #include "Payloads.hpp"
 #include "SafeZ.hpp"
+#include "ForceSensorModel.hpp"
 #include "SimPlant.hpp"
 
 #include "Types.hpp"
@@ -231,6 +232,53 @@ int main()
         if (!nearEqual(force.fx, 12.5f) || !nearEqual(force.fy, 0.0f) || !nearEqual(force.fz, -3.0f))
         {
             return 41;
+        }
+    }
+
+    // An active Z curve maps every axis. The result is the curve, not the old ±50 N line,
+    // and a negative plant force stays negative.
+    {
+        simbridge::SimProtocolBridge bridge;
+        const float beta1 = 0.02f;
+        const float beta0 = -beta1 * static_cast<float>(simplant::syntheticFzCounts(0.0f));
+        tecomm::SelectForceCurvePayload select{};
+        select.source = 3;
+        select.unit = 0;
+        select.commit = 1;
+        select.beta0 = beta0;
+        select.beta1 = beta1;
+        select.beta2 = 0.0f;
+        uint8_t payload[16];
+        if (!tecomm::encodeSelectForceCurvePayload(select, payload, sizeof(payload)))
+        {
+            return 50;
+        }
+        std::vector<simbridge::OutboundFrame> out;
+        const tecomm::DecodedFrame frame =
+            makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdSelectForceCurve), payload, sizeof(payload));
+        bridge.handleFrame(frame, tecomm::DecodeResult::Ok, out);
+
+        if (!bridge.plant().setInjectedForce(10.0f, -4.0f, -8.0f))
+        {
+            return 51;
+        }
+        bridge.applyHostInputs();
+        const ForceVector force = bridge.machine().hostInputs().force;
+
+        const auto expected = [&](float plant_force) {
+            const float adc = static_cast<float>(simplant::syntheticFzCounts(plant_force));
+            return beta0 + beta1 * adc;
+        };
+        const float linear_x =
+            -50.0f + (static_cast<float>(simplant::syntheticFzCounts(10.0f)) / 4095.0f) * 100.0f;
+        if (!nearEqual(force.fx, expected(10.0f), 1e-3f) || !nearEqual(force.fy, expected(-4.0f), 1e-3f) ||
+            !nearEqual(force.fz, expected(-8.0f), 1e-3f))
+        {
+            return 52;
+        }
+        if (nearEqual(force.fx, linear_x, 0.5f) || !(force.fz < 0.0f) || !(force.fx > 0.0f))
+        {
+            return 53;
         }
     }
 

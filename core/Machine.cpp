@@ -45,6 +45,7 @@ Machine::Machine()
     , homing_axis_leg_(HomingAxisLeg::FastSeek)
     , homing_creep_back_traveled_(0.0f)
     , collision_context_(CollisionContext::Approach)
+    , collision_phase_enabled_(true)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
     , xy_correction_steps_(0)
@@ -92,6 +93,7 @@ Machine::Machine(const ForceControlParams& params)
     , homing_axis_leg_(HomingAxisLeg::FastSeek)
     , homing_creep_back_traveled_(0.0f)
     , collision_context_(CollisionContext::Approach)
+    , collision_phase_enabled_(true)
     , last_force_watchdog_trip_(ForceWatchdogTrip::None)
     , pre_clamp_xy_enabled_(false)
     , xy_correction_steps_(0)
@@ -957,8 +959,8 @@ void Machine::evaluateHostSafety(float dt)
         return;
     }
 
-    last_force_watchdog_trip_ =
-        evaluateForceWatchdog(host_inputs_.force, machine_config_, collision_context_);
+    last_force_watchdog_trip_ = evaluateForceWatchdog(host_inputs_.force, machine_config_, collision_context_,
+                                                     collision_phase_enabled_);
     if (last_force_watchdog_trip_ == ForceWatchdogTrip::NonFinite)
     {
         enterSafetyFault(FaultReason::ForceNonFinite);
@@ -1334,6 +1336,16 @@ bool Machine::trySetTestConfiguration(const TestConfiguration& incoming, ConfigV
         error = ConfigValidationError::RuntimeLocked;
         return false;
     }
+    error = validateTestConfiguration(incoming);
+    if (error != ConfigValidationError::Ok)
+    {
+        return false;
+    }
+    if (incoming.target_force_N > machine_config_.force.range_N)
+    {
+        error = ConfigValidationError::TargetForceInvalid;
+        return false;
+    }
     return ::tryApplyTestConfiguration(test_configuration_, incoming, error);
 }
 
@@ -1447,6 +1459,16 @@ void Machine::setCollisionContext(CollisionContext context)
 CollisionContext Machine::collisionContext() const
 {
     return collision_context_;
+}
+
+void Machine::setCollisionPhaseEnabled(bool enabled)
+{
+    collision_phase_enabled_ = enabled;
+}
+
+bool Machine::collisionPhaseEnabled() const
+{
+    return collision_phase_enabled_;
 }
 
 ForceWatchdogTrip Machine::lastForceWatchdogTrip() const

@@ -16,6 +16,16 @@ function emptyMcs() {
   };
 }
 
+function emptyForceZ() {
+  return {
+    valid: false,
+    source: 'auto',
+    points: [],
+    active: null,
+    external: null,
+  };
+}
+
 function empty() {
   return {
     machineCoordinateSystem: emptyMcs(),
@@ -24,6 +34,33 @@ function empty() {
     probeCenter: null,
     probeCenterValid: false,
     toolOffset: null,
+    forceZ: emptyForceZ(),
+  };
+}
+
+function normalizeForceZ(raw) {
+  const emptyCurve = emptyForceZ();
+  if (!raw || typeof raw !== 'object') {
+    return emptyCurve;
+  }
+  const points = Array.isArray(raw.points)
+    ? raw.points
+        .filter((point) => point && Number.isFinite(Number(point.adcNet)) && Number.isFinite(Number(point.massG)))
+        .map((point) => ({
+          adcNet: Number(point.adcNet),
+          massG: Number(point.massG),
+          nominalG: Number(point.nominalG),
+          direction: point.direction,
+          referenceForceN: Number.isFinite(Number(point.referenceForceN)) ? Number(point.referenceForceN) : null,
+        }))
+    : [];
+  const active = raw.active && Number.isFinite(Number(raw.active.beta0)) ? raw.active : null;
+  return {
+    valid: raw.valid === true && active !== null,
+    source: raw.source || 'auto',
+    points,
+    active,
+    external: raw.external || null,
   };
 }
 
@@ -77,6 +114,7 @@ function normalize(parsed) {
     probeCenter: probe,
     probeCenterValid,
     toolOffset: tool,
+    forceZ: normalizeForceZ(parsed.forceZ),
   };
 }
 
@@ -103,11 +141,48 @@ function save(state) {
  * Commit a newly defined MCS to disk.
  * Replaces the previous committed MCS and discards geometry (old MCS frame).
  */
+const STANDARD_GRAVITY = 9.80665;
+
+function outermostForceN(forceZ) {
+  const points = forceZ && Array.isArray(forceZ.points) ? forceZ.points : [];
+  let outer = 0;
+  for (const point of points) {
+    const stored = Number(point.referenceForceN);
+    const fromMass = Math.abs(Number(point.massG) / 1000) * STANDARD_GRAVITY;
+    const force = Number.isFinite(stored) ? Math.abs(stored) : fromMass;
+    if (Number.isFinite(force) && force > outer) {
+      outer = force;
+    }
+  }
+  return outer;
+}
+
+function invalidateForceZBeyondRange(rangeN) {
+  const current = load();
+  const range = Number(rangeN);
+  if (!current.forceZ || current.forceZ.valid !== true || !(range > 0)) {
+    return { invalidated: false, calibration: current };
+  }
+  if (!(outermostForceN(current.forceZ) > range + 1e-6)) {
+    return { invalidated: false, calibration: current };
+  }
+  return { invalidated: true, calibration: setForceZ(emptyForceZ()) };
+}
+
+function setForceZ(forceZ) {
+  const current = load();
+  return save({
+    ...current,
+    forceZ,
+  });
+}
+
 function setMachineCoordinateSystem(homePosition) {
   const home = finitePose(homePosition);
   if (!home) {
     throw new Error('homePosition x,y,z must be finite');
   }
+  const current = load();
   return save({
     machineCoordinateSystem: {
       valid: true,
@@ -119,6 +194,7 @@ function setMachineCoordinateSystem(homePosition) {
     probeCenter: null,
     probeCenterValid: false,
     toolOffset: null,
+    forceZ: current.forceZ,
   });
 }
 
@@ -198,6 +274,8 @@ module.exports = {
   invalidateForDefineMcs,
   setPlateOrigin,
   setProbeCenter,
+  setForceZ,
+  invalidateForceZBeyondRange,
   isLegacyToolOffsetSemantics,
   FILE_PATH,
 };

@@ -470,7 +470,9 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.a_probe_brake) &&
         writeF32LE(out, capacity, offset, payload.probe_center_x) &&
         writeF32LE(out, capacity, offset, payload.probe_center_y) &&
-        writeF32LE(out, capacity, offset, payload.probe_center_z);
+        writeF32LE(out, capacity, offset, payload.probe_center_z) &&
+        writeF32LE(out, capacity, offset, payload.force_range_N) &&
+        writeF32LE(out, capacity, offset, payload.force_hard_limit_N);
     return ok && offset == kMachineConfigPayloadWireSize;
 }
 
@@ -550,7 +552,9 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.a_probe_brake, true) &&
         readF32LE(data, length, offset, out.probe_center_x, true) &&
         readF32LE(data, length, offset, out.probe_center_y, true) &&
-        readF32LE(data, length, offset, out.probe_center_z, true);
+        readF32LE(data, length, offset, out.probe_center_z, true) &&
+        readF32LE(data, length, offset, out.force_range_N, true) &&
+        readF32LE(data, length, offset, out.force_hard_limit_N, true);
     return ok && offset == length && length == kMachineConfigPayloadWireSize;
 }
 
@@ -674,6 +678,305 @@ EncodeResult encodeMessage(uint8_t message_id, const ForcePathChunkPayload& payl
     uint8_t buffer[kForcePathChunkMaxPayloadWireSize];
     std::size_t payload_size = 0;
     if (!encodeForcePathChunkPayload(payload, buffer, sizeof(buffer), payload_size))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, payload_size, out, out_capacity);
+}
+
+bool encodeSetForceCalibrationPayload(const SetForceCalibrationPayload& payload, uint8_t* out, std::size_t capacity,
+                                      std::size_t& bytes_written)
+{
+    if (payload.count > kForceCalibMaxPoints || payload.source > 2 || payload.confirm > 1 || payload.commit > 1)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    if (!writeU8(out, capacity, offset, payload.source) || !writeU8(out, capacity, offset, payload.confirm) ||
+        !writeU8(out, capacity, offset, payload.commit) || !writeU8(out, capacity, offset, payload.count))
+    {
+        return false;
+    }
+    for (uint8_t i = 0; i < payload.count; ++i)
+    {
+        const ForceCalibPointPayload& point = payload.points[i];
+        if (point.direction > 2 || !isFiniteFloat(point.mass_g) || !isFiniteFloat(point.nominal_g))
+        {
+            return false;
+        }
+        if (!writeU16LE(out, capacity, offset, point.adc_net) || !writeU8(out, capacity, offset, point.direction) ||
+            !writeU8(out, capacity, offset, 0) || !writeF32LE(out, capacity, offset, point.mass_g) ||
+            !writeF32LE(out, capacity, offset, point.nominal_g))
+        {
+            return false;
+        }
+    }
+    bytes_written = offset;
+    return offset == setForceCalibrationWireSize(payload.count);
+}
+
+bool decodeSetForceCalibrationPayload(const uint8_t* data, std::size_t length, SetForceCalibrationPayload& out)
+{
+    std::size_t offset = 0;
+    if (!readU8(data, length, offset, out.source) || !readU8(data, length, offset, out.confirm) ||
+        !readU8(data, length, offset, out.commit) || !readU8(data, length, offset, out.count))
+    {
+        return false;
+    }
+    if (out.source > 2 || out.confirm > 1 || out.commit > 1 || out.count > kForceCalibMaxPoints || out.count < 2)
+    {
+        return false;
+    }
+    if (length != setForceCalibrationWireSize(out.count))
+    {
+        return false;
+    }
+    for (uint8_t i = 0; i < out.count; ++i)
+    {
+        uint8_t pad = 0;
+        if (!readU16LE(data, length, offset, out.points[i].adc_net) ||
+            !readU8(data, length, offset, out.points[i].direction) || !readU8(data, length, offset, pad) ||
+            !readF32LE(data, length, offset, out.points[i].mass_g, true) ||
+            !readF32LE(data, length, offset, out.points[i].nominal_g, true))
+        {
+            return false;
+        }
+        if (out.points[i].direction > 2)
+        {
+            return false;
+        }
+    }
+    return offset == length;
+}
+
+bool encodeSelectForceCurvePayload(const SelectForceCurvePayload& payload, uint8_t* out, std::size_t capacity)
+{
+    if (payload.source > 3 || payload.confirm > 1 || payload.unit > 1 || payload.commit > 1)
+    {
+        return false;
+    }
+    if (!isFiniteFloat(payload.beta0) || !isFiniteFloat(payload.beta1) || !isFiniteFloat(payload.beta2))
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    return writeU8(out, capacity, offset, payload.source) && writeU8(out, capacity, offset, payload.confirm) &&
+           writeU8(out, capacity, offset, payload.unit) && writeU8(out, capacity, offset, payload.commit) &&
+           writeF32LE(out, capacity, offset, payload.beta0) && writeF32LE(out, capacity, offset, payload.beta1) &&
+           writeF32LE(out, capacity, offset, payload.beta2) && offset == kSelectForceCurveWireSize;
+}
+
+bool decodeSelectForceCurvePayload(const uint8_t* data, std::size_t length, SelectForceCurvePayload& out)
+{
+    if (length != kSelectForceCurveWireSize)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    if (!readU8(data, length, offset, out.source) || !readU8(data, length, offset, out.confirm) ||
+        !readU8(data, length, offset, out.unit) || !readU8(data, length, offset, out.commit) ||
+        !readF32LE(data, length, offset, out.beta0, true) || !readF32LE(data, length, offset, out.beta1, true) ||
+        !readF32LE(data, length, offset, out.beta2, true))
+    {
+        return false;
+    }
+    return out.source <= 3 && out.confirm <= 1 && out.unit <= 1 && out.commit <= 1 && offset == length;
+}
+
+bool encodeRawAdcPayload(const RawAdcPayload& payload, uint8_t* out, std::size_t capacity)
+{
+    if (payload.valid > 1)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    return writeU16LE(out, capacity, offset, payload.x) && writeU16LE(out, capacity, offset, payload.y) &&
+           writeU16LE(out, capacity, offset, payload.z) && writeU8(out, capacity, offset, payload.valid) &&
+           offset == kRawAdcWireSize;
+}
+
+bool decodeRawAdcPayload(const uint8_t* data, std::size_t length, RawAdcPayload& out)
+{
+    if (length != kRawAdcWireSize)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    return readU16LE(data, length, offset, out.x) && readU16LE(data, length, offset, out.y) &&
+           readU16LE(data, length, offset, out.z) && readU8(data, length, offset, out.valid) && out.valid <= 1 &&
+           offset == length;
+}
+
+bool encodeForceCalibrationResultPayload(const ForceCalibrationResultPayload& payload, uint8_t* out,
+                                         std::size_t capacity, std::size_t& bytes_written)
+{
+    if (payload.point_count > kForceCalibMaxPoints)
+    {
+        return false;
+    }
+    const float fields[] = {payload.beta0,
+                            payload.beta1,
+                            payload.beta2,
+                            payload.pearson_r,
+                            payload.r_squared,
+                            payload.max_abs_residual_N,
+                            payload.mean_residual_tension_N,
+                            payload.mean_residual_compression_N,
+                            payload.linear_max_abs_N,
+                            payload.quadratic_max_abs_N,
+                            payload.linear_r2,
+                            payload.quadratic_r2,
+                            payload.linear_beta0,
+                            payload.linear_beta1,
+                            payload.linear_beta2,
+                            payload.linear_valid,
+                            payload.quadratic_beta0,
+                            payload.quadratic_beta1,
+                            payload.quadratic_beta2,
+                            payload.quadratic_valid};
+    for (float value : fields)
+    {
+        if (!isFiniteFloat(value))
+        {
+            return false;
+        }
+    }
+    std::size_t offset = 0;
+    if (!writeU8(out, capacity, offset, payload.requested_source) ||
+        !writeU8(out, capacity, offset, payload.resolved_source) ||
+        !writeU8(out, capacity, offset, payload.committed) || !writeU8(out, capacity, offset, payload.reason) ||
+        !writeU8(out, capacity, offset, payload.degree) ||
+        !writeU8(out, capacity, offset, payload.needs_confirmation) ||
+        !writeU8(out, capacity, offset, payload.worst_index) ||
+        !writeU8(out, capacity, offset, payload.point_count))
+    {
+        return false;
+    }
+    for (float value : fields)
+    {
+        if (!writeF32LE(out, capacity, offset, value))
+        {
+            return false;
+        }
+    }
+    for (uint8_t i = 0; i < payload.point_count; ++i)
+    {
+        if (!isFiniteFloat(payload.reference_force_N[i]) ||
+            !writeF32LE(out, capacity, offset, payload.reference_force_N[i]))
+        {
+            return false;
+        }
+    }
+    bytes_written = offset;
+    return offset == forceCalibResultWireSize(payload.point_count);
+}
+
+bool decodeForceCalibrationResultPayload(const uint8_t* data, std::size_t length, ForceCalibrationResultPayload& out)
+{
+    std::size_t offset = 0;
+    if (!readU8(data, length, offset, out.requested_source) || !readU8(data, length, offset, out.resolved_source) ||
+        !readU8(data, length, offset, out.committed) || !readU8(data, length, offset, out.reason) ||
+        !readU8(data, length, offset, out.degree) || !readU8(data, length, offset, out.needs_confirmation) ||
+        !readU8(data, length, offset, out.worst_index) || !readU8(data, length, offset, out.point_count))
+    {
+        return false;
+    }
+    if (out.committed > 1 || out.needs_confirmation > 1 || out.point_count > kForceCalibMaxPoints)
+    {
+        return false;
+    }
+    if (length != forceCalibResultWireSize(out.point_count))
+    {
+        return false;
+    }
+    float* fields[] = {&out.beta0,
+                       &out.beta1,
+                       &out.beta2,
+                       &out.pearson_r,
+                       &out.r_squared,
+                       &out.max_abs_residual_N,
+                       &out.mean_residual_tension_N,
+                       &out.mean_residual_compression_N,
+                       &out.linear_max_abs_N,
+                       &out.quadratic_max_abs_N,
+                       &out.linear_r2,
+                       &out.quadratic_r2,
+                       &out.linear_beta0,
+                       &out.linear_beta1,
+                       &out.linear_beta2,
+                       &out.linear_valid,
+                       &out.quadratic_beta0,
+                       &out.quadratic_beta1,
+                       &out.quadratic_beta2,
+                       &out.quadratic_valid};
+    for (float* field : fields)
+    {
+        if (!readF32LE(data, length, offset, *field, true))
+        {
+            return false;
+        }
+    }
+    for (uint8_t i = 0; i < out.point_count; ++i)
+    {
+        if (!readF32LE(data, length, offset, out.reference_force_N[i], true))
+        {
+            return false;
+        }
+    }
+    return offset == length;
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const SetForceCalibrationPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kSetForceCalibrationHeaderWireSize + kForceCalibMaxPoints * kForceCalibPointWireSize];
+    std::size_t payload_size = 0;
+    if (!encodeSetForceCalibrationPayload(payload, buffer, sizeof(buffer), payload_size))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, payload_size, out, out_capacity);
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const SelectForceCurvePayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kSelectForceCurveWireSize];
+    if (!encodeSelectForceCurvePayload(payload, buffer, sizeof(buffer)))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, kSelectForceCurveWireSize, out, out_capacity);
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const RawAdcPayload& payload, uint8_t* out, std::size_t out_capacity)
+{
+    uint8_t buffer[kRawAdcWireSize];
+    if (!encodeRawAdcPayload(payload, buffer, sizeof(buffer)))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, kRawAdcWireSize, out, out_capacity);
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const ForceCalibrationResultPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kForceCalibResultMaxWireSize];
+    std::size_t payload_size = 0;
+    if (!encodeForceCalibrationResultPayload(payload, buffer, sizeof(buffer), payload_size))
     {
         EncodeResult result{};
         result.ok = false;

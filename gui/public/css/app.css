@@ -842,3 +842,200 @@ button:disabled {
   border-color: var(--clr-ok, #2e7d32);
   background: rgba(46, 125, 50, 0.06);
 }
+
+.calib-group {
+  margin: 0 0 1.35rem;
+}
+
+.calib-group h4 {
+  margin: 0 0 0.55rem;
+  font-size: 1rem;
+}
+
+.calib-group .menu-nav__item {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.4rem;
+  text-align: left;
+}
+
+.calib-group__note {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.force-wizard__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.force-wizard__equation {
+  font-family: monospace;
+  font-size: 0.95rem;
+}
+
+.force-wizard__spec {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.force-wizard__spec th,
+.force-wizard__spec td {
+  padding: 0.35rem 0.5rem;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.force-wizard__spec th {
+  width: 11rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.force-wizard h4 {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.force-wizard__progress,
+.force-wizard__sample-progress {
+  margin: 0 0 0.25rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.force-wizard__mean {
+  margin: 0.35rem 0 0.15rem;
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.force-wizard__samples {
+  margin-top: 0.45rem;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.force-wizard__samples th,
+.force-wizard__samples td {
+  padding: 0.1rem 0.4rem 0.1rem 0;
+  font-weight: 500;
+  text-align: left;
+}
+
+.force-wizard__primary {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.7rem 1.1rem;
+  background: #1d4e89;
+  border-color: #3d8bfd;
+  font-weight: 600;
+}
+
+.force-wizard__mass {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 12rem;
+  margin-top: 0.75rem;
+}
+
+.force-wizard__mass input {
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.force-wizard__stats {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.force-wizard__live {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.force-wizard__dock {
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.force-wizard__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.force-wizard__tools button {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.force-wizard__stop {
+  background: #5a2a2a;
+  border-color: #8a4040;
+}
+
+.force-wizard__advanced {
+  margin-top: 1rem;
+}
+
+.jog-panel--compact .jog-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.jog-panel--compact .jog-compact__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.jog-panel--compact .jog-step-input {
+  width: 4.2rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.jog-panel--compact .jog-mode-btn,
+.jog-panel--compact .btn-jog {
+  padding: 0.22rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+.jog-panel--compact .jog-axis--inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.jog-panel--compact .jog-position {
+  margin: 0.35rem 0 0;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+}

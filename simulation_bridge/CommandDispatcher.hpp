@@ -4,6 +4,7 @@
 #include "Payloads.hpp"
 #include "ProtocolSpec.hpp"
 
+#include "ForceCalibHost.hpp"
 #include "Machine.hpp"
 #include "TestExecutor.hpp"
 
@@ -25,7 +26,7 @@ struct OutboundFrame
 class CommandDispatcher
 {
 public:
-    CommandDispatcher(Machine& machine, TestExecutor& executor);
+    CommandDispatcher(Machine& machine, TestExecutor& executor, ForceCalibHost* force_calib = nullptr);
 
     // Dispatch one inbound frame. Appends zero or more outbound frames.
     void dispatch(const tecomm::DecodedFrame& frame, tecomm::DecodeResult decode_result,
@@ -44,8 +45,11 @@ private:
 
     bool isFaultGuarded(uint8_t message_id) const;
 
+    void appendForceCalibration(const tecomm::ForceCalibrationResultPayload& result, std::vector<OutboundFrame>& out);
+
     Machine& machine_;
     TestExecutor& executor_;
+    ForceCalibHost* force_calib_ = nullptr;
     uint8_t program_point_count_ = 0;
 };
 

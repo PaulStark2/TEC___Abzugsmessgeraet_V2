@@ -29,7 +29,7 @@ import {
 const PLANT_POLL_MS = 200;
 const PROGRAM_POLL_MS = 2000;
 const PROBE_PULSE_MS = 100;
-const INJECTED_FORCE_MAX_N = 200;
+const INJECTED_FORCE_MAX_N = 600;
 const INJECTED_HOLD_REFRESH_MS = 200;
 
 const el = (id) => document.getElementById(id);
@@ -827,6 +827,7 @@ async function stopInjectedHold() {
 async function startInjectedHold(btn, event) {
   const axis = btn.dataset.axis;
   const sign = Number(btn.dataset.sign);
+  const latched = btn.dataset.latch === '1';
   if (!axis || !Number.isFinite(sign)) {
     return;
   }
@@ -835,12 +836,14 @@ async function startInjectedHold(btn, event) {
   }
   const magnitude = readInjectedMagnitude();
   const vector = injectedVectorFor(axis, sign, magnitude);
-  injectedHold = { axis, sign, pointerId: event.pointerId, btn };
+  injectedHold = { axis, sign, pointerId: latched ? null : event.pointerId, btn, latched };
   btn.classList.add('sim-force-btn--active');
-  try {
-    btn.setPointerCapture(event.pointerId);
-  } catch {
-    // capture optional
+  if (!latched) {
+    try {
+      btn.setPointerCapture(event.pointerId);
+    } catch {
+      // capture optional
+    }
   }
   await sendInjectedForce(
     vector,
@@ -866,7 +869,7 @@ function bindInjectedForcePad() {
     void startInjectedHold(event.currentTarget, event);
   };
   const onPointerUp = (event) => {
-    if (!injectedHold) {
+    if (!injectedHold || injectedHold.latched) {
       return;
     }
     if (injectedHold.pointerId != null && event.pointerId !== injectedHold.pointerId) {
@@ -886,7 +889,7 @@ function bindInjectedForcePad() {
     btn.addEventListener('click', onClick);
   });
   window.addEventListener('blur', () => {
-    if (injectedHold) {
+    if (injectedHold && !injectedHold.latched) {
       void stopInjectedHold();
     }
   });
@@ -948,6 +951,9 @@ function bindPanel() {
   });
 
   bindInjectedForcePad();
+  el('btn-release-force').addEventListener('click', () => {
+    void stopInjectedHold();
+  });
 
   el('toggle-trajectory').addEventListener('change', (event) => {
     gantry.setShowTrajectory(event.target.checked);

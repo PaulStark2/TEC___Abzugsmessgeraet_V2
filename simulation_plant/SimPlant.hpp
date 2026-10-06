@@ -11,8 +11,9 @@ namespace simplant
 constexpr float kDefaultProbePulseSeconds = 0.1f;
 // Hold-to-apply failsafe: UI must refresh the injected TCP force within this window.
 constexpr float kInjectedForceHoldSeconds = 0.4f;
-// Plant-side sanity bound. Above SafetyLimits (50 N) so ForceHardLimit remains testable.
-constexpr float kMaxInjectedForceAbs_N = 200.0f;
+// Plant-side sanity bound. Above the 500 N config typo brake so a configured
+// hard limit can still be exceeded and ForceHardLimit stays testable.
+constexpr float kMaxInjectedForceAbs_N = 600.0f;
 
 // Trip points of the virtual limit switches [machine position units].
 struct PlantLimits

@@ -49,16 +49,21 @@ struct MachineConfig
         float sample_timeout_s = 0.5f; // stale HostInputs.force → Fault [s]
         float xy_correct_timeout_s = 2.0f; // PreClamp abort if Fx/Fy not settled
         unsigned xy_max_attempts = 80u; // PreClamp abort after this many XY steps
+        // Measuring range magnitude for every axis [N]. Calibration points and
+        // target_force_N must stay inside it. Collision thresholds may rise up to it.
+        float range_N = 30.0f;
+        // Watchdog hard-limit magnitude [N]. Must be <= range_N.
+        float hard_limit_N = 30.0f;
     };
 
     struct Collision
     {
         float approach_N = 20.0f;
-        float retract_N = 50.0f;
+        float retract_N = 30.0f;
         float clamp_N = 20.0f;
         float unclamp_N = 20.0f;
-        float contact_N = 50.0f;
-        float measure_N = 50.0f;
+        float contact_N = 30.0f;
+        float measure_N = 30.0f;
     };
 
     struct Spreader

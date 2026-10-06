@@ -100,7 +100,7 @@ Fz_spring = processFzZ(...)     // N, with Z+ up
 
 Hold injection (`setInjectedForce`) is momentary: `{0,0,0}` clears immediately.
 A non-zero vector expires after ~0.4 s unless the UI refreshes it. Magnitude per
-axis is limited to ±200 N so `ForceHardLimit` (> 50 N) remains testable. The Core
+axis is limited to ±600 N so `ForceHardLimit` (above the configured hard limit, default 30 N) remains testable. The Core
 ForceWatchdog decides Fault (`ForceCollision` vs `ForceHardLimit`); the plant never
 clears `MachineState::Fault`.
 

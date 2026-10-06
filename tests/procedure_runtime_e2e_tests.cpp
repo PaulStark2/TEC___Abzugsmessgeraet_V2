@@ -447,14 +447,27 @@ static int testForceLevelsWithStiffness5()
         {
             return 40;
         }
+        if (target > machine.machineConfig().force.range_N)
+        {
+            MachineConfig wide = machine.machineConfig();
+            wide.force.range_N = target;
+            wide.force.hard_limit_N = target;
+            wide.collision.contact_N = target;
+            wide.collision.measure_N = target;
+            ConfigValidationError wide_err = ConfigValidationError::Ok;
+            if (!machine.trySetMachineConfig(wide, wide_err))
+            {
+                return 41;
+            }
+        }
         if (!configureProcedure(machine, 15.0f, target))
         {
             return 41;
         }
         MachineConfig mcfg = machine.machineConfig();
         mcfg.force.insert_search_distance = 25.0f; // enough for 50 N at k=5 after unload
-        mcfg.collision.contact_N = 50.0f;
-        mcfg.collision.measure_N = 50.0f;
+        mcfg.collision.contact_N = mcfg.force.range_N;
+        mcfg.collision.measure_N = mcfg.force.range_N;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
         {

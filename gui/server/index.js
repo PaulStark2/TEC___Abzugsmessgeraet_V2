@@ -105,6 +105,58 @@ function readJsonBody(req) {
   });
 }
 
+function forceDirectionName(direction) {
+  if (direction === 0 || direction === 'tension') return 'tension';
+  if (direction === 1 || direction === 'compression') return 'compression';
+  return 'zero';
+}
+
+function forceZFromReport(body, report) {
+  const sourceNames = ['auto', 'linear', 'quadratic', 'external'];
+  const source = sourceNames[Number(body.source)] || 'auto';
+  return {
+    valid: true,
+    source,
+    points: (body.points || []).map((point, index) => ({
+      adcNet: Number(point.adcNet),
+      massG: Number(point.massG),
+      nominalG: Number(point.nominalG),
+      direction: forceDirectionName(point.direction),
+      referenceForceN: report.referenceForceN ? report.referenceForceN[index] : null,
+    })),
+    active: {
+      degree: report.degree,
+      beta0: report.beta0,
+      beta1: report.beta1,
+      beta2: report.beta2,
+      resolved: report.resolvedSource,
+      pearsonR: report.pearsonR,
+      rSquared: report.rSquared,
+      maxAbsResidualN: report.maxAbsResidualN,
+      meanResidualTensionN: report.meanResidualTensionN,
+      meanResidualCompressionN: report.meanResidualCompressionN,
+      worstIndex: report.worstIndex,
+      linear: {
+        valid: report.linearValid === 1,
+        beta0: report.linearBeta0,
+        beta1: report.linearBeta1,
+        beta2: report.linearBeta2,
+        rSquared: report.linearR2,
+        maxAbsResidualN: report.linearMaxAbsN,
+      },
+      quadratic: {
+        valid: report.quadraticValid === 1,
+        beta0: report.quadraticBeta0,
+        beta1: report.quadraticBeta1,
+        beta2: report.quadraticBeta2,
+        rSquared: report.quadraticR2,
+        maxAbsResidualN: report.quadraticMaxAbsN,
+      },
+    },
+    external: body.external || null,
+  };
+}
+
 function sendJson(res, statusCode, body) {
   const payload = JSON.stringify(body);
   res.writeHead(statusCode, {
@@ -204,6 +256,12 @@ async function handleCommand(body) {
         return { ok: false, error: 'pneumaticClose not supported by client' };
       }
       result = await machineClient.pneumaticClose();
+      break;
+    case 'setCollisionGuard':
+      if (typeof machineClient.setCollisionGuard !== 'function') {
+        return { ok: false, error: 'setCollisionGuard not supported by client' };
+      }
+      result = await machineClient.setCollisionGuard(body.enabled === true);
       break;
     case 'fixtureOpen':
       if (typeof machineClient.fixtureOpen !== 'function') {
@@ -713,12 +771,14 @@ const server = http.createServer(async (req, res) => {
       }
 
       const saved = machineConfigStore.save(incoming);
+      const curve = calibrationStore.invalidateForceZBeyondRange(saved.force_range_N);
       sendJson(res, 200, {
         ok: true,
         config: saved,
         coreConfig,
         mismatchedKeys,
         pushedToController: Boolean(canPush && connected),
+        forceCurveCleared: curve.invalidated,
       });
     } catch {
       sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
@@ -839,6 +899,84 @@ const server = http.createServer(async (req, res) => {
     }
     const result = await machineClient.startProbeCalibration();
     sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/force') {
+    try {
+      const body = await readJsonBody(req);
+      if (typeof machineClient.setForceCalibration !== 'function') {
+        sendJson(res, 400, { ok: false, error: 'Kraftkalibrierung ist auf diesem Backend nicht verfügbar' });
+        return;
+      }
+      const result = await machineClient.setForceCalibration({
+        source: Number(body.source) || 0,
+        confirm: Boolean(body.confirm),
+        commit: Boolean(body.commit),
+        points: body.points || [],
+      });
+      let calibration = calibrationStore.load();
+      if (result.report && result.report.committed && body.commit) {
+        calibration = calibrationStore.setForceZ(forceZFromReport(body, result.report));
+      }
+      sendJson(res, result.report ? 200 : 400, {
+        ok: Boolean(result.ok),
+        error: result.error,
+        report: result.report,
+        calibration,
+      });
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/force-select') {
+    try {
+      const body = await readJsonBody(req);
+      if (typeof machineClient.selectForceCurve !== 'function') {
+        sendJson(res, 400, { ok: false, error: 'Kraftkalibrierung ist auf diesem Backend nicht verfügbar' });
+        return;
+      }
+      const result = await machineClient.selectForceCurve({
+        source: Number(body.source),
+        confirm: Boolean(body.confirm),
+        unit: body.unit === 'volt' || body.unit === 1 ? 1 : 0,
+        commit: Boolean(body.commit),
+        beta0: Number(body.beta0) || 0,
+        beta1: Number(body.beta1) || 0,
+        beta2: Number(body.beta2) || 0,
+      });
+      let calibration = calibrationStore.load();
+      if (result.report && result.report.committed && body.commit) {
+        const previous = calibration.forceZ || {};
+        const next = forceZFromReport(
+          {
+            source: Number(body.source),
+            points: previous.points || [],
+            external:
+              Number(body.source) === 3
+                ? {
+                    unit: body.unit === 'volt' || body.unit === 1 ? 'volt' : 'adc',
+                    beta0: Number(body.beta0) || 0,
+                    beta1: Number(body.beta1) || 0,
+                    beta2: Number(body.beta2) || 0,
+                  }
+                : previous.external,
+          },
+          result.report
+        );
+        calibration = calibrationStore.setForceZ(next);
+      }
+      sendJson(res, result.report ? 200 : 400, {
+        ok: Boolean(result.ok),
+        error: result.error,
+        report: result.report,
+        calibration,
+      });
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
     return;
   }
 

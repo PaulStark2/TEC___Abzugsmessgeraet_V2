@@ -342,12 +342,42 @@ export async function invalidateHoming() {
   return result;
 }
 
+export async function setCollisionGuard(enabled) {
+  return sendCommand({ command: 'setCollisionGuard', enabled: enabled === true });
+}
+
 export async function fixtureOpen() {
   return sendCommand({ command: 'fixtureOpen' });
 }
 
 export async function fixtureClose() {
   return sendCommand({ command: 'fixtureClose' });
+}
+
+export async function submitForceCalibration(body) {
+  const response = await fetch('/api/calibration/force', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+  if (!response.ok && !result.report) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function selectForceCurve(body) {
+  const response = await fetch('/api/calibration/force-select', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+  if (!response.ok && !result.report) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
 }
 
 export async function fetchCalibration() {

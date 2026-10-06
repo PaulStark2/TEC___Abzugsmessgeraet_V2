@@ -4,6 +4,7 @@ add_library(simulation_bridge STATIC
     SimHostInputProvider.cpp
     StatusSnapshot.cpp
     CommandDispatcher.cpp
+    ForceCalibHost.cpp
     SimProtocolBridge.cpp
 )
 

@@ -3,6 +3,7 @@
 #include "ForcePathRecorder.hpp"
 #include "MessageIds.hpp"
 #include "PayloadCodec.hpp"
+#include "ForceSensorModel.hpp"
 #include "ProcessForceModel.hpp"
 #include "StatusSnapshot.hpp"
 #include "Types.hpp"
@@ -23,7 +24,7 @@ namespace simbridge
 
 SimProtocolBridge::SimProtocolBridge()
     : executor_(machine_)
-    , dispatcher_(machine_, executor_)
+    , dispatcher_(machine_, executor_, &force_calib_)
 {
     // Simulation contract:
     // ProcedureController reads hostInputs after advancing motion for this tick.
@@ -86,6 +87,15 @@ void SimProtocolBridge::appendStatusPush(std::vector<OutboundFrame>& out)
     {
         frame.length = encoded.bytes_written;
         out.push_back(frame);
+    }
+
+    OutboundFrame adc_frame{};
+    const tecomm::EncodeResult adc_encoded = tecomm::encodeMessage(
+        static_cast<uint8_t>(tecomm::MessageId::MsgRawAdc), force_calib_.raw(), adc_frame.data, sizeof(adc_frame.data));
+    if (adc_encoded.ok)
+    {
+        adc_frame.length = adc_encoded.bytes_written;
+        out.push_back(adc_frame);
     }
 }
 
@@ -174,6 +184,18 @@ void SimProtocolBridge::applyHostInputs()
             process_force_unloaded_ = false;
         }
         // Idle/jog: plant injected force (default 0) is the HostInputs vector.
+    }
+
+    // One dose and one sign for every axis. The stored Z curve is applied to the
+    // raw counts of X, Y and Z. Tension stays negative; there is no second flip.
+    force_calib_.observeRaw(simplant::syntheticFzCounts(inputs.force.fx),
+                            simplant::syntheticFzCounts(inputs.force.fy),
+                            simplant::syntheticFzCounts(inputs.force.fz), true);
+    if (force_calib_.active())
+    {
+        inputs.force.fx = static_cast<float>(force_calib_.evaluateSensorNewton(force_calib_.raw().x));
+        inputs.force.fy = static_cast<float>(force_calib_.evaluateSensorNewton(force_calib_.raw().y));
+        inputs.force.fz = static_cast<float>(force_calib_.evaluateSensorNewton(force_calib_.raw().z));
     }
 
     machine_.setHostInputs(inputs);

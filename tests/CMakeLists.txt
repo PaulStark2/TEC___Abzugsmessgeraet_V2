@@ -345,3 +345,15 @@ target_compile_definitions(bridge_tcp_tests PRIVATE
 add_test(NAME bridge_tcp_tests COMMAND bridge_tcp_tests)
 set_tests_properties(bridge_tcp_tests PROPERTIES TIMEOUT 30)
 
+add_executable(force_calibration_tests
+    force_calibration_tests.cpp
+)
+target_link_libraries(force_calibration_tests PRIVATE core)
+add_test(NAME force_calibration_tests COMMAND force_calibration_tests)
+
+add_executable(adc_scaler_tests
+    adc_scaler_tests.cpp
+)
+target_include_directories(adc_scaler_tests PRIVATE ${CMAKE_SOURCE_DIR}/firmware/include)
+add_test(NAME adc_scaler_tests COMMAND adc_scaler_tests)
+

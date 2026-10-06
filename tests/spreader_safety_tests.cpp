@@ -58,13 +58,13 @@ static void seedProcess(Machine& machine, TestExecutor& ex)
 
 int main()
 {
-    // Timer: STOP during extend de-energizes without confirming extended.
+    // Timer: STOP during extend freezes the open command without confirming extended.
     {
         SpreaderTimer timer;
         timer.commandExtend(0.4f);
         timer.tick(0.1f);
         timer.enterSafeState();
-        if (timer.command() || timer.extended() || timer.isBusy())
+        if (!timer.command() || timer.extended() || timer.isBusy())
         {
             return 1;
         }
@@ -73,7 +73,7 @@ int main()
             return 2;
         }
         timer.tick(0.5f);
-        if (timer.extended() || timer.command())
+        if (timer.extended() || !timer.command())
         {
             return 3;
         }
@@ -122,7 +122,7 @@ int main()
             return 11;
         }
         m.stop();
-        if (m.hostOutputs().spreaderExtend || m.spreaderBusy() || m.hostOutputs().spreaderExtended)
+        if (!m.hostOutputs().spreaderExtend || m.spreaderBusy() || m.hostOutputs().spreaderExtended)
         {
             return 12;
         }
@@ -131,13 +131,13 @@ int main()
             return 13;
         }
         tickWithForce(m, 0.5f);
-        if (m.hostOutputs().spreaderExtended || m.hostOutputs().spreaderExtend)
+        if (m.hostOutputs().spreaderExtended || !m.hostOutputs().spreaderExtend)
         {
             return 14;
         }
     }
 
-    // Machine STOP during retract: valve already off, latch stays extended.
+    // Machine STOP during retract: close command already active, latch stays extended.
     {
         Machine m;
         MachineConfig cfg = m.machineConfig();
@@ -189,7 +189,7 @@ int main()
         {
             return 30;
         }
-        if (m.hostOutputs().spreaderExtend || m.hostOutputs().spreaderExtended || m.spreaderBusy())
+        if (!m.hostOutputs().spreaderExtend || m.hostOutputs().spreaderExtended || m.spreaderBusy())
         {
             return 31;
         }
@@ -197,8 +197,8 @@ int main()
         {
             return 32;
         }
-        m.setSpreaderExtend(true);
-        if (m.hostOutputs().spreaderExtend)
+        m.setSpreaderExtend(false);
+        if (!m.hostOutputs().spreaderExtend)
         {
             return 33;
         }
@@ -231,7 +231,7 @@ int main()
         {
             return 43;
         }
-        if (machine.hostOutputs().spreaderExtend || machine.spreaderBusy())
+        if (!machine.hostOutputs().spreaderExtend || machine.spreaderBusy())
         {
             return 44;
         }
@@ -271,7 +271,7 @@ int main()
         {
             return 52;
         }
-        if (machine.hostOutputs().spreaderExtend || machine.spreaderBusy())
+        if (!machine.hostOutputs().spreaderExtend || machine.spreaderBusy())
         {
             return 53;
         }

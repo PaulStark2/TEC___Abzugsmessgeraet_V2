@@ -74,6 +74,22 @@ int main()
         }
     }
 
+    // STOP freezes the last command; latch is not rewritten.
+    {
+        SpreaderTimer timer;
+        timer.commandExtend(0.4f);
+        timer.tick(0.1f);
+        timer.enterSafeState();
+        if (!timer.command() || timer.extended() || timer.isBusy())
+        {
+            return 20;
+        }
+        if (timer.state() != SpreaderState::SafeDeenergized)
+        {
+            return 21;
+        }
+    }
+
     // Fixture remains an immediate stub (no timer).
     {
         Machine m;

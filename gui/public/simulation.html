@@ -196,21 +196,27 @@
           <p class="placeholder-note">
             Halten legt eine konstante Kraft in Maschinenachsenrichtung an. Der Core entscheidet:
             Idle-Kontext Approach 20&nbsp;N → <code>ForceCollision</code>;
-            |F| &gt; 50&nbsp;N → <code>ForceHardLimit</code>.
+            |F| &gt; harte Grenze (Default 30&nbsp;N) → <code>ForceHardLimit</code>.
             Fault bleibt latched, bis <code>clearFault</code> in der Maschinen-GUI.
           </p>
           <div class="sim-field">
             <label for="input-injected-force-n">Betrag [N]</label>
-            <input type="number" id="input-injected-force-n" min="0" max="200" step="0.5" value="25" />
+            <input type="number" id="input-injected-force-n" min="0" max="600" step="0.001" value="25" />
           </div>
           <div class="sim-force-pad" role="group" aria-label="TCP-Kraftrichtung">
             <button type="button" class="sim-force-btn" data-axis="x" data-sign="1">+X</button>
             <button type="button" class="sim-force-btn" data-axis="x" data-sign="-1">−X</button>
             <button type="button" class="sim-force-btn" data-axis="y" data-sign="1">+Y</button>
             <button type="button" class="sim-force-btn" data-axis="y" data-sign="-1">−Y</button>
-            <button type="button" class="sim-force-btn" data-axis="z" data-sign="1">+Z</button>
-            <button type="button" class="sim-force-btn" data-axis="z" data-sign="-1">−Z</button>
+            <button type="button" class="sim-force-btn" data-axis="z" data-sign="1" data-latch="1">+Z</button>
+            <button type="button" class="sim-force-btn" data-axis="z" data-sign="-1" data-latch="1">−Z</button>
           </div>
+          <button type="button" id="btn-release-force">Kraft lösen</button>
+          <p class="placeholder-note">
+            +Z und −Z rasten ein und bleiben stehen, auch wenn dieses Fenster den Fokus verliert.
+            „Kraft lösen“ setzt die Kraft auf 0&nbsp;N. −Z ist Zug, +Z ist Druck.
+            +X, −X, +Y und −Y gelten nur, solange die Taste gehalten wird.
+          </p>
           <p class="sim-readout">injiziert: <span id="sim-injected-force">0 / 0 / 0</span> N</p>
         </section>
 

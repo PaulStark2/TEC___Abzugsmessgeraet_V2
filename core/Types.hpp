@@ -139,8 +139,9 @@ enum class FaultReason : uint8_t
 };
 
 // Electrical/timing view of the spreader. There is no end-position sensor.
-// SafeDeenergized: valve off after STOP/Fault; extended() is last confirmed timer
-// state only and must not be read as a mechanical guarantee.
+// command true = open pair, false = close pair (two valves on the STM32).
+// SafeDeenergized: last command frozen after STOP/Fault; extended() is the last
+// confirmed timer latch and must not be read as a mechanical guarantee.
 enum class SpreaderState : uint8_t
 {
     Retracted = 0,

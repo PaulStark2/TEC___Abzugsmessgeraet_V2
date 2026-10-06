@@ -179,6 +179,9 @@ public:
     // Collision watchdog context (ProcedureController sets this per phase).
     void setCollisionContext(CollisionContext context);
     CollisionContext collisionContext() const;
+    // Phase threshold (collisionApproach and the other contexts). Hard limit stays on.
+    void setCollisionPhaseEnabled(bool enabled);
+    bool collisionPhaseEnabled() const;
     ForceWatchdogTrip lastForceWatchdogTrip() const;
     FaultReason lastFaultReason() const;
     // Latch a process abort reason without entering MachineState::Fault.
@@ -256,6 +259,7 @@ private:
     TestConfiguration test_configuration_;
     CalibrationSet calibration_set_;
     CollisionContext collision_context_;
+    bool collision_phase_enabled_;
     ForceWatchdogTrip last_force_watchdog_trip_;
     SpreaderTimer spreader_timer_;
     bool pre_clamp_xy_enabled_;
@@ -284,7 +288,7 @@ private:
 
     // M11 safety helpers.
     void enterSafetyFault(FaultReason reason); // stopMotion + latched Fault
-    void applySpreaderSafeState(); // valve off; do not invent a retracted pose
+    void applySpreaderSafeState(); // freeze last command; do not invent a retracted pose
     void updatePneumaticStub(); // mirror Extend -> Extended for both actuators
 
     // M16 limit helpers: derive blocked directions and effective planner targets without

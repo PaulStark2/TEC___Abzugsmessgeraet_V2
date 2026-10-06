@@ -4,11 +4,12 @@
 // MachineConfig values that exceed these must be rejected (not clamped).
 struct SafetyLimits
 {
-    // Absolute force magnitude the Core will ever accept as a configured threshold [N].
-    // Matches the sensor range (±50 N). Firmware ADC scaling is outside Core.
-    static constexpr float kMaxFxAbs_N = 50.0f;
-    static constexpr float kMaxFyAbs_N = 50.0f;
-    static constexpr float kMaxFzAbs_N = 50.0f;
+    // Typo brake for configured force thresholds [N]. Not the sensor range.
+    // The measuring range and the watchdog hard limit live in MachineConfig
+    // and default to ±30 N. Firmware ADC scaling is outside Core.
+    static constexpr float kMaxFxAbs_N = 500.0f;
+    static constexpr float kMaxFyAbs_N = 500.0f;
+    static constexpr float kMaxFzAbs_N = 500.0f;
 
     // Absolute motion limits in machine position units / s and / s^2.
     static constexpr float kMaxVelocity = 50.0f;

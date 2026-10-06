@@ -32,15 +32,33 @@ constexpr std::size_t kProgramSummaryPayloadWireSize = 26;
 constexpr std::size_t kLoadProgramMaxPointCount = 32;
 constexpr std::size_t kLoadProgramMaxPayloadWireSize =
     1 + kLoadProgramMaxPointCount * kMoveToPayloadWireSize; // 385
-// 48 x float32 + uint16 max_optimization_iterations + uint16 num_fine_searches
-// + 3 x float32 probe_center (CalibrationSet mirror on GetMachineConfig).
-constexpr std::size_t kMachineConfigPayloadWireSize = 288;
+// Previous 288-byte layout, plus force_range_N and force_hard_limit_N.
+constexpr std::size_t kMachineConfigPayloadWireSize = 296;
 constexpr std::size_t kTestConfigurationPayloadWireSize = 8; // mode u8 + force f32 + iterations u16 + index u8
 constexpr std::size_t kPlateOriginPayloadWireSize = kMoveToPayloadWireSize;
 constexpr std::size_t kForcePathChunkMaxSamples = 32;
 constexpr std::size_t kForcePathChunkHeaderWireSize = 12; // point u8 + iter u16 + seq u32 + count u8 + dropped u32
 constexpr std::size_t kForcePathChunkMaxPayloadWireSize =
     kForcePathChunkHeaderWireSize + kForcePathChunkMaxSamples * 8;
+
+constexpr std::size_t kForceCalibMaxPoints = 33;
+constexpr std::size_t kForceCalibPointWireSize = 12;
+constexpr std::size_t kSetForceCalibrationHeaderWireSize = 4;
+constexpr std::size_t kSelectForceCurveWireSize = 16;
+constexpr std::size_t kRawAdcWireSize = 7;
+constexpr std::size_t kForceCalibResultHeaderWireSize = 88; // 8 bytes + 20 x float32
+constexpr std::size_t kForceCalibResultMaxWireSize =
+    kForceCalibResultHeaderWireSize + kForceCalibMaxPoints * 4;
+
+inline std::size_t setForceCalibrationWireSize(uint8_t point_count)
+{
+    return kSetForceCalibrationHeaderWireSize + static_cast<std::size_t>(point_count) * kForceCalibPointWireSize;
+}
+
+inline std::size_t forceCalibResultWireSize(uint8_t point_count)
+{
+    return kForceCalibResultHeaderWireSize + static_cast<std::size_t>(point_count) * 4;
+}
 
 inline std::size_t forcePathChunkWireSize(uint8_t sample_count)
 {

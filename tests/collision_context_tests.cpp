@@ -6,17 +6,17 @@
 
 int main()
 {
-    // Hard limit trips above ±50 N regardless of context threshold.
+    // Hard limit trips above the configured hard limit, not the 500 N typo brake.
     {
         MachineConfig cfg{};
         cfg.collision.approach_N = 20.0f;
-        ForceVector force{0.0f, 0.0f, SafetyLimits::kMaxFzAbs_N + 0.1f};
+        ForceVector force{0.0f, 0.0f, cfg.force.hard_limit_N + 0.1f};
         if (evaluateForceWatchdog(force, cfg, CollisionContext::Approach) != ForceWatchdogTrip::HardLimit)
         {
             return 1;
         }
-        // Exactly 50 N is allowed (insertionForce max); phase threshold still applies.
-        force.fz = SafetyLimits::kMaxFzAbs_N;
+        // Exactly the hard limit is allowed; the phase threshold still applies.
+        force.fz = cfg.force.hard_limit_N;
         if (evaluateForceWatchdog(force, cfg, CollisionContext::Approach) != ForceWatchdogTrip::CollisionContext)
         {
             return 2;
@@ -53,7 +53,7 @@ int main()
         m.setCollisionContext(CollisionContext::Measure);
         m.moveTo(0.0f, 0.0f, -2.0f);
         HostInputs in{};
-        in.force.fz = 25.0f; // < measure 40, > approach 20
+        in.force.fz = 25.0f; // < default measure 30 N, > approach 20 N
         m.setHostInputs(in);
         m.tick(0.05f);
         if (m.machineState() == MachineState::Fault)
@@ -65,6 +65,27 @@ int main()
         if (m.machineState() != MachineState::Fault)
         {
             return 13;
+        }
+    }
+
+    // Calibration can drop the phase threshold. The hard limit still trips.
+    {
+        Machine m;
+        m.setCollisionPhaseEnabled(false);
+        HostInputs in{};
+        in.force.fz = 25.0f;
+        m.setHostInputs(in);
+        m.tick(0.05f);
+        if (m.machineState() == MachineState::Fault || m.collisionPhaseEnabled())
+        {
+            return 20;
+        }
+        in.force.fz = SafetyLimits::kMaxFzAbs_N + 0.1f;
+        m.setHostInputs(in);
+        m.tick(0.05f);
+        if (m.machineState() != MachineState::Fault || m.lastForceWatchdogTrip() != ForceWatchdogTrip::HardLimit)
+        {
+            return 21;
         }
     }
 

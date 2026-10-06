@@ -15,6 +15,7 @@ struct TestConfiguration
 };
 
 // Reject target force outside (0, kMaxFzAbs] or zero iterations.
+// Machine::trySetTestConfiguration also rejects a target above the configured measuring range.
 ConfigValidationError validateTestConfiguration(const TestConfiguration& config);
 
 // Copy incoming into dest only when valid; otherwise dest unchanged.

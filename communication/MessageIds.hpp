@@ -29,6 +29,9 @@ enum class MessageId : uint8_t
     CmdDefineMcs = 0x56,
     CmdRestoreMcs = 0x57,
     CmdInvalidateHoming = 0x58,
+    CmdSetForceCalibration = 0x59,
+    CmdSelectForceCurve = 0x5A,
+    CmdSetCollisionGuard = 0x5B,
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.
@@ -40,6 +43,8 @@ enum class MessageId : uint8_t
     MsgProgramSummary = 0xA1,
     MsgForcePathChunk = 0xA2,
     MsgMachineConfig = 0xA3,
+    MsgRawAdc = 0xA4,
+    MsgForceCalibration = 0xA5,
 };
 
 } // namespace tecomm

@@ -3,6 +3,7 @@
 import { navigate } from '../router.js';
 import {
   sendCommand,
+  fetchMachineStatus,
   fetchCalibration,
   setPlateOrigin,
   defineMcs,
@@ -15,7 +16,8 @@ import {
   invalidateHoming,
 } from '../api.js';
 import { mountJogPanel } from '../components/jogPanel.js';
-import { MCS_REQUIRED_MESSAGE, GEOMETRY_INCOMPLETE_MESSAGE } from '../homingGate.js';
+import { mountForceCalibration } from './forceWizard.js';
+import { MCS_REQUIRED_MESSAGE, GEOMETRY_INCOMPLETE_MESSAGE, runWithHomingGate } from '../homingGate.js';
 
 const MCS_REDEFINE_TITLE = 'MCS neu definieren?';
 const MCS_REDEFINE_MESSAGE =
@@ -56,6 +58,32 @@ function confirmMcsRedefine() {
   });
 }
 
+function confirmForceRecalibration() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'homing-gate-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.innerHTML = `
+      <div class="homing-gate-dialog">
+        <h3>Kraftsensor neu kalibrieren?</h3>
+        <p>Sind Sie sicher, dass der Kraftsensor neu kalibriert werden soll? Die bisherige Z-Kennlinie bleibt erhalten, bis die neue Kurve gespeichert wird.</p>
+        <div class="homing-gate-actions">
+          <button type="button" class="homing-gate-yes">Weiter</button>
+          <button type="button" class="homing-gate-no">Zurück</button>
+        </div>
+      </div>
+    `;
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector('.homing-gate-yes').addEventListener('click', () => cleanup('continue'));
+    overlay.querySelector('.homing-gate-no').addEventListener('click', () => cleanup('cancel'));
+    document.body.appendChild(overlay);
+  });
+}
+
 function formatCoord(v) {
   return Number(v).toFixed(3);
 }
@@ -69,6 +97,8 @@ const MODE = {
 
 const STEPS = {
   MENU: 'menu',
+  GEOMETRY_MENU: 'geometry_menu',
+  FORCE_MENU: 'force_menu',
   DEFINE_MCS: 'define_mcs',
   HOMING: 'homing',
   PLATE_QUESTION: 'plate_question',
@@ -98,6 +128,7 @@ export function renderCalibrate(container) {
   /** True after persistMcs in this Full-Calibration session (commit done). */
   let mcsCommittedThisSession = false;
   let cleanupFn = null;
+  let forceCleanup = null;
 
   function getStatus() {
     return liveStatus || {};
@@ -112,9 +143,15 @@ export function renderCalibrate(container) {
       console.error(err);
     }
     const wasCommittedIncomplete = selectedMode === MODE.FULL && mcsCommittedThisSession;
+    const backStep =
+      selectedMode === MODE.FORCE
+        ? STEPS.FORCE_MENU
+        : selectedMode === MODE.FULL || selectedMode === MODE.GEOMETRY
+          ? STEPS.GEOMETRY_MENU
+          : STEPS.MENU;
     selectedMode = MODE.NONE;
     mcsCommittedThisSession = false;
-    setStep(STEPS.MENU);
+    setStep(backStep);
     window.setTimeout(() => {
       const fb = contentEl.querySelector('#menu-feedback');
       if (!fb) {
@@ -139,6 +176,48 @@ export function renderCalibrate(container) {
     }
   }
 
+  function showGateFeedback(feedbackEl, gate) {
+    if (!feedbackEl || !gate || gate.result === 'ran') return;
+    const text = {
+      mcs_required: MCS_REQUIRED_MESSAGE,
+      cancelled: 'Start abgebrochen — Homing erforderlich.',
+      failed: 'Homing fehlgeschlagen — Kalibrierung nicht gestartet.',
+      timeout: 'Homing-Timeout — Kalibrierung nicht gestartet.',
+    }[gate.result];
+    if (!text) return;
+    feedbackEl.textContent = text;
+    feedbackEl.classList.toggle('command-feedback--error', gate.result !== 'cancelled');
+  }
+
+  async function runCalibrationHomingGate(feedbackEl, action) {
+    const machine = await fetchMachineStatus();
+    return runWithHomingGate({
+      status: {
+        connected: machine.connected !== false,
+        isHomed: machine.isHomed === true,
+        mcsValid: machine.mcsValid === true,
+      },
+      startHoming: () => sendCommand({ command: 'home' }),
+      getStatus: async () => {
+        const st = await fetchMachineStatus();
+        return {
+          connected: st.connected !== false,
+          isHomed: st.isHomed === true,
+          mcsValid: st.mcsValid === true,
+          homingState: st.homingState,
+          machineState: st.machineState,
+          eStop: st.eStop === true,
+        };
+      },
+      onHomingStarted: () => {
+        if (!feedbackEl) return;
+        feedbackEl.textContent = 'Homing gestartet — warte auf erfolgreichen Abschluss…';
+        feedbackEl.classList.remove('command-feedback--error');
+      },
+      action,
+    });
+  }
+
   async function refreshStoreFlags() {
     try {
       const result = await fetchCalibration();
@@ -153,6 +232,10 @@ export function renderCalibrate(container) {
     switch (currentStep) {
       case STEPS.MENU:
         return renderCalibMenu();
+      case STEPS.GEOMETRY_MENU:
+        return renderGeometryMenu();
+      case STEPS.FORCE_MENU:
+        return renderForceMenu();
       case STEPS.DEFINE_MCS:
         return renderDefineMcs();
       case STEPS.HOMING:
@@ -180,47 +263,12 @@ export function renderCalibrate(container) {
   }
 
   function renderCalibMenu() {
-    void refreshStoreFlags().then(() => {
-      if (currentStep !== STEPS.MENU) {
-        return;
-      }
-      const geomDisabled = !mcsValidInStore;
-      contentEl.innerHTML = `
+    contentEl.innerHTML = `
       <div class="success-card">
-        <h3>Kalibrierung wählen</h3>
-        <fieldset class="calib-mode-fieldset" style="border:none;padding:0;margin:0 0 16px;">
-          <label style="display:block;margin:10px 0;">
-            <input type="radio" name="calib-mode" value="full" />
-            <strong>MCS und Bauplatte/Messtaster definieren und kalibrieren</strong>
-            <p style="margin:4px 0 0 24px;opacity:0.85;">
-              Definiert den Maschinenursprung neu. Die bisherige Bauplatten- und Messtasterkalibrierung
-              wird dadurch ungültig und muss anschließend neu durchgeführt werden.
-            </p>
-          </label>
-          <label style="display:block;margin:10px 0;${geomDisabled ? 'opacity:0.55;' : ''}">
-            <input type="radio" name="calib-mode" value="geometry" ${geomDisabled ? 'disabled' : ''} />
-            <strong>Bauplatte/Messtaster kalibrieren</strong>
-            <p style="margin:4px 0 0 24px;opacity:0.85;">
-              Das bestehende Maschinenkoordinatensystem bleibt unverändert.
-              Nur Bauplatte und Messtaster werden neu eingemessen.
-            </p>
-            ${
-              geomDisabled
-                ? `<p style="margin:8px 0 0 24px;color:var(--clr-err,red);">
-                    Es ist noch kein gültiges Maschinenkoordinatensystem definiert.
-                    Bitte zuerst „MCS und Bauplatte/Messtaster definieren und kalibrieren“ durchführen.
-                  </p>`
-                : ''
-            }
-          </label>
-          <label style="display:block;margin:10px 0;opacity:0.55;">
-            <input type="radio" name="calib-mode" value="force" disabled />
-            <strong>Kraftmessdose kalibrieren</strong>
-            <p style="margin:4px 0 0 24px;">Noch nicht verfügbar.</p>
-          </label>
-        </fieldset>
-        <div class="control-actions" style="flex-direction:column;gap:8px;">
-          <button type="button" id="btn-start" class="menu-nav__item">Start</button>
+        <h3>Kalibrieren</h3>
+        <div class="calib-group">
+          <button type="button" id="btn-open-geometry" class="menu-nav__item">Geometrische Kalibrierung Bauplatte/Messtaster</button>
+          <button type="button" id="btn-open-force" class="menu-nav__item">Kraftkalibrierung der Kraftmessdose</button>
         </div>
         <p id="menu-feedback" class="command-feedback" aria-live="polite"></p>
       </div>
@@ -242,16 +290,32 @@ export function renderCalibrate(container) {
           }
         })
         .catch(() => {});
-      contentEl.querySelector('#btn-start').addEventListener('click', () => {
-        const chosen = contentEl.querySelector('input[name="calib-mode"]:checked');
-        if (!chosen) {
-          feedbackEl.textContent = 'Bitte eine Kalibrierfunktion auswählen.';
-          feedbackEl.classList.add('command-feedback--error');
-          return;
-        }
-        feedbackEl.textContent = '';
-        feedbackEl.classList.remove('command-feedback--error');
-        if (chosen.value === 'full') {
+      contentEl.querySelector('#btn-open-geometry').addEventListener('click', () => setStep(STEPS.GEOMETRY_MENU));
+      contentEl.querySelector('#btn-open-force').addEventListener('click', () => setStep(STEPS.FORCE_MENU));
+      contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
+  }
+
+  function renderGeometryMenu() {
+    void refreshStoreFlags().then(() => {
+      if (currentStep !== STEPS.GEOMETRY_MENU) return;
+      const geomDisabled = !mcsValidInStore;
+      contentEl.innerHTML = `
+      <div class="success-card">
+        <h3>Geometrische Kalibrierung Bauplatte/Messtaster</h3>
+        <div class="calib-group">
+          <button type="button" id="btn-calib-full" class="menu-nav__item">MCS und Bauplatte/Messtaster definieren und kalibrieren</button>
+          <button type="button" id="btn-calib-geometry" class="menu-nav__item" ${geomDisabled ? 'disabled' : ''}>Bauplatte/Messtaster kalibrieren</button>
+        </div>
+        <p id="menu-feedback" class="command-feedback" aria-live="polite"></p>
+        ${geomDisabled ? '<p class="calib-group__note">Für die zweite Funktion muss zuerst ein Maschinenkoordinatensystem definiert sein.</p>' : ''}
+      </div>
+      <div class="control-actions page-actions">
+        <button type="button" id="btn-back-calib" class="btn-back">Zurück</button>
+      </div>
+    `;
+      const feedbackEl = contentEl.querySelector('#menu-feedback');
+      contentEl.querySelector('#btn-back-calib').addEventListener('click', () => setStep(STEPS.MENU));
+      contentEl.querySelector('#btn-calib-full').addEventListener('click', () => {
           void (async () => {
             const decision = await confirmMcsRedefine();
             if (decision !== 'continue') {
@@ -272,24 +336,85 @@ export function renderCalibrate(container) {
             savedProbeCenter = null;
             setStep(STEPS.DEFINE_MCS);
           })();
-          return;
-        }
-        if (chosen.value === 'geometry') {
+      });
+      contentEl.querySelector('#btn-calib-geometry').addEventListener('click', () => {
+        void (async () => {
           if (!mcsValidInStore) {
             feedbackEl.textContent = MCS_REQUIRED_MESSAGE;
             feedbackEl.classList.add('command-feedback--error');
             return;
           }
+          feedbackEl.textContent = '';
+          feedbackEl.classList.remove('command-feedback--error');
+          const gate = await runCalibrationHomingGate(feedbackEl, async () => {});
+          if (gate.result !== 'ran') {
+            showGateFeedback(feedbackEl, gate);
+            return;
+          }
           selectedMode = MODE.GEOMETRY;
           savedPlateOrigin = null;
           savedProbeCenter = null;
-          setStep(STEPS.HOMING);
-          return;
-        }
-        feedbackEl.textContent = 'Die Kalibrierung der Kraftmessdose ist derzeit noch nicht implementiert.';
-        feedbackEl.classList.add('command-feedback--error');
+          setStep(STEPS.PLATE_QUESTION);
+        })();
       });
-      contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
+    });
+  }
+
+  function renderForceMenu() {
+    contentEl.innerHTML = `
+      <div class="success-card">
+        <h3>Kraftkalibrierung der Kraftmessdose</h3>
+        <div class="calib-group">
+          <button type="button" id="btn-calib-force" class="menu-nav__item">Kalibrierprozess starten</button>
+          <button type="button" id="btn-force-view" class="menu-nav__item">Kalibrierkennwerte</button>
+        </div>
+        <p id="menu-feedback" class="command-feedback" aria-live="polite"></p>
+      </div>
+      <div class="control-actions page-actions">
+        <button type="button" id="btn-back-calib" class="btn-back">Zurück</button>
+      </div>
+    `;
+    contentEl.querySelector('#btn-back-calib').addEventListener('click', () => setStep(STEPS.MENU));
+    contentEl.querySelector('#btn-force-view').addEventListener('click', () => {
+      selectedMode = MODE.FORCE;
+      if (forceCleanup) forceCleanup();
+      forceCleanup = mountForceCalibration(contentEl, {
+        viewOnly: true,
+        onBack: () => {
+          if (forceCleanup) forceCleanup();
+          forceCleanup = null;
+          selectedMode = MODE.NONE;
+          setStep(STEPS.FORCE_MENU);
+        },
+      });
+    });
+    contentEl.querySelector('#btn-calib-force').addEventListener('click', () => {
+          void (async () => {
+            const decision = await confirmForceRecalibration();
+            if (decision !== 'continue') {
+              return;
+            }
+            const feedbackEl = contentEl.querySelector('#menu-feedback');
+            if (feedbackEl) {
+              feedbackEl.textContent = '';
+              feedbackEl.classList.remove('command-feedback--error');
+            }
+            const gate = await runCalibrationHomingGate(feedbackEl, async () => {
+              selectedMode = MODE.FORCE;
+              if (forceCleanup) forceCleanup();
+              forceCleanup = mountForceCalibration(contentEl, {
+                onBack: () => {
+                  if (forceCleanup) forceCleanup();
+                  forceCleanup = null;
+                  selectedMode = MODE.NONE;
+                  setStep(STEPS.FORCE_MENU);
+                },
+              });
+            });
+            if (gate.result !== 'ran') {
+              showGateFeedback(feedbackEl, gate);
+            }
+          })();
     });
   }
 
@@ -691,11 +816,11 @@ export function renderCalibrate(container) {
           </div>
         </div>
         <div class="control-actions page-actions" style="margin-top:16px;">
-          <button type="button" id="btn-back-menu">Zurück zum Kalibrieren-Menü</button>
+          <button type="button" id="btn-back-menu">Zurück</button>
         </div>
       </div>
     `;
-    contentEl.querySelector('#btn-back-menu').addEventListener('click', () => setStep(STEPS.MENU));
+    contentEl.querySelector('#btn-back-menu').addEventListener('click', () => setStep(STEPS.GEOMETRY_MENU));
   }
 
   pollTimer = window.setInterval(async () => {

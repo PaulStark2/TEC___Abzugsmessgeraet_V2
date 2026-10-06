@@ -37,9 +37,10 @@ void logCmdStartReject(const char* reason, const Machine& machine, const TestExe
 
 } // namespace
 
-CommandDispatcher::CommandDispatcher(Machine& machine, TestExecutor& executor)
+CommandDispatcher::CommandDispatcher(Machine& machine, TestExecutor& executor, ForceCalibHost* force_calib)
     : machine_(machine)
     , executor_(executor)
+    , force_calib_(force_calib)
 {
 }
 
@@ -371,6 +372,19 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdSetCollisionGuard:
+    {
+        tecomm::BoolPayload value{};
+        if (!tecomm::decodeBoolPayload(frame.payload, frame.payload_length, value))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        machine_.setCollisionPhaseEnabled(value.value != 0);
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
     case tecomm::MessageId::CmdSetFixture:
     {
         tecomm::BoolPayload value{};
@@ -402,6 +416,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         {
             appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, static_cast<uint8_t>(error), out);
             break;
+        }
+        if (force_calib_ != nullptr &&
+            force_calib_->storedForceExceeds(machine_.machineConfig().force.range_N))
+        {
+            force_calib_->clear();
         }
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
@@ -521,6 +540,46 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdSetForceCalibration:
+    {
+        if (force_calib_ == nullptr)
+        {
+            appendNack(message_id, tecomm::NackErrorCode::Unsupported, 0, out);
+            break;
+        }
+        tecomm::SetForceCalibrationPayload command{};
+        if (!tecomm::decodeSetForceCalibrationPayload(frame.payload, frame.payload_length, command))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        const double span_N = 2.0 * static_cast<double>(machine_.machineConfig().force.range_N);
+        const tecomm::ForceCalibrationResultPayload result = force_calib_->applySet(command, span_N);
+        appendForceCalibration(result, out);
+        appendAck(message_id, result.committed ? tecomm::AckResultCode::Ok : tecomm::AckResultCode::Rejected, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdSelectForceCurve:
+    {
+        if (force_calib_ == nullptr)
+        {
+            appendNack(message_id, tecomm::NackErrorCode::Unsupported, 0, out);
+            break;
+        }
+        tecomm::SelectForceCurvePayload command{};
+        if (!tecomm::decodeSelectForceCurvePayload(frame.payload, frame.payload_length, command))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        const double span_N = 2.0 * static_cast<double>(machine_.machineConfig().force.range_N);
+        const tecomm::ForceCalibrationResultPayload result = force_calib_->applySelect(command, span_N);
+        appendForceCalibration(result, out);
+        appendAck(message_id, result.committed ? tecomm::AckResultCode::Ok : tecomm::AckResultCode::Rejected, out);
+        break;
+    }
+
     case tecomm::MessageId::CmdRequestStatus:
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         appendStatusReport(out);
@@ -570,6 +629,19 @@ void CommandDispatcher::appendNack(uint8_t ref_message_id, tecomm::NackErrorCode
     OutboundFrame frame{};
     const tecomm::EncodeResult encoded = tecomm::encodeMessage(
         static_cast<uint8_t>(tecomm::MessageId::RspNack), payload, frame.data, sizeof(frame.data));
+    if (encoded.ok)
+    {
+        frame.length = encoded.bytes_written;
+        out.push_back(frame);
+    }
+}
+
+void CommandDispatcher::appendForceCalibration(const tecomm::ForceCalibrationResultPayload& result,
+                                               std::vector<OutboundFrame>& out)
+{
+    OutboundFrame frame{};
+    const tecomm::EncodeResult encoded = tecomm::encodeMessage(
+        static_cast<uint8_t>(tecomm::MessageId::MsgForceCalibration), result, frame.data, sizeof(frame.data));
     if (encoded.ok)
     {
         frame.length = encoded.bytes_written;
@@ -665,6 +737,9 @@ bool CommandDispatcher::isFaultGuarded(uint8_t message_id) const
     case tecomm::MessageId::CmdClearFault:
     case tecomm::MessageId::CmdRequestStatus:
     case tecomm::MessageId::CmdGetMachineConfig:
+    case tecomm::MessageId::CmdSetForceCalibration:
+    case tecomm::MessageId::CmdSelectForceCurve:
+    case tecomm::MessageId::CmdSetCollisionGuard:
         return false;
     default:
         return true;

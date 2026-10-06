@@ -20,11 +20,17 @@ const NACK_PAYLOAD_WIRE_SIZE = 3;
 const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 41;
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
-const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 288;
+const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 296;
 const TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE = 8;
 const PLATE_ORIGIN_PAYLOAD_WIRE_SIZE = 12;
 const FORCE_PATH_CHUNK_MAX_SAMPLES = 32;
 const FORCE_PATH_CHUNK_HEADER_WIRE_SIZE = 12;
+const FORCE_CALIB_MAX_POINTS = 33;
+const FORCE_CALIB_POINT_WIRE_SIZE = 12;
+const SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE = 4;
+const SELECT_FORCE_CURVE_WIRE_SIZE = 16;
+const RAW_ADC_WIRE_SIZE = 7;
+const FORCE_CALIB_RESULT_HEADER_WIRE_SIZE = 88;
 
 const NO_CURRENT_POINT_INDEX = 0xff;
 
@@ -49,6 +55,9 @@ const MessageId = Object.freeze({
   CmdDefineMcs: 0x56,
   CmdRestoreMcs: 0x57,
   CmdInvalidateHoming: 0x58,
+  CmdSetForceCalibration: 0x59,
+  CmdSelectForceCurve: 0x5a,
+  CmdSetCollisionGuard: 0x5b,
   CmdRequestStatus: 0x7f,
   RspAck: 0x80,
   RspNack: 0x81,
@@ -56,6 +65,8 @@ const MessageId = Object.freeze({
   MsgProgramSummary: 0xa1,
   MsgForcePathChunk: 0xa2,
   MsgMachineConfig: 0xa3,
+  MsgRawAdc: 0xa4,
+  MsgForceCalibration: 0xa5,
 });
 
 const MachineState = Object.freeze({
@@ -232,6 +243,12 @@ module.exports = {
   PLATE_ORIGIN_PAYLOAD_WIRE_SIZE,
   FORCE_PATH_CHUNK_MAX_SAMPLES,
   FORCE_PATH_CHUNK_HEADER_WIRE_SIZE,
+  FORCE_CALIB_MAX_POINTS,
+  FORCE_CALIB_POINT_WIRE_SIZE,
+  SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE,
+  SELECT_FORCE_CURVE_WIRE_SIZE,
+  RAW_ADC_WIRE_SIZE,
+  FORCE_CALIB_RESULT_HEADER_WIRE_SIZE,
   NO_CURRENT_POINT_INDEX,
   MessageId,
   MachineState,

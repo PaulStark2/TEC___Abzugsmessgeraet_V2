@@ -1,5 +1,6 @@
 // Milestone 1: SafetyLimits, MachineConfig, TestConfiguration, CalibrationSet.
 #include "CalibrationSet.hpp"
+#include "Machine.hpp"
 #include "MachineConfig.hpp"
 #include "SafetyLimits.hpp"
 #include "TestConfiguration.hpp"
@@ -283,12 +284,59 @@ int main()
         }
     }
 
-    // SafetyLimits are compile-time constants (sensor range).
+    // SafetyLimits are the 500 N typo brake. The sensor range is a parameter.
     {
-        if (SafetyLimits::kMaxFxAbs_N != 50.0f || SafetyLimits::kMaxFyAbs_N != 50.0f ||
-            SafetyLimits::kMaxFzAbs_N != 50.0f)
+        if (SafetyLimits::kMaxFxAbs_N != 500.0f || SafetyLimits::kMaxFyAbs_N != 500.0f ||
+            SafetyLimits::kMaxFzAbs_N != 500.0f)
         {
             return 50;
+        }
+        MachineConfig defaults{};
+        if (defaults.force.range_N != 30.0f || defaults.force.hard_limit_N != 30.0f ||
+            defaults.collision.measure_N != 30.0f)
+        {
+            return 51;
+        }
+        MachineConfig hard{};
+        hard.force.hard_limit_N = 40.0f;
+        if (validateMachineConfig(hard) != ConfigValidationError::ForceExceedsSafety)
+        {
+            return 52;
+        }
+        MachineConfig raised{};
+        raised.force.range_N = 100.0f;
+        raised.force.hard_limit_N = 80.0f;
+        raised.collision.retract_N = 90.0f;
+        raised.collision.contact_N = 90.0f;
+        raised.collision.measure_N = 90.0f;
+        if (validateMachineConfig(raised) != ConfigValidationError::Ok)
+        {
+            return 53;
+        }
+        raised.force.range_N = 501.0f;
+        raised.force.hard_limit_N = 80.0f;
+        if (validateMachineConfig(raised) != ConfigValidationError::ForceExceedsSafety)
+        {
+            return 54;
+        }
+        Machine machine;
+        TestConfiguration run{};
+        run.target_force_N = 40.0f;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (machine.trySetTestConfiguration(run, err) || err != ConfigValidationError::TargetForceInvalid)
+        {
+            return 55;
+        }
+        MachineConfig wide = machine.machineConfig();
+        wide.force.range_N = 50.0f;
+        wide.force.hard_limit_N = 50.0f;
+        if (!machine.trySetMachineConfig(wide, err))
+        {
+            return 56;
+        }
+        if (!machine.trySetTestConfiguration(run, err))
+        {
+            return 57;
         }
     }
 

@@ -4,9 +4,10 @@
 
 | Funktion | Semantik |
 |----------|----------|
-| **MCS und Bauplatte/Messtaster definieren und kalibrieren** | Full: `CmdDefineMcs` → Commit (`persistMcs`) → Plate teach → M19 |
-| **Bauplatte/Messtaster kalibrieren** | Geometry: Reference `CmdHome` bei Bedarf → Plate → M19; MCS unverändert |
-| **Kraftmessdose kalibrieren** | Noch nicht implementiert |
+| **Geometrische Kalibrierung** | Eigenes Untermenü: MCS und Bauplatte/Messtaster neu, oder nur Bauplatte/Messtaster bei bestehendem MCS |
+| **Kraftkalibrierung der Kraftmessdose** | Eigenes Untermenü: Kalibrierprozess starten oder Kalibrierkennwerte |
+| **Kalibrierprozess starten** | Z-Regression, siehe [Force_Calibration.md](Force_Calibration.md) |
+| **Kalibrierkennwerte** | Gespeicherte Kennlinie, Gleichung und Auswahlbedingungen, ohne Aktorsteuerung |
 
 ## Define / Commit / Abort
 

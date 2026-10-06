@@ -88,7 +88,7 @@ int main()
         {
             return 22;
         }
-        if (m.hostOutputs().spreaderExtend || m.spreaderBusy())
+        if (!m.hostOutputs().spreaderExtend || m.spreaderBusy())
         {
             return 23;
         }

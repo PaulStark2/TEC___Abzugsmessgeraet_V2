@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandDispatcher.hpp"
+#include "ForceCalibHost.hpp"
 #include "FrameStreamBuffer.hpp"
 
 #include "SimPlant.hpp"
@@ -48,6 +49,7 @@ private:
     Machine machine_;
     TestExecutor executor_;
     simplant::SimPlant plant_;
+    ForceCalibHost force_calib_;
     CommandDispatcher dispatcher_;
     float process_z_test_ = 0.0f;
     bool process_force_latched_ = false;

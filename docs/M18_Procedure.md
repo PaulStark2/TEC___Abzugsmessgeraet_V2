@@ -71,9 +71,9 @@ Pause remains forbidden during the actual test phases (M17 rule retained).
 | S1 | No simultaneous long XY travel and Z descent to a test height. Approach is raise-Z → XY at Safe-Z → lower-Z. |
 | S2 | Automatic start (`CmdStart`, probe calib start) requires `machine.isHomed()`. Homing itself and service `CmdMoveTo` do not. |
 | S3 | Every abort path calls `machine.stop()` (unless already Fault). Axes must not keep moving. |
-| S4 | Spreader has no end-position sensor. STOP/Fault de-energizes the valve. |
+| S4 | Spreader has no end-position sensor. STOP/Fault freeze the last open/close command (`SafeDeenergized`). |
 | S5 | Non-finite Fx/Fy/Fz → Fault. Stale force samples → Fault. |
-| S6 | Core uses Newton only. ADC 0…3.3 V ↔ −50…+50 N is host-side. Tensile-positive `Fz` and `targetForce > 0`. |
+| S6 | Core uses Newton only. The measuring range is a MachineConfig parameter, default ±30 N, typo brake 500 N. Until Phase 7 the STM32 uses a provisional linear map 0…4095 → ±`force_range_N`. The committed curve is `docs/Force_Calibration.md` (tension negative). |
 | S7 | Host heartbeat watchdog while automatic process runs. Timeout → Fault + stop + spreader safe. |
 | S8 | MachineConfig, TestConfiguration, PlateOrigin, Safe-Z, speeds, force params, manual spreader: NACK `InvalidState` while `ProcessState::Running`. |
 | S9 | Phase 1 succeeds only if `Fz >= targetForce`. Search end / AtTarget / zMinBlocked is abort, not InsertionPoint. |
@@ -143,19 +143,18 @@ limit switches, e_stop
 
 Default `sample_timeout_s = 0.5` (0.05…5 s).
 
-### ADC scaling (host, documented for M19)
+### ADC scaling (host)
 
-Linear map, sensor 0…3.3 V = −50…+50 N:
+Committed contract: [`docs/Force_Calibration.md`](Force_Calibration.md)
+(`F = β0 + β1·adc + β2·adc²`, tension negative). STM32 Phase 2.1 provisional map
+until that curve is loaded:
 
 ```text
-F[N] = -50 + (V / 3.3) * 100
-ADC 0 counts     → -50 N
-ADC full-scale   → +50 N   (3.3 V)
+F[N] = -R + (counts / 4095) * 2R
+R = MachineConfig.force.range_N   (default 30 N)
+ADC 0 counts     → -R
+ADC 4095         → +R
 ```
-
-Core process: `targetForce > 0` and Phase 1 uses `Fz >= targetForce` with **tensile-positive**
-Fz (tension along +Z). The STM32 host must wire/sign the Z channel so that insertion
-tension is positive in Core Newton. No hidden Core sign flip.
 
 ---
 
@@ -165,7 +164,7 @@ Active only while an automatic process runs (`setCommunicationWatchdogEnabled`).
 
 - Host increments `hostHeartbeatSequence` on a live heartbeat.
 - Age ≥ `heartbeat_timeout_s` (default 0.3 s, range 0.05…2 s) → `FaultReason::CommunicationTimeout`.
-- Motion stops, spreader enters SafeDeenergized.
+- Motion stops, spreader enters SafeDeenergized (last open/close command frozen).
 - A later heartbeat does **not** auto-resume.
 
 Offline / manual operation can leave the watchdog disabled.
@@ -180,17 +179,17 @@ safety-case split of “GUI timeout” vs “certified timeout” is not impleme
 No end-position feedback. Timing (`spreaderExtend` for `extend_time_s` /
 `retract_time_s`) is unchanged for Clamp/Unclamp.
 
-**Assumption (hardware not present):** only one electrical valve output exists
-(`HostOutputs.spreaderExtend`). There is no dedicated retract/vent line in Core.
+Core still has one command (`HostOutputs.spreaderExtend`). Hardware uses two
+valves: STM32 **PC8 = open**, **PC12 = close**, always as a complementary pair.
 
-| Mode | Valve | Latch `spreaderExtended` |
-|------|-------|--------------------------|
-| Clamp | on for extendTime | set true after timer |
-| Unclamp | on for retractTime | set false after timer |
-| STOP / Fault / E-Stop | **off immediately** (`enterSafeState`) | **not rewritten** (unknown mechanical pose) |
+| Mode | Electrical pair (STM32) | Latch `spreaderExtended` |
+|------|-------------------------|--------------------------|
+| Clamp | PC8 High, PC12 Low for extendTime | set true after timer |
+| Unclamp | PC8 Low, PC12 High for retractTime | set false after timer |
+| STOP / Fault / E-Stop | **freeze last pair** (`enterSafeState`) | **not rewritten** (unknown mechanical pose) |
 
-`SpreaderState::SafeDeenergized` after safety. Do not treat `spreaderExtended` as a
-mechanical guarantee after a fault.
+`SpreaderState::SafeDeenergized` after safety. Hardware E-Stop still cuts air.
+Do not treat `spreaderExtended` as a mechanical guarantee after a fault.
 
 `CmdSetSpreader` during `ProcessState::Running` → `InvalidState`. Procedure Clamp still
 uses `Machine::setSpreaderExtend` internally.
@@ -283,7 +282,7 @@ between ticks. Search end without trigger → Error, **no** `setProbeCenter` /
 STM32 host shall supply: Fx/Fy/Fz (Newton), `forceSampleValid` / sequence, heartbeat,
 `probeTriggered` plus latched trigger pose / sequence, limits, E-Stop.
 
-STM32 host shall consume: stepper commands, `spreaderExtend`, fault state.
+STM32 host shall consume: stepper commands, spreader open/close pair, fixture, fault state.
 
 Target: fixed tick, safety reaction in a few milliseconds. Core M18 has no blocking
 operations on that path.
@@ -297,7 +296,7 @@ operations on that path.
 - No real E-Stop hardware loop.
 - No real pneumatics / dual-valve retract.
 - No real probe calibration protocol.
-- Spreader mechanical pose after SafeDeenergized is **unknown**.
+- Spreader mechanical pose after SafeDeenergized is **unknown** (GPIO pair frozen).
 - SimPlant force remains 0; complete-run tests inject tensile-positive Fz.
 
 **Hardwarefreigabe: NEIN.**

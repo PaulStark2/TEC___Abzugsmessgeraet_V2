@@ -435,18 +435,20 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     const insertionForce = Number(body && body.insertionForce);
     const iterations = Number(body && body.iterations);
 
+    const machineCfg = machineConfigStore.load();
+    const rangeN = Number(machineCfg.force_range_N);
+    const forceLimitN = Number.isFinite(rangeN) && rangeN > 0 ? rangeN : 30;
     if (!Number.isFinite(insertionForce) || !(insertionForce > 0)) {
       return { ok: false, error: 'insertionForce must be a positive number' };
     }
-    if (insertionForce > 50) {
-      return { ok: false, error: 'insertionForce must be <= 50 N' };
+    if (insertionForce > forceLimitN) {
+      return { ok: false, error: `insertionForce must be <= ${forceLimitN} N` };
     }
     if (!Number.isInteger(iterations) || iterations < 1) {
       return { ok: false, error: 'iterations must be an integer >= 1' };
     }
 
     const calib = calibrationStore.load();
-    const machineCfg = machineConfigStore.load();
     const workspace = await loadWorkspaceFromPlant(
       plantClient,
       typeof machineClient.getStatus === 'function' ? machineClient.getStatus() : {}

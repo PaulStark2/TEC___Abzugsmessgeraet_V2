@@ -10,6 +10,7 @@ add_library(core STATIC
     ProbeSearch.cpp
     MachineConfig.cpp
     TestConfiguration.cpp
+    ForceCalibration.cpp
 )
 
 target_include_directories(core

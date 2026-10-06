@@ -440,7 +440,7 @@ int main()
     }
 
     // -------------------------------
-    // P4: E-Stop de-energizes the valve; does not invent a retracted pose
+    // P4: E-Stop freezes the last spreader command; does not invent a retracted pose
     // -------------------------------
     {
         Machine m;
@@ -457,7 +457,7 @@ int main()
         {
             return 64;
         }
-        if (m.hostOutputs().spreaderExtend || m.spreaderBusy())
+        if (!m.hostOutputs().spreaderExtend || m.spreaderBusy())
         {
             return 65;
         }

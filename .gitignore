@@ -23,6 +23,9 @@ node_modules/
 # GUI runtime config (written by Parametereinstellungen)
 gui/server/data/*.json
 
+# STM32 firmware out-of-tree build
+build-firmware/
+
 # M14.1 local development runtime (PID files)
 gui/.dev-runtime/
 

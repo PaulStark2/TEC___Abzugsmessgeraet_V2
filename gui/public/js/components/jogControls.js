@@ -27,9 +27,32 @@ export function snapJogStepMm(raw, minStep) {
 
 /**
  * HTML fragment: mode toggle + step input + axis buttons (no outer section wrapper).
+ * Compact mode is one short row for the force-calibration wizard.
+ * @param {boolean} [compact]
  * @returns {string}
  */
-export function jogAxesMarkup() {
+export function jogAxesMarkup(compact = false) {
+  const axes = `
+        <span class="jog-label">X</span>
+        <button type="button" class="btn-jog" data-axis="X" data-direction="-1">−X</button>
+        <button type="button" class="btn-jog" data-axis="X" data-direction="1">+X</button>
+        <span class="jog-label">Y</span>
+        <button type="button" class="btn-jog" data-axis="Y" data-direction="-1">−Y</button>
+        <button type="button" class="btn-jog" data-axis="Y" data-direction="1">+Y</button>
+        <span class="jog-label">Z</span>
+        <button type="button" class="btn-jog" data-axis="Z" data-direction="-1">−Z</button>
+        <button type="button" class="btn-jog" data-axis="Z" data-direction="1">+Z</button>`;
+  if (compact) {
+    return `
+      <div class="jog-compact">
+        <label class="jog-compact__step">mm
+          <input type="number" class="jog-step-input" min="0" step="any" value="1" />
+        </label>
+        <button type="button" class="jog-mode-btn is-active" data-jog-mode="step">Schritt</button>
+        <button type="button" class="jog-mode-btn" data-jog-mode="hold">Halten</button>
+        <div class="jog-axis jog-axis--inline">${axes}</div>
+      </div>`;
+  }
   return `
     <div class="jog-mode-row" role="group" aria-label="Jog-Modus">
       <button type="button" class="jog-mode-btn is-active" data-jog-mode="step">Einzelschritt</button>

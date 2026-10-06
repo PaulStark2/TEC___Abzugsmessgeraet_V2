@@ -48,6 +48,20 @@ bool encodeForcePathChunkPayload(const ForcePathChunkPayload& payload, uint8_t* 
                                  std::size_t& bytes_written);
 bool decodeForcePathChunkPayload(const uint8_t* data, std::size_t length, ForcePathChunkPayload& out);
 
+bool encodeSetForceCalibrationPayload(const SetForceCalibrationPayload& payload, uint8_t* out, std::size_t capacity,
+                                      std::size_t& bytes_written);
+bool decodeSetForceCalibrationPayload(const uint8_t* data, std::size_t length, SetForceCalibrationPayload& out);
+
+bool encodeSelectForceCurvePayload(const SelectForceCurvePayload& payload, uint8_t* out, std::size_t capacity);
+bool decodeSelectForceCurvePayload(const uint8_t* data, std::size_t length, SelectForceCurvePayload& out);
+
+bool encodeRawAdcPayload(const RawAdcPayload& payload, uint8_t* out, std::size_t capacity);
+bool decodeRawAdcPayload(const uint8_t* data, std::size_t length, RawAdcPayload& out);
+
+bool encodeForceCalibrationResultPayload(const ForceCalibrationResultPayload& payload, uint8_t* out,
+                                         std::size_t capacity, std::size_t& bytes_written);
+bool decodeForceCalibrationResultPayload(const uint8_t* data, std::size_t length, ForceCalibrationResultPayload& out);
+
 // Convenience: encode typed payload + frame header/CRC.
 EncodeResult encodeMessage(uint8_t message_id, const MoveToPayload& payload, uint8_t* out,
                            std::size_t out_capacity);
@@ -68,6 +82,14 @@ EncodeResult encodeMessage(uint8_t message_id, const MachineConfigPayload& paylo
 EncodeResult encodeMessage(uint8_t message_id, const TestConfigurationPayload& payload, uint8_t* out,
                            std::size_t out_capacity);
 EncodeResult encodeMessage(uint8_t message_id, const ForcePathChunkPayload& payload, uint8_t* out,
+                           std::size_t out_capacity);
+EncodeResult encodeMessage(uint8_t message_id, const SetForceCalibrationPayload& payload, uint8_t* out,
+                           std::size_t out_capacity);
+EncodeResult encodeMessage(uint8_t message_id, const SelectForceCurvePayload& payload, uint8_t* out,
+                           std::size_t out_capacity);
+EncodeResult encodeMessage(uint8_t message_id, const RawAdcPayload& payload, uint8_t* out,
+                           std::size_t out_capacity);
+EncodeResult encodeMessage(uint8_t message_id, const ForceCalibrationResultPayload& payload, uint8_t* out,
                            std::size_t out_capacity);
 EncodeResult encodeEmptyMessage(uint8_t message_id, uint8_t* out, std::size_t out_capacity);
 

@@ -819,6 +819,38 @@ async function testGetMachineConfigSequentialCalls() {
   }
 }
 
+async function testRawAdcSurvivesStatusReport() {
+  const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId !== MessageId.CmdMoveTo) {
+      return;
+    }
+    replyAck(socket, frame.messageId);
+    const rawPayload = Buffer.alloc(7);
+    rawPayload.writeUInt16LE(10, 0);
+    rawPayload.writeUInt16LE(20, 2);
+    rawPayload.writeUInt16LE(1861, 4);
+    rawPayload[6] = 1;
+    const raw = encodeFrame(MessageId.MsgRawAdc, rawPayload);
+    const status = encodeFrame(MessageId.MsgStatusReport, makeStatusPayload({ x: 4 }));
+    socket.write(Buffer.concat([raw.frame, status.frame]));
+  });
+
+  try {
+    await withClient(port, async (client) => {
+      const moved = await client.moveTo(1, 0, 0);
+      assert.ok(moved.ok, moved.error);
+      const status = client.getStatus();
+      assert.strictEqual(status.adcValid, true);
+      assert.strictEqual(status.adcX, 10);
+      assert.strictEqual(status.adcY, 20);
+      assert.strictEqual(status.adcZ, 1861);
+      assert.strictEqual(status.x, 4);
+    });
+  } finally {
+    server.close();
+  }
+}
+
 async function main() {
   await testStatusHello();
   await testMoveToAck();
@@ -842,6 +874,7 @@ async function main() {
   await testGetMachineConfigTimeoutWithoutConfig();
   await testGetMachineConfigDoesNotReturnStaleConfig();
   await testGetMachineConfigSequentialCalls();
+  await testRawAdcSurvivesStatusReport();
   console.log('protocolMachineClient.test.js: PASS');
 }
 

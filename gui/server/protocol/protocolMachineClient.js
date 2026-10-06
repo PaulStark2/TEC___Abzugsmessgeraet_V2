@@ -25,6 +25,10 @@ const {
   decodeStatusReportPayload,
   decodeMachineConfigPayload,
   decodeForcePathChunkPayload,
+  decodeRawAdcPayload,
+  decodeForceCalibrationResultPayload,
+  encodeSetForceCalibrationMessage,
+  encodeSelectForceCurveMessage,
   statusReportToGuiStatus,
 } = require('./m12Codec');
 const { MessageId, AckResultCode, NackErrorCode, DecodeResult } = require('./protocolTypes');
@@ -190,6 +194,13 @@ function createProtocolMachineClient(options = {}) {
     if (connected) {
       sessionReady = true;
     }
+    // StatusReport has no ADC fields. Keep the last MsgRawAdc sample.
+    const keptAdc = {
+      adcX: status.adcX,
+      adcY: status.adcY,
+      adcZ: status.adcZ,
+      adcValid: status.adcValid,
+    };
     status = statusReportToGuiStatus(decoded, connected && sessionReady);
     measuredHome = latchMeasuredHome({
       previousHomingState: lastHomingState,
@@ -198,7 +209,11 @@ function createProtocolMachineClient(options = {}) {
       previousMeasuredHome: measuredHome,
     });
     lastHomingState = status.homingState;
-    status = { ...status, measuredHome: measuredHome ? { ...measuredHome } : null };
+    status = {
+      ...status,
+      ...keptAdc,
+      measuredHome: measuredHome ? { ...measuredHome } : null,
+    };
     if (becameReady && typeof sessionReadyHandler === 'function') {
       Promise.resolve()
         .then(() => sessionReadyHandler())
@@ -228,6 +243,31 @@ function createProtocolMachineClient(options = {}) {
       }
       if (decoded) {
         lastMachineConfig = decoded;
+      }
+      return;
+    }
+
+    if (frame.messageId === MessageId.MsgRawAdc) {
+      const raw = decodeRawAdcPayload(frame.payload);
+      if (raw) {
+        status = {
+          ...status,
+          adcX: raw.x,
+          adcY: raw.y,
+          adcZ: raw.z,
+          adcValid: raw.valid,
+        };
+      }
+      return;
+    }
+
+    if (frame.messageId === MessageId.MsgForceCalibration) {
+      const report = decodeForceCalibrationResultPayload(frame.payload);
+      for (const id of [MessageId.CmdSetForceCalibration, MessageId.CmdSelectForceCurve]) {
+        const pending = pendingByMessageId.get(id);
+        if (pending) {
+          pending.report = report;
+        }
       }
       return;
     }
@@ -264,14 +304,13 @@ function createProtocolMachineClient(options = {}) {
         tryCompleteGetMachineConfigPending(pending);
         return;
       }
-      finishPendingCommand(ack.refMessageId, error
-        ? {
-            ok: false,
-            error,
-            resultCode: ack.resultCode,
-            status: getStatus(),
-          }
-        : { ok: true, resultCode: ack.resultCode, status: getStatus() });
+      finishPendingCommand(ack.refMessageId, {
+        ok: !error,
+        error,
+        resultCode: ack.resultCode,
+        status: getStatus(),
+        report: pending.report || null,
+      });
       return;
     }
 
@@ -767,6 +806,28 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdSetPlateOrigin, encoded.frame);
   }
 
+  async function setForceCalibration(command) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeSetForceCalibrationMessage(command);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_FORCE_CALIBRATION' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetForceCalibration, encoded.frame);
+  }
+
+  async function selectForceCurve(command) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeSelectForceCurveMessage(command);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SELECT_FORCE_CURVE' };
+    }
+    return sendFrameAndWait(MessageId.CmdSelectForceCurve, encoded.frame);
+  }
+
   async function setProbeCenter(x, y, z) {
     if (!isLiveSession()) {
       return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
@@ -776,6 +837,17 @@ function createProtocolMachineClient(options = {}) {
       return { ok: false, error: 'Failed to encode SET_PROBE_CENTER' };
     }
     return sendFrameAndWait(MessageId.CmdSetProbeCenter, encoded.frame);
+  }
+
+  async function setCollisionGuard(enabled) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeBoolMessage(MessageId.CmdSetCollisionGuard, enabled === true);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_COLLISION_GUARD' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetCollisionGuard, encoded.frame);
   }
 
   async function fixtureOpen() {
@@ -861,6 +933,9 @@ function createProtocolMachineClient(options = {}) {
     setTestConfiguration,
     setPlateOrigin,
     setProbeCenter,
+    setForceCalibration,
+    selectForceCurve,
+    setCollisionGuard,
     fixtureOpen,
     fixtureClose,
     startProbeCalibration,

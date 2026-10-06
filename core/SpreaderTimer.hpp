@@ -2,9 +2,10 @@
 
 #include "Types.hpp"
 
-// Non-blocking spreader valve timer. Command (valve) is set immediately;
-// Extended feedback follows after MachineConfig spreader times.
+// Non-blocking spreader timer for a double-acting pair (open/close).
+// Command is set immediately; extended() follows MachineConfig times.
 // There is no end-position sensor: extended() is a timer latch, not hardware.
+// STOP/Fault freezes command_ (firmware keeps the last PC8/PC12 pair).
 class SpreaderTimer
 {
 public:
@@ -44,11 +45,11 @@ public:
         }
     }
 
-    // STOP / Fault / E-Stop: de-energize the valve immediately. Do not finish
-    // a pending extend or retract, and do not rewrite the last confirmed latch.
+    // STOP / Fault / E-Stop: freeze the last valve command. Do not finish a
+    // pending extend or retract, and do not rewrite the last confirmed latch.
+    // Firmware keeps the last PC8/PC12 pair; it must not treat this as close.
     void enterSafeState()
     {
-        command_ = false;
         remaining_s_ = 0.0f;
         safe_deenergized_ = true;
     }

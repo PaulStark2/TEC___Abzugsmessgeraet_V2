@@ -73,6 +73,8 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.force.sample_timeout_s = p.sample_timeout_s;
     cfg.communication.heartbeat_timeout_s = p.heartbeat_timeout_s;
     cfg.force.xy_correct_timeout_s = p.xy_correct_timeout_s;
+    cfg.force.range_N = p.force_range_N;
+    cfg.force.hard_limit_N = p.force_hard_limit_N;
     return cfg;
 }
 
@@ -154,6 +156,8 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.probe_center_x = 0.0f;
     p.probe_center_y = 0.0f;
     p.probe_center_z = 0.0f;
+    p.force_range_N = cfg.force.range_N;
+    p.force_hard_limit_N = cfg.force.hard_limit_N;
     return p;
 }
 

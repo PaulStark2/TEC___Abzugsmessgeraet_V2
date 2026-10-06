@@ -212,6 +212,9 @@ function createMockMachineClient() {
     jog,
     pneumaticOpen,
     pneumaticClose,
+    setCollisionGuard() {
+      return { ok: true, status: getStatus() };
+    },
     home,
     defineMcs,
     invalidateHoming,

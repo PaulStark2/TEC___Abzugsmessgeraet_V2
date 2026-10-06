@@ -57,11 +57,41 @@ function migrateLegacyKeys(parsed) {
   return parsed;
 }
 
+const LEGACY_COLLISION_KEYS = [
+  'collision_approach_N',
+  'collision_retract_N',
+  'collision_clamp_N',
+  'collision_unclamp_N',
+  'collision_contact_N',
+  'collision_measure_N',
+];
+
+/** Files from before the ±30 N range have no force_range_N. Cap old 50 N collision defaults. */
+function migrateForceRange(parsed) {
+  if (!parsed || typeof parsed !== 'object' || parsed.force_range_N !== undefined) {
+    return false;
+  }
+  parsed.force_range_N = 30;
+  parsed.force_hard_limit_N = 30;
+  for (const key of LEGACY_COLLISION_KEYS) {
+    if (Number(parsed[key]) > 30) {
+      parsed[key] = 30;
+    }
+  }
+  return true;
+}
+
 function load() {
   try {
     const raw = fs.readFileSync(FILE_PATH, 'utf8');
     const parsed = migrateLegacyKeys(JSON.parse(raw));
-    return { ...defaultMachineConfigPayload(), ...parsed };
+    const changed = migrateForceRange(parsed);
+    const merged = { ...defaultMachineConfigPayload(), ...parsed };
+    if (changed) {
+      ensureDir();
+      fs.writeFileSync(FILE_PATH, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+    }
+    return merged;
   } catch {
     return defaultMachineConfigPayload();
   }

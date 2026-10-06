@@ -63,8 +63,13 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdDefineMcs:
     case MessageId::CmdRestoreMcs:
     case MessageId::CmdInvalidateHoming:
+    case MessageId::CmdSetForceCalibration:
+    case MessageId::CmdSelectForceCurve:
+    case MessageId::CmdSetCollisionGuard:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
+    case MessageId::MsgRawAdc:
+    case MessageId::MsgForceCalibration:
     case MessageId::RspNack:
     case MessageId::MsgStatusReport:
     case MessageId::MsgProgramSummary:
@@ -111,6 +116,7 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
 
     case MessageId::CmdSetSpreader:
     case MessageId::CmdSetFixture:
+    case MessageId::CmdSetCollisionGuard:
         if (payload_length != kBoolPayloadWireSize)
         {
             return false;
@@ -259,6 +265,30 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
     {
         ForcePathChunkPayload parsed{};
         return decodeForcePathChunkPayload(payload, payload_length, parsed);
+    }
+
+    case MessageId::CmdSetForceCalibration:
+    {
+        SetForceCalibrationPayload parsed{};
+        return decodeSetForceCalibrationPayload(payload, payload_length, parsed);
+    }
+
+    case MessageId::CmdSelectForceCurve:
+    {
+        SelectForceCurvePayload parsed{};
+        return decodeSelectForceCurvePayload(payload, payload_length, parsed);
+    }
+
+    case MessageId::MsgRawAdc:
+    {
+        RawAdcPayload parsed{};
+        return decodeRawAdcPayload(payload, payload_length, parsed);
+    }
+
+    case MessageId::MsgForceCalibration:
+    {
+        ForceCalibrationResultPayload parsed{};
+        return decodeForceCalibrationResultPayload(payload, payload_length, parsed);
     }
 
     default:
