@@ -1,27 +1,39 @@
 #include "HostIo.hpp"
 
 #include "AdcScaler.hpp"
+#include "CommandDispatcher.hpp"
+#include "FirmwareHost.hpp"
+#include "FixedFrameBuffer.hpp"
 #include "Machine.hpp"
 #include "PinMap.hpp"
 #include "Types.hpp"
 
-#include <cstdio>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
 extern "C" void Error_Handler(void);
 
 static ADC_HandleTypeDef g_adc{};
 static DMA_HandleTypeDef g_dma_adc{};
 static UART_HandleTypeDef g_uart{};
-static volatile std::uint16_t g_adc_dma[3]{};
+static volatile std::uint16_t g_adc_dma[3] = {2048u, 2048u, 2048u};
 
-static constexpr std::size_t kRxCap = 16;
+static constexpr std::size_t kRxCap = 1024;
 static volatile std::uint8_t g_rx_buf[kRxCap]{};
-static volatile std::uint8_t g_rx_head = 0;
-static volatile std::uint8_t g_rx_tail = 0;
-static char g_status_line[96]{};
-static volatile bool g_tx_busy = false;
+static volatile std::uint16_t g_rx_head = 0;
+static volatile std::uint16_t g_rx_tail = 0;
+
+static constexpr std::size_t kTxCap = 4096;
+static volatile std::uint8_t g_tx_buf[kTxCap]{};
+static volatile std::uint16_t g_tx_head = 0;
+static volatile std::uint16_t g_tx_tail = 0;
+static volatile bool g_tx_irq_armed = false;
+
+static FixedFrameBuffer g_frames{};
 static bool g_spreader_pins_latched = false;
 static bool g_spreader_open_latched = false;
+static std::uint32_t g_status_divider = 0;
 
 static bool pinHigh(GPIO_TypeDef* port, std::uint16_t pin)
 {
@@ -30,7 +42,7 @@ static bool pinHigh(GPIO_TypeDef* port, std::uint16_t pin)
 
 static void rxPush(std::uint8_t byte)
 {
-    const std::uint8_t next = static_cast<std::uint8_t>((g_rx_head + 1u) % kRxCap);
+    const std::uint16_t next = static_cast<std::uint16_t>((g_rx_head + 1u) % kRxCap);
     if (next == g_rx_tail)
     {
         return;
@@ -46,11 +58,82 @@ static bool rxPop(std::uint8_t& byte)
         return false;
     }
     byte = g_rx_buf[g_rx_tail];
-    g_rx_tail = static_cast<std::uint8_t>((g_rx_tail + 1u) % kRxCap);
+    g_rx_tail = static_cast<std::uint16_t>((g_rx_tail + 1u) % kRxCap);
     return true;
 }
 
-// Complementary pair: open = PC8 High / PC12 Low, close = PC8 Low / PC12 High.
+static bool txPush(std::uint8_t byte)
+{
+    const std::uint16_t next = static_cast<std::uint16_t>((g_tx_head + 1u) % kTxCap);
+    if (next == g_tx_tail)
+    {
+        return false;
+    }
+    g_tx_buf[g_tx_head] = byte;
+    g_tx_head = next;
+    return true;
+}
+
+static bool txPop(std::uint8_t& byte)
+{
+    if (g_tx_head == g_tx_tail)
+    {
+        return false;
+    }
+    byte = g_tx_buf[g_tx_tail];
+    g_tx_tail = static_cast<std::uint16_t>((g_tx_tail + 1u) % kTxCap);
+    return true;
+}
+
+static void txArm()
+{
+    if (g_tx_irq_armed)
+    {
+        return;
+    }
+    if (g_tx_head == g_tx_tail)
+    {
+        return;
+    }
+    g_tx_irq_armed = true;
+    __HAL_UART_ENABLE_IT(&g_uart, UART_IT_TXE);
+}
+
+static std::size_t txFreeSpace()
+{
+    // One slot left empty to distinguish full vs empty.
+    const std::uint16_t head = g_tx_head;
+    const std::uint16_t tail = g_tx_tail;
+    if (head >= tail)
+    {
+        return static_cast<std::size_t>(kTxCap - 1u - (head - tail));
+    }
+    return static_cast<std::size_t>(tail - head - 1u);
+}
+
+// All-or-nothing: never push a partial frame (truncation corrupts the M12 stream).
+static bool enqueueFrame(const simbridge::OutboundFrame& frame)
+{
+    if (frame.length == 0 || frame.length > txFreeSpace())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < frame.length; ++i)
+    {
+        (void)txPush(frame.data[i]);
+    }
+    txArm();
+    return true;
+}
+
+static void enqueueFrames(const std::vector<simbridge::OutboundFrame>& frames)
+{
+    for (const simbridge::OutboundFrame& frame : frames)
+    {
+        (void)enqueueFrame(frame);
+    }
+}
+
 static void driveSpreaderPair(bool open)
 {
     if (open)
@@ -132,21 +215,22 @@ static void Adc_Init()
         Error_Handler();
     }
     __HAL_DMA_DISABLE_IT(&g_dma_adc, DMA_IT_TC | DMA_IT_HT | DMA_IT_TE);
+    HAL_Delay(2);
 }
 
 static void Uart_Init()
 {
-    __HAL_RCC_USART3_CLK_ENABLE();
+    TEC_HOST_USART_CLK_ENABLE();
 
     GPIO_InitTypeDef gpio{};
     gpio.Pin = PIN_UART_TX_PIN | PIN_UART_RX_PIN;
     gpio.Mode = GPIO_MODE_AF_PP;
     gpio.Pull = GPIO_PULLUP;
     gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    gpio.Alternate = GPIO_AF7_USART3;
+    gpio.Alternate = TEC_HOST_USART_AF;
     HAL_GPIO_Init(PIN_UART_TX_PORT, &gpio);
 
-    g_uart.Instance = USART3;
+    g_uart.Instance = TEC_HOST_USART;
     g_uart.Init.BaudRate = 115200;
     g_uart.Init.WordLength = UART_WORDLENGTH_8B;
     g_uart.Init.StopBits = UART_STOPBITS_1;
@@ -159,8 +243,8 @@ static void Uart_Init()
         Error_Handler();
     }
 
-    HAL_NVIC_SetPriority(USART3_IRQn, 6, 0);
-    HAL_NVIC_EnableIRQ(USART3_IRQn);
+    HAL_NVIC_SetPriority(TEC_HOST_USART_IRQn, 6, 0);
+    HAL_NVIC_EnableIRQ(TEC_HOST_USART_IRQn);
     __HAL_UART_ENABLE_IT(&g_uart, UART_IT_RXNE);
 }
 
@@ -173,7 +257,8 @@ void init()
     Uart_Init();
 }
 
-HostInputs sampleInputs(std::uint32_t force_sequence, float force_range_N)
+HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_sequence,
+                        float force_range_N)
 {
     HostInputs inputs{};
     std::uint16_t fx = 0;
@@ -186,7 +271,7 @@ HostInputs sampleInputs(std::uint32_t force_sequence, float force_range_N)
     inputs.forceSampleValid = true;
     inputs.forceSampleSequence = force_sequence;
     inputs.hostHeartbeatValid = true;
-    inputs.hostHeartbeatSequence = force_sequence;
+    inputs.hostHeartbeatSequence = heartbeat_sequence;
     inputs.limitXMin = pinHigh(PIN_LIM_XN_PORT, PIN_LIM_XN_PIN);
     inputs.limitXMax = pinHigh(PIN_LIM_XP_PORT, PIN_LIM_XP_PIN);
     inputs.limitYMin = pinHigh(PIN_LIM_YN_PORT, PIN_LIM_YN_PIN);
@@ -225,104 +310,68 @@ void latestAdc(std::uint16_t& fx, std::uint16_t& fy, std::uint16_t& fz)
     fz = g_adc_dma[2];
 }
 
-void sendStatusLine(const Machine& machine, const HostInputs& inputs, std::uint16_t adc_fx,
-                    std::uint16_t adc_fy, std::uint16_t adc_fz)
-{
-    if (g_tx_busy)
-    {
-        return;
-    }
-    const int fx_mN = static_cast<int>(inputs.force.fx * 1000.0f);
-    const int fy_mN = static_cast<int>(inputs.force.fy * 1000.0f);
-    const int fz_mN = static_cast<int>(inputs.force.fz * 1000.0f);
-    std::uint8_t lim = 0;
-    if (inputs.limitXMin)
-    {
-        lim |= 1u << 0;
-    }
-    if (inputs.limitXMax)
-    {
-        lim |= 1u << 1;
-    }
-    if (inputs.limitYMin)
-    {
-        lim |= 1u << 2;
-    }
-    if (inputs.limitYMax)
-    {
-        lim |= 1u << 3;
-    }
-    if (inputs.limitZMin)
-    {
-        lim |= 1u << 4;
-    }
-    if (inputs.limitZMax)
-    {
-        lim |= 1u << 5;
-    }
-    const unsigned open = g_spreader_open_latched ? 1u : 0u;
-    const int n = std::snprintf(
-        g_status_line, sizeof(g_status_line),
-        "IO e=%u p=%u lim=0x%02X adc=%u,%u,%u mN=%d,%d,%d spr=%u st=%u\r\n",
-        inputs.e_stop ? 1u : 0u, inputs.probeTriggered ? 1u : 0u, static_cast<unsigned>(lim),
-        static_cast<unsigned>(adc_fx), static_cast<unsigned>(adc_fy), static_cast<unsigned>(adc_fz), fx_mN,
-        fy_mN, fz_mN, open, static_cast<unsigned>(machine.machineState()));
-    if (n <= 0)
-    {
-        return;
-    }
-    g_tx_busy = true;
-    if (HAL_UART_Transmit_IT(&g_uart, reinterpret_cast<std::uint8_t*>(g_status_line),
-                             static_cast<std::uint16_t>(n)) != HAL_OK)
-    {
-        g_tx_busy = false;
-    }
-}
-
-void pollUart(Machine& machine)
+void serviceProtocol(FirmwareHost& host)
 {
     std::uint8_t byte = 0;
     while (rxPop(byte))
     {
-        if (byte == 'F' || byte == 'f')
+        g_frames.append(&byte, 1);
+    }
+
+    tecomm::DecodedFrame decoded{};
+    tecomm::DecodeResult decode_result = tecomm::DecodeResult::NeedMoreData;
+    while (g_frames.tryPopFrame(decoded, decode_result))
+    {
+        std::vector<simbridge::OutboundFrame> out;
+        out.reserve(4);
+        host.handleFrame(decoded, decode_result, out);
+        enqueueFrames(out);
+    }
+
+    // StatusReport 50 Hz. Skip a tick if the TX ring is tight so ACKs are never starved.
+    ++g_status_divider;
+    if (g_status_divider >= 20u)
+    {
+        g_status_divider = 0;
+        // StatusReport (~49 B) + MsgRawAdc (~15 B).
+        if (txFreeSpace() >= 96u)
         {
-            machine.setFixtureExtend(!machine.hostOutputs().fixtureExtend);
-        }
-        else if (byte == 'R' || byte == 'r')
-        {
-            machine.setSpreaderExtend(!machine.hostOutputs().spreaderExtend);
-        }
-        else if (byte == '?')
-        {
-            std::uint16_t fx = 0;
-            std::uint16_t fy = 0;
-            std::uint16_t fz = 0;
-            latestAdc(fx, fy, fz);
-            sendStatusLine(machine, machine.hostInputs(), fx, fy, fz);
+            std::vector<simbridge::OutboundFrame> status;
+            status.reserve(2);
+            host.appendStatusPush(status);
+            enqueueFrames(status);
         }
     }
 }
 
 } // namespace hostio
 
-extern "C" void USART3_IRQHandler(void)
+extern "C" void TEC_HOST_USART_IRQHandler(void)
 {
     if (__HAL_UART_GET_FLAG(&g_uart, UART_FLAG_RXNE) != RESET)
     {
         const std::uint8_t byte = static_cast<std::uint8_t>(g_uart.Instance->DR);
-        if (!g_tx_busy && __HAL_UART_GET_FLAG(&g_uart, UART_FLAG_TXE) != RESET)
+        rxPush(byte);
+    }
+
+    if (__HAL_UART_GET_FLAG(&g_uart, UART_FLAG_TXE) != RESET && g_tx_irq_armed)
+    {
+        std::uint8_t byte = 0;
+        if (txPop(byte))
         {
             g_uart.Instance->DR = byte;
         }
-        rxPush(byte);
+        else
+        {
+            __HAL_UART_DISABLE_IT(&g_uart, UART_IT_TXE);
+            g_tx_irq_armed = false;
+        }
     }
-    HAL_UART_IRQHandler(&g_uart);
-}
 
-extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart)
-{
-    if (huart->Instance == USART3)
+    if (__HAL_UART_GET_FLAG(&g_uart, UART_FLAG_ORE) != RESET)
     {
-        g_tx_busy = false;
+        volatile std::uint32_t sync = g_uart.Instance->SR;
+        sync = g_uart.Instance->DR;
+        (void)sync;
     }
 }

@@ -25,6 +25,19 @@ add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>)
 add_compile_definitions(STM32F446xx USE_HAL_DRIVER)
 
+# Host UART for Phase-2.1 bench and later M12. One instance only — never dual M12.
+# Bring-up default: USART2 (Nucleo ST-Link VCP). Production Pi: -DTEC_HOST_UART=USART3.
+set(TEC_HOST_UART "USART2" CACHE STRING "Host UART: USART2 (ST-Link VCP) or USART3 (Pi PC10/PC11)")
+set_property(CACHE TEC_HOST_UART PROPERTY STRINGS USART2 USART3)
+if(TEC_HOST_UART STREQUAL "USART2")
+    add_compile_definitions(TEC_HOST_UART_USART2=1)
+elseif(TEC_HOST_UART STREQUAL "USART3")
+    add_compile_definitions(TEC_HOST_UART_USART3=1)
+else()
+    message(FATAL_ERROR "TEC_HOST_UART must be USART2 or USART3 (got '${TEC_HOST_UART}')")
+endif()
+message(STATUS "TEC_HOST_UART=${TEC_HOST_UART}")
+
 add_link_options(
     ${TEC_MCU_FLAGS}
     -T${CMAKE_CURRENT_SOURCE_DIR}/linker/STM32F446RETX_FLASH.ld
@@ -71,6 +84,8 @@ endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../core ${CMAKE_CURRENT_BINARY_DIR}/core)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../communication ${CMAKE_CURRENT_BINARY_DIR}/communication)
 
+set(TEC_SIM_BRIDGE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../simulation_bridge)
+
 add_library(stm32f4_hal STATIC
     ${stm32f4xx_hal_SOURCE_DIR}/Src/stm32f4xx_hal.c
     ${stm32f4xx_hal_SOURCE_DIR}/Src/stm32f4xx_hal_cortex.c
@@ -86,6 +101,8 @@ add_library(stm32f4_hal STATIC
     ${stm32f4xx_hal_SOURCE_DIR}/Src/stm32f4xx_hal_adc.c
     ${stm32f4xx_hal_SOURCE_DIR}/Src/stm32f4xx_hal_adc_ex.c
     ${stm32f4xx_hal_SOURCE_DIR}/Src/stm32f4xx_hal_uart.c
+    ${stm32f4xx_hal_SOURCE_DIR}/Src/stm32f4xx_hal_tim.c
+    ${stm32f4xx_hal_SOURCE_DIR}/Src/stm32f4xx_hal_tim_ex.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/system_stm32f4xx.c
 )
 target_compile_options(stm32f4_hal PRIVATE -Wno-unused-parameter)
@@ -101,10 +118,15 @@ add_executable(tec_firmware
     src/main.cpp
     src/FirmwareHost.cpp
     src/HostIo.cpp
+    src/StepGenerator.cpp
+    src/FixedFrameBuffer.cpp
     src/syscalls.cpp
+    ${TEC_SIM_BRIDGE_DIR}/CommandDispatcher.cpp
+    ${TEC_SIM_BRIDGE_DIR}/StatusSnapshot.cpp
+    ${TEC_SIM_BRIDGE_DIR}/ForceCalibHost.cpp
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/gcc/startup_stm32f446xx.s
 )
-target_include_directories(tec_firmware PRIVATE include)
+target_include_directories(tec_firmware PRIVATE include ${TEC_SIM_BRIDGE_DIR})
 target_link_libraries(tec_firmware PRIVATE core communication stm32f4_hal)
 set_target_properties(tec_firmware PROPERTIES OUTPUT_NAME tec_firmware SUFFIX ".elf")
 

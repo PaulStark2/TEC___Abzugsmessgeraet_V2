@@ -4,18 +4,22 @@
 
 #include <cstdint>
 
+class FirmwareHost;
 class Machine;
 
-// Phase-2.1 HAL I/O: ADC1 DMA, USART3 echo, GPIO limits/probe/E-Stop, dual spreader, fixture.
+// ADC DMA, limits/probe/E-Stop, spreader/fixture GPIO, M12 on TEC_HOST_UART.
 namespace hostio
 {
 
 void init();
-HostInputs sampleInputs(std::uint32_t force_sequence, float force_range_N);
+// force_sequence advances every ADC tick; heartbeat_sequence only on CmdNop (Phase 6).
+HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_sequence,
+                        float force_range_N);
 void applyOutputs(const Machine& machine);
-void pollUart(Machine& machine);
-void sendStatusLine(const Machine& machine, const HostInputs& inputs, std::uint16_t adc_fx,
-                    std::uint16_t adc_fy, std::uint16_t adc_fz);
+
+// Drain RX → FixedFrameBuffer → CommandDispatcher; enqueue TX; 50 Hz status.
+void serviceProtocol(FirmwareHost& host);
+
 void latestAdc(std::uint16_t& fx, std::uint16_t& fy, std::uint16_t& fz);
 
 } // namespace hostio

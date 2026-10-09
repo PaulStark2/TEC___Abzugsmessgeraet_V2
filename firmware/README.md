@@ -1,63 +1,90 @@
-# STM32F446RE firmware (M19.x Phase 1–2.1)
+# STM32F446RE firmware (M19.x Phase 1–5a / 6–7)
 
 Standalone CMake project. Do not add this folder to the host `CMakeLists.txt` —
 the firmware uses `arm-none-eabi` and a different toolchain.
 
-## Phase 1 scope
+## Scope
 
-- 180 MHz clock (HSE 8 MHz from Nucleo ST-Link)
-- GPIO according to `include/PinMap.hpp` (step/dir held low)
-- Independent watchdog ~1 s, refreshed every Core tick
-- SysTick 1 kHz → `Machine::tick(0.001f)`
-- Heartbeat LED on **PC7** (Nucleo LD2 on PA5 is the probe input)
-- Same `core/` and `communication/` sources as the PC simulation
+- 180 MHz, IWDG, SysTick 1 kHz → Core `Machine` / `TestExecutor`
+- ADC DMA Fx/Fy/Fz, limits, probe, E-Stop, spreader pair, fixture
+- XYZ step GPIO (PB6/PB4/PB8), DIR PC1/PC3/PC5, 200 steps/mm
+- **M12 binary protocol** on host UART (replaces ASCII Phase-2–4 bench)
+- **ForceCalibHost**: `MsgRawAdc` at 50 Hz; after GUI commit, polynomial on Fx/Fy/Fz (same Z curve)
+- **Process (Phase 6)**: shared `CommandDispatcher` Start/Stop/Pause; `TestExecutor` tick while Running; Core comm-watchdog advances **only on `CmdNop`** (GUI already sends 10 Hz)
 
-## Phase 2.1 bench (USART3 115200 8N1 on PC10/PC11)
+## Host UART (`TEC_HOST_UART`)
 
-USB-TTL or Pi UART. **Not** the ST-Link VCP — SB13/SB14 stay closed so USART2
-PA2/PA3 remains available for debug.
+| Value | Pins | Use |
+|-------|------|-----|
+| **`USART2`** (default) | PA2/PA3 | Laptop ST-Link VCP → GUI `PROTOCOL_TRANSPORT=uart` |
+| `USART3` | PC10/PC11 | Pi `/dev/serial0` (Phase 5b) |
 
-- Bytes are echoed.
-- Once per second a status line: `IO e=.. p=.. lim=0x.. adc=..,..,.. mN=..,..,.. spr=.. st=..`
-- `spr=1` means the open valve (PC8) is High and the close valve (PC12) is Low
-- `?` — status immediately
-- `F` — toggle fixture relay (PC9)
-- `R` — toggle spreader (PC8/PC12 complementary pair)
-- `lim` bits: 0=X− 1=X+ 2=Y− 3=Y+ 4=Z− 5=Z+ (High = triggered)
-- `p=1` when probe pin is Low (NC contact)
-- `e=1` when E-Stop is High
-- PC7 blinks ~1 Hz; **~5 Hz if Core Fault**
-- Open analog pins can float into Fault (collision 20 N / hard limit 30 N). Tie
-  PA0/PA1/PA4 toward ~1.5 V for a quiet bench, or accept Fault while probing GPIO.
-- Newton on the status line is provisional: 0…4095 → ±`force_range_N` (default ±30 N)
+115200 8N1. StatusReport **50 Hz**. GUI sends **CmdNop 10 Hz** when the session is live.
 
-Not in Phase 2.1: step PWM timers, probe EXTI pose-latch, M12 protocol.
-
-## Build
-
-Requires GNU Arm Embedded Toolchain 14.2 (`arm-none-eabi-gcc` **14.x** on PATH).
-A Nanotec Plug & Drive install may put GCC 4.8.4 first — put the 14.2 `bin` directory in front:
-
-`C:\Program Files (x86)\Arm GNU Toolchain arm-none-eabi\14.2 rel1\bin`
-
-From the repo root. CMake 4 resolves `--toolchain` relative to the build directory, so pass an absolute path:
-
-```bash
-cmake -S firmware -B build-firmware -G Ninja --toolchain "$PWD/firmware/cmake/arm-none-eabi-stm32f446.cmake"
-cmake --build build-firmware
-```
-
-On Windows PowerShell:
+## Build / flash
 
 ```powershell
-cmake -S firmware -B build-firmware -G Ninja --toolchain "$PWD\firmware\cmake\arm-none-eabi-stm32f446.cmake"
+cmake -S firmware -B build-firmware -G Ninja `
+  --toolchain "$PWD\firmware\cmake\arm-none-eabi-stm32f446.cmake" `
+  -DTEC_HOST_UART=USART2
 cmake --build build-firmware
 ```
 
-Outputs: `build-firmware/tec_firmware.elf`, `.hex`, `.bin`.
+Flash `build-firmware/tec_firmware.hex`.
 
-Flash with STM32CubeProgrammer or OpenOCD (ST-Link).
+## GUI against Nucleo
 
-## CubeMX
+```powershell
+cd gui
+npm install serialport
+$env:MACHINE_CLIENT='protocol'
+$env:PROTOCOL_TRANSPORT='uart'
+$env:PROTOCOL_SERIAL_PATH='COMx'   # Device Manager → ST-Link VCP
+npm start
+```
 
-`TEC_Abzug_F446.ioc` records the pinout. Application code lives in this CMake tree; regenerate HAL only if you bump Cube packages. Canonical pins: `include/PinMap.hpp`.
+Expect: status online after first `MsgStatusReport`; jog/`moveTo` via M12.
+
+### Phase 7 — Kraftkalibrierung (UART)
+
+1. Flash current hex; GUI as above (close Serial Monitor / other COM users).
+2. Live status should include **ADC counts** (`MsgRawAdc`); force wizard can sample Z.
+3. On connect, GUI push of a committed curve should **ACK** (no longer `Unsupported`).
+4. After commit: StatusReport force = polynomial on ADC (all three channels share the Z curve).
+5. Without a committed curve: provisional linear map `0…4095 → ±force_range_N` remains.
+
+Bench: real weights / wizard points when the sensor is ready; software path can be checked with a stored curve from a prior sim session.
+
+### Phase 6 — Prozess am Target
+
+Same M12 commands as simulation. Typical gate for `CmdStart`:
+
+1. Homing (`isHomed`)
+2. Probe center valid
+3. Plate origin valid
+4. Non-empty program
+
+While `ProcessState::Running`, Core enables the communication watchdog — GUI `CmdNop` must keep flowing or the machine Faults (no auto-resume). STOP always works.
+
+### Real XYZ jog (existing code, parallel to Phase 6)
+
+Realistic with current firmware if:
+
+- DM542: STEP←PB6/PB4/PB8, DIR←PC1/PC3/PC5, common GND; **ENA** tied/enabled on the driver (no MCU ENA pin yet)
+- DIP µstep matches **200 steps/mm** (57HS56 1/4 + SFU1204 assumption)
+- 5 V level shifting if the drivers need it; motor supply + E-Stop hardware cut
+- Soft-start: single-axis jog at low speed; confirm DIR polarity before multi-axis
+- +Max limits for Homing (or temporary button-sim as before)
+- Expect ugly Oszi traces to still move motors; lost steps possible (open-loop)
+
+Jog does **not** need Phase 6. Keep E-Stop reachable.
+
+## Motion pins
+
+| Axis | STEP | DIR | Cap |
+|------|------|-----|-----|
+| X | PB6 | PC1 | 10 kHz |
+| Y | PB4 | PC3 | 10 kHz |
+| Z | PB8 | PC5 | 5 kHz |
+
+Canonical map: `include/PinMap.hpp`.

@@ -139,11 +139,12 @@ Koordinatensystem: Core `(x,y,z)` → Three.js `(x,y,z)` 1:1, Kamera **Z-up**.
 
 GUI spricht mit `simulation_protocol` über das **M12-Binärprotokoll** (nicht JSON).
 
-| Mode | Env | Transport | Port | Host |
-|------|-----|-----------|------|------|
+| Mode | Env | Transport | Port / Path | Host |
+|------|-----|-----------|-------------|------|
 | `mock` | `MACHINE_CLIENT=mock` | In-process JS | — | MockMachineClient |
 | `sim` | `MACHINE_CLIENT=sim` | TCP newline JSON (M8.5) | **8765** | `simulation_interactive` |
-| `protocol` | `MACHINE_CLIENT=protocol` | TCP M12 binary (M14) | **8766** | `simulation_protocol` |
+| `protocol` | `MACHINE_CLIENT=protocol` | TCP M12 binary (default) | **8766** | `simulation_protocol` |
+| `protocol` + UART | `MACHINE_CLIENT=protocol` + `PROTOCOL_TRANSPORT=uart` | M12 on serial | **COMx** / `/dev/serial0` | STM32 firmware |
 
 1. Core-Host bauen und starten:
 
@@ -168,9 +169,25 @@ Weitere Env-Vars:
 
 | Variable | Default | Bedeutung |
 |----------|---------|-----------|
+| `PROTOCOL_TRANSPORT` | `tcp` | `tcp` (Simulation) oder `uart` (STM32) |
 | `PROTOCOL_HOST` | `127.0.0.1` | TCP-Host |
 | `PROTOCOL_PORT` | `8766` | TCP-Port |
+| `PROTOCOL_SERIAL_PATH` | — | z. B. `COM5` (ST-Link VCP) oder `/dev/serial0` |
+| `PROTOCOL_SERIAL_BAUD` | `115200` | UART Baudrate |
 | `PROTOCOL_ACK_TIMEOUT_MS` | `3000` | Wartezeit auf RSP_ACK/NACK |
+
+**STM32 bring-up (Phase 5a)** — Firmware auf Nucleo flashen (`TEC_HOST_UART=USART2`), dann:
+
+```powershell
+cd gui
+npm install serialport
+set MACHINE_CLIENT=protocol
+set PROTOCOL_TRANSPORT=uart
+set PROTOCOL_SERIAL_PATH=COM5
+npm start
+```
+
+Default bleibt `PROTOCOL_TRANSPORT=tcp` (Simulation). Nie TCP-Sim und UART-STM32 parallel.
 
 **Single-Client:** `simulation_protocol` akzeptiert einen Client; ein neuer Connect ersetzt den vorherigen.
 

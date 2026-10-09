@@ -3,6 +3,7 @@
 #include "FirmwareHost.hpp"
 #include "HostIo.hpp"
 #include "PinMap.hpp"
+#include "StepGenerator.hpp"
 #include "Types.hpp"
 
 static IWDG_HandleTypeDef g_iwdg;
@@ -129,15 +130,6 @@ static void Gpio_Init(void)
     gpio.Pull = GPIO_PULLDOWN;
     HAL_GPIO_Init(GPIOA, &gpio);
 
-    HAL_GPIO_WritePin(PIN_STEP_X_PORT, PIN_STEP_X_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PIN_STEP_Y_PORT, PIN_STEP_Y_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PIN_STEP_Z_PORT, PIN_STEP_Z_PIN, GPIO_PIN_RESET);
-    gpio.Pin = PIN_STEP_X_PIN | PIN_STEP_Y_PIN | PIN_STEP_Z_PIN;
-    gpio.Mode = GPIO_MODE_OUTPUT_PP;
-    gpio.Pull = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOB, &gpio);
-
     HAL_GPIO_WritePin(PIN_DIR_X_PORT, PIN_DIR_X_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(PIN_DIR_Y_PORT, PIN_DIR_Y_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(PIN_DIR_Z_PORT, PIN_DIR_Z_PIN, GPIO_PIN_RESET);
@@ -178,31 +170,42 @@ int main(void)
     Gpio_Init();
     Iwdg_Init();
     hostio::init();
+    stepgen::init();
 
     for (;;)
     {
         if (g_ms_elapsed != 0)
         {
             g_ms_elapsed = 0;
-            hostio::pollUart(g_host.machine());
-            const HostInputs inputs =
-                hostio::sampleInputs(g_host.nextForceSequence(), g_host.machine().machineConfig().force.range_N);
-            g_host.tickOneMillisecond(inputs);
+            hostio::serviceProtocol(g_host);
+            std::uint16_t adc_x = 0;
+            std::uint16_t adc_y = 0;
+            std::uint16_t adc_z = 0;
+            hostio::latestAdc(adc_x, adc_y, adc_z);
+            const HostInputs inputs = hostio::sampleInputs(
+                g_host.nextForceSequence(), g_host.heartbeatSequence(),
+                g_host.machine().machineConfig().force.range_N);
+            g_host.tickOneMillisecond(inputs, adc_x, adc_y, adc_z);
             hostio::applyOutputs(g_host.machine());
-            const std::uint32_t ticks = g_host.tickCount();
+            stepgen::tickMillisecond();
+
             const bool fault = g_host.machine().machineState() == MachineState::Fault;
+            const bool estop = inputs.e_stop;
+            if (fault || estop)
+            {
+                stepgen::emergencyStop();
+            }
+            else
+            {
+                stepgen::followRawPose(g_host.machine().rawX(), g_host.machine().rawY(),
+                                      g_host.machine().rawZ());
+            }
+
+            const std::uint32_t ticks = g_host.tickCount();
             const std::uint32_t blink_period = fault ? 100u : 500u;
             if ((ticks % blink_period) == 0u)
             {
                 HAL_GPIO_TogglePin(PIN_DEBUG_LED_PORT, PIN_DEBUG_LED_PIN);
-            }
-            if ((ticks % 1000u) == 0u)
-            {
-                std::uint16_t fx = 0;
-                std::uint16_t fy = 0;
-                std::uint16_t fz = 0;
-                hostio::latestAdc(fx, fy, fz);
-                hostio::sendStatusLine(g_host.machine(), inputs, fx, fy, fz);
             }
             HAL_IWDG_Refresh(&g_iwdg);
         }

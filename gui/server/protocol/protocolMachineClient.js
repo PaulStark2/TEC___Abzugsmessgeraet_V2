@@ -8,8 +8,8 @@
  * MSG_STATUS_REPORT after connect (sessionReady).
  */
 
-const net = require('net');
 const { FrameStreamBuffer } = require('./frameStreamBuffer');
+const { createProtocolConnection } = require('./protocolTransport');
 const {
   encodeEmptyMessage,
   encodeMoveToMessage,
@@ -35,8 +35,11 @@ const { MessageId, AckResultCode, NackErrorCode, DecodeResult } = require('./pro
 const { latchMeasuredHome } = require('../coord/homeMarker');
 
 const DEFAULT_JOG_STEP = 1;
-const RECONNECT_DELAY_MS = 2000;
+const RECONNECT_DELAY_MS_TCP = 2000;
+const RECONNECT_DELAY_MS_UART = 4000; // Windows needs longer after SerialPort.close
+const NOP_INTERVAL_MS = 100; // CmdNop 10 Hz while session is live
 const MACHINE_UNAVAILABLE = 'Machine connection unavailable';
+const STATUS_STALE_MS = 1000; // UART: if status still flows, ACK timeout ≠ link dead
 
 function createDefaultStatus(connected = false) {
   return {
@@ -106,15 +109,26 @@ function nackErrorMessage(errorCode) {
 function createProtocolMachineClient(options = {}) {
   const host = options.host || process.env.PROTOCOL_HOST || '127.0.0.1';
   const port = Number(options.port || process.env.PROTOCOL_PORT || 8766);
-  const ackTimeoutMs = Number(options.ackTimeoutMs || process.env.PROTOCOL_ACK_TIMEOUT_MS || 3000);
+  const transport = String(options.transport || process.env.PROTOCOL_TRANSPORT || 'tcp').toLowerCase();
+  const isUart = transport === 'uart' || transport === 'serial';
+  const serialPath = options.serialPath || process.env.PROTOCOL_SERIAL_PATH || '';
+  const baudRate = Number(options.baudRate || process.env.PROTOCOL_SERIAL_BAUD || 115200);
+  const ackTimeoutMs = Number(
+    options.ackTimeoutMs ||
+      process.env.PROTOCOL_ACK_TIMEOUT_MS ||
+      (isUart ? 5000 : 3000)
+  );
+  const reconnectDelayMs = isUart ? RECONNECT_DELAY_MS_UART : RECONNECT_DELAY_MS_TCP;
 
   let status = createDefaultStatus(false);
   let socket = null;
   let connected = false;
-  /** True only after TCP connect AND at least one valid status report in this session. */
+  /** True only after transport connect AND at least one valid status report in this session. */
   let sessionReady = false;
   let closed = false;
   let reconnectTimer = null;
+  let nopTimer = null;
+  let lastStatusAtMs = 0;
   const streamBuffer = new FrameStreamBuffer();
 
   let lastMachineConfig = null;
@@ -162,10 +176,36 @@ function createProtocolMachineClient(options = {}) {
     }
   }
 
+  function stopNopHeartbeat() {
+    if (nopTimer) {
+      clearInterval(nopTimer);
+      nopTimer = null;
+    }
+  }
+
+  function startNopHeartbeat() {
+    stopNopHeartbeat();
+    nopTimer = setInterval(() => {
+      if (!isLiveSession()) {
+        return;
+      }
+      const encoded = encodeEmptyMessage(MessageId.CmdNop);
+      if (!encoded.ok || !socket) {
+        return;
+      }
+      try {
+        socket.write(encoded.frame);
+      } catch {
+        // reconnect path handles faults
+      }
+    }, NOP_INTERVAL_MS);
+  }
+
   function markDisconnected(reason) {
     const wasLive = connected || sessionReady;
     connected = false;
     sessionReady = false;
+    stopNopHeartbeat();
     measuredHome = null;
     lastHomingState = null;
     status = { ...status, connected: false, measuredHome: null };
@@ -189,10 +229,14 @@ function createProtocolMachineClient(options = {}) {
     if (!decoded) {
       return;
     }
-    // First valid status after TCP connect arms the session for mutating commands.
+    // First valid status after transport connect arms the session for mutating commands.
+    lastStatusAtMs = Date.now();
     const becameReady = connected && !sessionReady;
     if (connected) {
       sessionReady = true;
+      if (becameReady) {
+        startNopHeartbeat();
+      }
     }
     // StatusReport has no ADC fields. Keep the last MsgRawAdc sample.
     const keptAdc = {
@@ -361,12 +405,22 @@ function createProtocolMachineClient(options = {}) {
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
+        const statusFresh = lastStatusAtMs > 0 && Date.now() - lastStatusAtMs < STATUS_STALE_MS;
+        // UART: status still flowing ⇒ link is up; only the command ACK was lost/slow.
+        // TCP: keep fail-closed reconnect (half-open sockets).
+        if (isUart && statusFresh && connected) {
+          finishPendingCommand(messageId, {
+            ok: false,
+            error: 'Command ACK timeout (link still receiving status)',
+            status: getStatus(),
+          });
+          return;
+        }
         finishPendingCommand(messageId, {
           ok: false,
           error: MACHINE_UNAVAILABLE,
           status: getStatus(),
         });
-        // Half-open TCP (host killed, no close yet): fail closed and force reconnect.
         markDisconnected(MACHINE_UNAVAILABLE);
         if (!closed) {
           scheduleReconnect();
@@ -429,6 +483,15 @@ function createProtocolMachineClient(options = {}) {
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
+        const statusFresh = lastStatusAtMs > 0 && Date.now() - lastStatusAtMs < STATUS_STALE_MS;
+        if (isUart && statusFresh && connected) {
+          finishPendingCommand(MessageId.CmdGetMachineConfig, {
+            ok: false,
+            error: 'Command ACK timeout (link still receiving status)',
+            status: getStatus(),
+          });
+          return;
+        }
         finishPendingCommand(MessageId.CmdGetMachineConfig, {
           ok: false,
           error: MACHINE_UNAVAILABLE,
@@ -484,7 +547,7 @@ function createProtocolMachineClient(options = {}) {
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
-    }, RECONNECT_DELAY_MS);
+    }, reconnectDelayMs);
   }
 
   function attachSocketHandlers(s) {
@@ -545,19 +608,36 @@ function createProtocolMachineClient(options = {}) {
 
     connected = false;
     sessionReady = false;
+    stopNopHeartbeat();
     status = { ...status, connected: false };
     streamBuffer.clear();
 
-    const s = net.createConnection({ host, port }, () => {
-      if (s !== socket) {
-        return;
-      }
-      // TCP is up, but mutating commands wait until first status report.
-      connected = true;
-      sessionReady = false;
-      status = { ...status, connected: false };
-      console.log(`ProtocolMachineClient connected to ${host}:${port}`);
-    });
+    let s;
+    try {
+      s = createProtocolConnection(
+        { transport, host, port, serialPath, baudRate },
+        () => {
+          if (s !== socket) {
+            return;
+          }
+          // Link is up; mutating commands wait until first status report.
+          connected = true;
+          sessionReady = false;
+          status = { ...status, connected: false };
+          if (transport === 'uart' || transport === 'serial') {
+            console.log(
+              `ProtocolMachineClient connected UART ${serialPath} @ ${baudRate}`
+            );
+          } else {
+            console.log(`ProtocolMachineClient connected to ${host}:${port}`);
+          }
+        }
+      );
+    } catch (err) {
+      console.error(`ProtocolMachineClient connect failed: ${err.message || err}`);
+      scheduleReconnect();
+      return;
+    }
 
     socket = s;
     attachSocketHandlers(s);

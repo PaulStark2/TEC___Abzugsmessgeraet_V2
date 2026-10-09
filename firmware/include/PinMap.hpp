@@ -14,13 +14,32 @@
 #define PIN_FORCE_FZ_PORT GPIOA
 #define PIN_FORCE_FZ_PIN GPIO_PIN_4
 
-// USART2 PA2/PA3 stays on the ST-Link VCP (SB13/SB14 closed). Not the Pi link.
-
-// USART3 to Raspberry Pi (AF7, 115200 8N1).
+// Host UART: compile-time select via CMake TEC_HOST_UART=USART2|USART3.
+// USART2 = ST-Link VCP PA2/PA3 (bring-up). USART3 = Pi PC10/PC11 (production).
+// SB13/SB14 stay closed. Exactly one host UART — never dual M12.
+#if defined(TEC_HOST_UART_USART2)
+#define PIN_UART_TX_PORT GPIOA
+#define PIN_UART_TX_PIN GPIO_PIN_2
+#define PIN_UART_RX_PORT GPIOA
+#define PIN_UART_RX_PIN GPIO_PIN_3
+#define TEC_HOST_USART USART2
+#define TEC_HOST_USART_IRQn USART2_IRQn
+#define TEC_HOST_USART_IRQHandler USART2_IRQHandler
+#define TEC_HOST_USART_AF GPIO_AF7_USART2
+#define TEC_HOST_USART_CLK_ENABLE() __HAL_RCC_USART2_CLK_ENABLE()
+#elif defined(TEC_HOST_UART_USART3)
 #define PIN_UART_TX_PORT GPIOC
 #define PIN_UART_TX_PIN GPIO_PIN_10
 #define PIN_UART_RX_PORT GPIOC
 #define PIN_UART_RX_PIN GPIO_PIN_11
+#define TEC_HOST_USART USART3
+#define TEC_HOST_USART_IRQn USART3_IRQn
+#define TEC_HOST_USART_IRQHandler USART3_IRQHandler
+#define TEC_HOST_USART_AF GPIO_AF7_USART3
+#define TEC_HOST_USART_CLK_ENABLE() __HAL_RCC_USART3_CLK_ENABLE()
+#else
+#error "Define TEC_HOST_UART_USART2 or TEC_HOST_UART_USART3 (CMake TEC_HOST_UART)"
+#endif
 
 // Probe NC: idle High, contact Low. Internal pull-down. Polled in Phase 2 (EXTI latch later).
 #define PIN_PROBE_PORT GPIOA
@@ -44,7 +63,8 @@
 #define PIN_ESTOP_PORT GPIOA
 #define PIN_ESTOP_PIN GPIO_PIN_9
 
-// Step PWM (held low until Phase 3; TIM3/4/10 later).
+// Step outputs (GPIO pulses Phase 3–4; TIM AF optional later).
+// X=PB6, Y=PB4, Z=PB8 — Morpho pin numbers in firmware/README.md.
 #define PIN_STEP_Y_PORT GPIOB
 #define PIN_STEP_Y_PIN GPIO_PIN_4
 #define PIN_STEP_X_PORT GPIOB
@@ -74,5 +94,5 @@
 #define PIN_DEBUG_LED_PORT GPIOC
 #define PIN_DEBUG_LED_PIN GPIO_PIN_7
 
-// Open-loop conversion used by later step generators (not applied in Phase 2.1).
+// Open-loop conversion (57HS56, 1/4 µstep, SFU1204).
 constexpr float kStepsPerMm = 200.0f;

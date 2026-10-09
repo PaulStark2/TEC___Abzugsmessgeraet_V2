@@ -1,6 +1,6 @@
 # Z-Kraftkalibrierung (Meilenstein A)
 
-Diese Seite beschreibt, welche Messwerte in die Z-Kennlinie eingehen und wie daraus die gespeicherte Funktion entsteht. Die Rechnung liegt im plattformunabhängigen Core. Die GUI sammelt die Punkte, die Simulation wendet die Kennlinie an. Die STM32-Firmware bekommt denselben Vertrag, setzt ihn in diesem Meilenstein aber noch nicht um.
+Diese Seite beschreibt, welche Messwerte in die Z-Kennlinie eingehen und wie daraus die gespeicherte Funktion entsteht. Die Rechnung liegt im plattformunabhängigen Core. Die GUI sammelt die Punkte; Simulation und STM32-Firmware (`ForceCalibHost`) wenden dieselbe Kennlinie an und senden `MsgRawAdc`.
 
 Die Kennlinie ist eine Regression der Sensorkraft auf den ADC-Zählwert. Sie wird nicht durch die Stützpunkte gezwungen. Ein Punkt, der daneben liegt, bleibt sichtbar als Residuum.
 

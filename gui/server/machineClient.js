@@ -22,7 +22,7 @@
  *
  * MACHINE_CLIENT=mock      → MockMachineClient (offline JS mock)
  * MACHINE_CLIENT=sim       → SimMachineClient (M8.5 TCP/JSON :8765)
- * MACHINE_CLIENT=protocol  → ProtocolMachineClient (M12 binary TCP :8766)
+ * MACHINE_CLIENT=protocol  → ProtocolMachineClient (M12 binary; TCP :8766 or UART via PROTOCOL_TRANSPORT)
  */
 
 const { createMockMachineClient } = require('./mock/mockMachineClient');

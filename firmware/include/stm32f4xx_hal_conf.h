@@ -1,6 +1,6 @@
 #pragma once
 
-// HAL module selection for Phase 1–2 (clock, GPIO, IWDG, ADC, UART).
+// HAL module selection for Phase 1–3 (clock, GPIO, IWDG, ADC, UART, TIM).
 
 #define HAL_MODULE_ENABLED
 #define HAL_CORTEX_MODULE_ENABLED
@@ -9,6 +9,7 @@
 #define HAL_GPIO_MODULE_ENABLED
 #define HAL_ADC_MODULE_ENABLED
 #define HAL_UART_MODULE_ENABLED
+#define HAL_TIM_MODULE_ENABLED
 #define HAL_IWDG_MODULE_ENABLED
 #define HAL_PWR_MODULE_ENABLED
 #define HAL_RCC_MODULE_ENABLED
@@ -127,6 +128,9 @@
 #endif
 #ifdef HAL_UART_MODULE_ENABLED
 #include "stm32f4xx_hal_uart.h"
+#endif
+#ifdef HAL_TIM_MODULE_ENABLED
+#include "stm32f4xx_hal_tim.h"
 #endif
 
 #ifdef USE_FULL_ASSERT

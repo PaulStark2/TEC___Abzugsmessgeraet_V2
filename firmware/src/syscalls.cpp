@@ -1,4 +1,23 @@
+#include <cstdint>
+#include <errno.h>
+
 extern "C" {
+
+// Newlib heap for std::vector (CommandDispatcher outbound frames).
+static std::uint8_t g_heap[32 * 1024];
+static std::uint8_t* g_heap_end = g_heap;
+
+void* _sbrk(int incr)
+{
+    std::uint8_t* prev = g_heap_end;
+    if (g_heap_end + incr > g_heap + sizeof(g_heap))
+    {
+        errno = ENOMEM;
+        return reinterpret_cast<void*>(static_cast<std::ptrdiff_t>(-1));
+    }
+    g_heap_end += incr;
+    return prev;
+}
 
 int _close(int)
 {
