@@ -13,6 +13,7 @@ const { createProtocolConnection } = require('./protocolTransport');
 const {
   encodeEmptyMessage,
   encodeMoveToMessage,
+  encodeSetManualSpeedMessage,
   encodeBoolMessage,
   encodeLoadProgramMessage,
   encodeMachineConfigMessage,
@@ -136,11 +137,17 @@ function createProtocolMachineClient(options = {}) {
   let forcePathHandler = null;
   let measuredHome = null;
   let lastHomingState = null;
+  /** Manual jog/move speed (mm/s); not in StatusReport — cached after CmdSetManualSpeed. */
+  let lastManualSpeed = 15;
   /** @type {Map<number, { resolve: Function, timer: NodeJS.Timeout, waitForMachineConfig?: boolean, ackOk?: boolean, config?: object|null }>} */
   const pendingByMessageId = new Map();
 
   function getStatus() {
-    return { ...status, connected: connected && sessionReady };
+    return {
+      ...status,
+      connected: connected && sessionReady,
+      manualSpeed: lastManualSpeed,
+    };
   }
 
   function finishPendingCommand(messageId, result) {
@@ -764,6 +771,18 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdHome, encoded.frame);
   }
 
+  /** Rest tare: 20 samples, 100 ms apart (CmdForceTare). Axes must be still. */
+  async function forceTare() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdForceTare);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode FORCE_TARE' };
+    }
+    return sendFrameAndWait(MessageId.CmdForceTare, encoded.frame);
+  }
+
   /** Explicit MCS definition (CmdDefineMcs). */
   async function defineMcs() {
     if (!isLiveSession()) {
@@ -805,8 +824,22 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdRestoreMcs, encoded.frame);
   }
 
-  async function setSpeed() {
-    return { ok: false, error: 'Not supported over protocol' };
+  async function setSpeed(speed) {
+    const value = Number(speed);
+    if (!Number.isFinite(value)) {
+      return { ok: false, error: 'setSpeed requires finite speed', status: getStatus() };
+    }
+    // Match mock / Core SafetyLimits: 1 … 50 mm/s.
+    const clamped = Math.min(50, Math.max(1, value));
+    const encoded = encodeSetManualSpeedMessage(clamped);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode SET_MANUAL_SPEED' };
+    }
+    const result = await sendFrameAndWait(MessageId.CmdSetManualSpeed, encoded.frame);
+    if (result && result.ok) {
+      lastManualSpeed = clamped;
+    }
+    return { ...result, status: getStatus() };
   }
 
   /**
@@ -1001,6 +1034,7 @@ function createProtocolMachineClient(options = {}) {
     pneumaticOpen,
     pneumaticClose,
     home,
+    forceTare,
     defineMcs,
     invalidateHoming,
     restoreMcs,

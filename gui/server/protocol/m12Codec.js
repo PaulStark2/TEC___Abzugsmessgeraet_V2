@@ -12,6 +12,7 @@ const {
   MAX_PAYLOAD_SIZE,
   MIN_FRAME_SIZE,
   MOVE_TO_PAYLOAD_WIRE_SIZE,
+  MANUAL_SPEED_PAYLOAD_WIRE_SIZE,
   BOOL_PAYLOAD_WIRE_SIZE,
   ACK_PAYLOAD_WIRE_SIZE,
   NACK_PAYLOAD_WIRE_SIZE,
@@ -59,6 +60,28 @@ function readF32LE(buffer, offset) {
     return { ok: false };
   }
   return { ok: true, value };
+}
+
+function encodeManualSpeedPayload(speed) {
+  if (!isFiniteNumber(speed)) {
+    return null;
+  }
+  const out = Buffer.alloc(MANUAL_SPEED_PAYLOAD_WIRE_SIZE);
+  if (!writeF32LE(out, 0, speed)) {
+    return null;
+  }
+  return out;
+}
+
+function decodeManualSpeedPayload(payload) {
+  if (!payload || payload.length !== MANUAL_SPEED_PAYLOAD_WIRE_SIZE) {
+    return null;
+  }
+  const speed = payload.readFloatLE(0);
+  if (!Number.isFinite(speed)) {
+    return null;
+  }
+  return { speed };
 }
 
 function encodeMoveToPayload({ x, y, z }) {
@@ -159,6 +182,21 @@ const MACHINE_CONFIG_FIELDS = [
   { key: 'probe_center_z', type: 'f32', optionalZero: true },
   { key: 'force_range_N', type: 'f32', defaultValue: 30 },
   { key: 'force_hard_limit_N', type: 'f32', defaultValue: 30 },
+  { key: 'a_manual', type: 'f32', defaultValue: 500 },
+  { key: 'force_hard_limit_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'force_hard_limit_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_approach_x_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_approach_y_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_retract_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_retract_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_clamp_x_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_clamp_y_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_unclamp_x_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_unclamp_y_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_contact_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_contact_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_measure_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_measure_y_N', type: 'f32', defaultValue: 30 },
 ];
 
 function encodeMachineConfigPayload(cfg) {
@@ -418,6 +456,7 @@ function statusReportToGuiStatus(decoded, connected = true) {
     plateOriginValid: flagBit(StatusFlag.PlateOriginValid),
     probeCenterValid: flagBit(StatusFlag.ProbeCenterValid),
     mcsValid: flagBit(StatusFlag.McsValid),
+    tareActive: flagBit(StatusFlag.TareActive),
     limitWarning,
     x: decoded.x,
     y: decoded.y,
@@ -459,6 +498,7 @@ function isEmptyCommandId(messageId) {
     case MessageId.CmdStartProbeCalib:
     case MessageId.CmdDefineMcs:
     case MessageId.CmdInvalidateHoming:
+    case MessageId.CmdForceTare:
     case MessageId.CmdRequestStatus:
       return true;
     default:
@@ -474,6 +514,8 @@ function validatePayloadForMessage(messageId, payload) {
   switch (messageId) {
     case MessageId.CmdMoveTo:
       return length === MOVE_TO_PAYLOAD_WIRE_SIZE && decodeMoveToPayload(payload) !== null;
+    case MessageId.CmdSetManualSpeed:
+      return length === MANUAL_SPEED_PAYLOAD_WIRE_SIZE && decodeManualSpeedPayload(payload) !== null;
     case MessageId.CmdSetSpreader:
     case MessageId.CmdSetFixture:
     case MessageId.CmdSetCollisionGuard:
@@ -559,6 +601,14 @@ function encodeMoveToMessage(x, y, z) {
     return { ok: false, error: 'InvalidPayload' };
   }
   return encodeFrame(MessageId.CmdMoveTo, payload);
+}
+
+function encodeSetManualSpeedMessage(speed) {
+  const payload = encodeManualSpeedPayload(speed);
+  if (!payload) {
+    return { ok: false, error: 'InvalidPayload' };
+  }
+  return encodeFrame(MessageId.CmdSetManualSpeed, payload);
 }
 
 function encodeBoolMessage(messageId, value) {
@@ -992,6 +1042,9 @@ module.exports = {
   encodeRestoreMcsMessage,
   encodeMoveToPayload,
   decodeMoveToPayload,
+  encodeManualSpeedPayload,
+  decodeManualSpeedPayload,
+  encodeSetManualSpeedMessage,
   encodeBoolPayload,
   decodeBoolPayload,
   encodeAckPayload,

@@ -98,6 +98,7 @@ const MODE = {
 const STEPS = {
   MENU: 'menu',
   GEOMETRY_MENU: 'geometry_menu',
+  GEOMETRY_VALUES: 'geometry_values',
   FORCE_MENU: 'force_menu',
   DEFINE_MCS: 'define_mcs',
   HOMING: 'homing',
@@ -234,6 +235,8 @@ export function renderCalibrate(container) {
         return renderCalibMenu();
       case STEPS.GEOMETRY_MENU:
         return renderGeometryMenu();
+      case STEPS.GEOMETRY_VALUES:
+        return renderGeometryValues();
       case STEPS.FORCE_MENU:
         return renderForceMenu();
       case STEPS.DEFINE_MCS:
@@ -305,6 +308,7 @@ export function renderCalibrate(container) {
         <div class="calib-group">
           <button type="button" id="btn-calib-full" class="menu-nav__item">MCS und Bauplatte/Messtaster definieren und kalibrieren</button>
           <button type="button" id="btn-calib-geometry" class="menu-nav__item" ${geomDisabled ? 'disabled' : ''}>Bauplatte/Messtaster kalibrieren</button>
+          <button type="button" id="btn-calib-values" class="menu-nav__item">Kalibrierkennwerte</button>
         </div>
         <p id="menu-feedback" class="command-feedback" aria-live="polite"></p>
         ${geomDisabled ? '<p class="calib-group__note">Für die zweite Funktion muss zuerst ein Maschinenkoordinatensystem definiert sein.</p>' : ''}
@@ -315,6 +319,9 @@ export function renderCalibrate(container) {
     `;
       const feedbackEl = contentEl.querySelector('#menu-feedback');
       contentEl.querySelector('#btn-back-calib').addEventListener('click', () => setStep(STEPS.MENU));
+      contentEl.querySelector('#btn-calib-values').addEventListener('click', () => {
+        setStep(STEPS.GEOMETRY_VALUES);
+      });
       contentEl.querySelector('#btn-calib-full').addEventListener('click', () => {
           void (async () => {
             const decision = await confirmMcsRedefine();
@@ -357,6 +364,87 @@ export function renderCalibrate(container) {
           setStep(STEPS.PLATE_QUESTION);
         })();
       });
+    });
+  }
+
+  function poseBlock(title, pose, validFlag) {
+    const valid =
+      validFlag === undefined ? Boolean(pose) : Boolean(validFlag) && Boolean(pose);
+    if (!valid || !pose) {
+      return `
+        <div>
+          <strong>${title}</strong><br/>
+          <span class="placeholder-note">nicht gesetzt / ungültig</span>
+        </div>`;
+    }
+    return `
+      <div>
+        <strong>${title}</strong><br/>
+        X = ${formatCoord(pose.x)} mm<br/>
+        Y = ${formatCoord(pose.y)} mm<br/>
+        Z = ${formatCoord(pose.z)} mm
+      </div>`;
+  }
+
+  async function renderGeometryValues() {
+    let calib = {};
+    let live = {};
+    try {
+      const result = await fetchCalibration();
+      calib = (result && result.calibration) || {};
+    } catch {
+      calib = {};
+    }
+    try {
+      live = await fetchMachineStatus();
+    } catch {
+      live = {};
+    }
+    const mcs = calib.machineCoordinateSystem || {};
+    contentEl.innerHTML = `
+      <div class="success-card">
+        <h3>Kalibrierkennwerte (Geometrie)</h3>
+        <p class="placeholder-note">
+          Gespeicherte Referenzposen aus der geometrischen Kalibrierung (Maschinenkoordinaten).
+          Zum Abgleich mit der realen Maschine die Statusleiste / Live-Pose nutzen.
+        </p>
+        <div style="display:flex;gap:32px;flex-wrap:wrap;margin-top:12px;">
+          <div>
+            <strong>MCS</strong><br/>
+            gültig: <b>${mcs.valid ? 'ja' : 'nein'}</b><br/>
+            Ursprung: ${mcs.origin || '—'}<br/>
+            ${
+              mcs.homePosition
+                ? `Home: X=${formatCoord(mcs.homePosition.x)}, Y=${formatCoord(
+                    mcs.homePosition.y
+                  )}, Z=${formatCoord(mcs.homePosition.z)} mm`
+                : 'Home: —'
+            }
+          </div>
+          ${poseBlock('Bauplatte (plateOrigin)', calib.plateOrigin, calib.plateOriginValid)}
+          ${poseBlock('Messtaster (probeCenter)', calib.probeCenter, calib.probeCenterValid)}
+          ${poseBlock('Werkzeugoffset (toolOffset)', calib.toolOffset, true)}
+          <div>
+            <strong>Live-TCP (Controller)</strong><br/>
+            X = ${formatCoord(live.x)} mm<br/>
+            Y = ${formatCoord(live.y)} mm<br/>
+            Z = ${formatCoord(live.z)} mm<br/>
+            <span class="placeholder-note">
+              Homed: ${live.isHomed === true ? 'ja' : live.isHomed === false ? 'nein' : '—'} ·
+              MCS: ${live.mcsValid === true ? 'gültig' : '—'}
+            </span>
+          </div>
+        </div>
+        <p id="values-feedback" class="command-feedback" aria-live="polite"></p>
+      </div>
+      <div class="control-actions page-actions">
+        <button type="button" id="btn-values-refresh">Aktualisieren</button>
+        <button type="button" id="btn-back-geom" class="btn-back">Zurück</button>
+      </div>
+    `;
+    contentEl.querySelector('#btn-back-geom').addEventListener('click', () => setStep(STEPS.GEOMETRY_MENU));
+    contentEl.querySelector('#btn-values-refresh').addEventListener('click', () => {
+      void renderGeometryValues();
     });
   }
 
@@ -695,6 +783,8 @@ export function renderCalibrate(container) {
     const statusEl = contentEl.querySelector('#probe-status');
     const btnStart = contentEl.querySelector('#btn-start-m19');
     let waitingForCalib = false;
+    // Ignore residual Aborted/Fault from a prior run until this start is visible as Running.
+    let sawCalibRunning = false;
 
     contentEl.querySelector('#btn-start-m19').addEventListener('click', async () => {
       try {
@@ -704,9 +794,11 @@ export function renderCalibrate(container) {
         statusEl.style.color = '';
         btnStart.disabled = true;
         waitingForCalib = true;
+        sawCalibRunning = false;
         await startProbeCalibration();
       } catch (err) {
         waitingForCalib = false;
+        sawCalibRunning = false;
         btnStart.disabled = false;
         statusEl.textContent = '';
         feedbackEl.textContent = err.message || String(err);
@@ -730,22 +822,50 @@ export function renderCalibrate(container) {
     const checkCalibComplete = async () => {
       if (!waitingForCalib) return;
       const s = getStatus();
+      if (
+        s.processState === 'Running' &&
+        (s.procedurePhase === 'ProbeCalibrate' || s.procedurePhase === 'Completed')
+      ) {
+        sawCalibRunning = true;
+      }
+      // Stale Aborted from the previous circle-fit / STOP must not abort the new start.
+      if (!sawCalibRunning) {
+        return;
+      }
       if (s.processState === 'Aborted' || s.machineState === 'Fault') {
         waitingForCalib = false;
+        sawCalibRunning = false;
         btnStart.disabled = false;
         statusEl.textContent = 'Einmessung abgebrochen.';
         statusEl.style.color = 'var(--clr-err,red)';
-        if (s.faultReason === 'ProbeSearchNoContact') {
+        const fault = s.faultReason && s.faultReason !== 'None' ? s.faultReason : null;
+        const phase = s.procedurePhase ? String(s.procedurePhase) : '—';
+        if (fault === 'ProbeSearchNoContact') {
           feedbackEl.textContent =
             'Kein Messtasterkontakt (Timeout). Bisherige gültige Kalibrierung bleibt erhalten.';
+        } else if (fault === 'ProbeApproachContact') {
+          feedbackEl.textContent =
+            'Messtaster-Kontakt bereits während der Approach-Z-Fahrt (gespeichertes probeCenter.z zu tief?). ' +
+            'Bisherige gültige Kalibrierung bleibt erhalten.';
+        } else if (fault === 'CommunicationTimeout') {
+          feedbackEl.textContent =
+            'CommunicationTimeout: Host-Heartbeat (CmdNop) während der Kalibrierung ausgefallen. UART/Link prüfen, dann erneut. Bisherige Kalibrierung bleibt erhalten.';
+        } else if (fault) {
+          feedbackEl.textContent = `Abbruch mit Fault „${fault}“ (Phase ${phase}). Bisherige gültige Kalibrierung bleibt erhalten.`;
         } else {
-          feedbackEl.textContent = 'Bisherige gültige Kalibrierung bleibt erhalten.';
+          // Typical: all search legs ran, then finishAndStore() rejected the 4-point circle
+          // (radius ≠ measuring_head/2 + tool/2). No Core fault is latched for that case.
+          feedbackEl.textContent =
+            `Kalibrierung verworfen (Phase ${phase}) — oft ungültiger Kreis-Fit am Ende ` +
+            `(Hub über Scheibenmitte? measuring_head_diameter/tool_diameter? steps/mm?). ` +
+            `Statusleiste Fault-Reason und Phase prüfen. Bisherige gültige Kalibrierung bleibt erhalten.`;
         }
         feedbackEl.classList.add('command-feedback--error');
         return;
       }
       if (s.probeCenterValid && (s.processState === 'Completed' || s.procedurePhase === 'Completed')) {
         waitingForCalib = false;
+        sawCalibRunning = false;
         try {
           const syncResult = await syncCalibrationFromController({ persistProbeCenter: true });
           const c = (syncResult && syncResult.calibration) || {};

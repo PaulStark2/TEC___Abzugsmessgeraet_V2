@@ -5,10 +5,13 @@
 #include "PayloadCodec.hpp"
 #include "StatusSnapshot.hpp"
 
+#include "SafetyLimits.hpp"
 #include "TestPoint.hpp"
 #include "TestProgram.hpp"
 #include "Types.hpp"
+#include "WireUtil.hpp"
 
+#include <cmath>
 #include <cstdio>
 
 namespace simbridge
@@ -296,6 +299,42 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdSetManualSpeed:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.machineState() == MachineState::Homing)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+
+        std::size_t offset = 0;
+        float speed = 0.0f;
+        if (frame.payload_length != tecomm::kManualSpeedPayloadWireSize ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, speed, true) ||
+            offset != frame.payload_length || !std::isfinite(speed))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+
+        // Match GUI mock clamp: 1 … SafetyLimits::kMaxVelocity (50).
+        constexpr float kMinManualSpeed = 1.0f;
+        if (speed < kMinManualSpeed || speed > SafetyLimits::kMaxVelocity)
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+            break;
+        }
+
+        machine_.setActiveVelocity(speed);
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
     case tecomm::MessageId::CmdMoveTo:
     {
         if (executor_.processState() == ProcessState::Running)
@@ -316,6 +355,7 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
             break;
         }
 
+        machine_.useManualMotionProfile();
         machine_.moveTo(move.x, move.y, move.z);
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
@@ -381,6 +421,26 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
             break;
         }
         machine_.setCollisionPhaseEnabled(value.value != 0);
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdForceTare:
+    {
+        if (executor_.processState() == ProcessState::Running ||
+            machine_.machineState() == MachineState::Homing ||
+            machine_.machineState() == MachineState::Active ||
+            machine_.motionState() == MotionState::Moving ||
+            machine_.forceTareActive())
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (!machine_.beginForceTare())
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+            break;
+        }
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
     }

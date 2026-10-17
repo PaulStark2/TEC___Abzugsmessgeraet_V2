@@ -24,6 +24,7 @@ constexpr std::size_t kMaxFrameSize = 520; // 6 + 512 + 2
 
 // Fixed payload sizes for typed messages (explicit wire layout, no struct padding).
 constexpr std::size_t kMoveToPayloadWireSize = 12; // 3 x float32
+constexpr std::size_t kManualSpeedPayloadWireSize = 4; // 1 x float32 mm/s
 constexpr std::size_t kBoolPayloadWireSize = 1;
 constexpr std::size_t kAckPayloadWireSize = 2;
 constexpr std::size_t kNackPayloadWireSize = 3;
@@ -32,8 +33,9 @@ constexpr std::size_t kProgramSummaryPayloadWireSize = 26;
 constexpr std::size_t kLoadProgramMaxPointCount = 32;
 constexpr std::size_t kLoadProgramMaxPayloadWireSize =
     1 + kLoadProgramMaxPointCount * kMoveToPayloadWireSize; // 385
-// Previous 288-byte layout, plus force_range_N and force_hard_limit_N.
-constexpr std::size_t kMachineConfigPayloadWireSize = 296;
+// 288-byte layout, plus force_range_N, force_hard_limit_N, a_manual,
+// and the per-axis hard/collision limits for X and Y (Z stays in the older fields).
+constexpr std::size_t kMachineConfigPayloadWireSize = 356;
 constexpr std::size_t kTestConfigurationPayloadWireSize = 8; // mode u8 + force f32 + iterations u16 + index u8
 constexpr std::size_t kPlateOriginPayloadWireSize = kMoveToPayloadWireSize;
 constexpr std::size_t kForcePathChunkMaxSamples = 32;

@@ -29,6 +29,8 @@ ProcedureController::ProcedureController(Machine& machine)
     , phase2_measured_fz_(0.0f)
     , phase2_motion_fz_(0.0f)
     , probe_calib_standalone_(false)
+    , tare_next_(ProcedurePhase::Idle)
+    , fine_approach_after_tare_(false)
 {
 }
 
@@ -46,6 +48,7 @@ bool ProcedureController::pauseAllowed() const
     case ProcedurePhase::OptimizeInsert:
     case ProcedurePhase::TestOrAge:
     case ProcedurePhase::Unclamp:
+    case ProcedurePhase::ForceTare:
         return false;
     default:
         return true;
@@ -127,6 +130,7 @@ bool ProcedureController::start()
     process_state_ = ProcessState::Running;
     setAutomaticProcessGuards(true);
     probe_calib_standalone_ = false;
+    fine_approach_after_tare_ = false;
     enterPhase(ProcedurePhase::ProbeApproach);
     if (phase_ == ProcedurePhase::ProbeApproach && motionSettled())
     {
@@ -239,6 +243,9 @@ void ProcedureController::tick(float dt)
         break;
     case ProcedurePhase::MoveSafeEnd:
         handleMoveSafeEnd();
+        break;
+    case ProcedurePhase::ForceTare:
+        handleForceTare();
         break;
     default:
         break;
@@ -464,6 +471,12 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
                                         motion.corner_testpoints);
         machine_.moveTo(point_x_, point_y_, insertion_z_);
         break;
+    case ProcedurePhase::ForceTare:
+        if (!machine_.beginForceTare())
+        {
+            abortProcess("force tare busy");
+        }
+        break;
     case ProcedurePhase::Completed:
         setAutomaticProcessGuards(false);
         process_state_ = ProcessState::Completed;
@@ -572,6 +585,7 @@ void ProcedureController::abortProcess(const char* reason)
 {
     probe_calib_.abort();
     machine_.setPreClampXyEnabled(false);
+    fine_approach_after_tare_ = false;
     setAutomaticProcessGuards(false);
     if (machine_.machineState() != MachineState::Fault)
     {
@@ -589,6 +603,51 @@ void ProcedureController::abortProcess(const char* reason)
                  static_cast<unsigned>(machine_.lastForceWatchdogTrip()),
                  machine_.hostInputs().force.fz, machine_.x(), machine_.y(), machine_.z(),
                  machine_.rawX(), machine_.rawY(), machine_.rawZ());
+}
+
+void ProcedureController::startForceTare(ProcedurePhase next)
+{
+    fine_approach_after_tare_ = false;
+    tare_next_ = next;
+    enterPhase(ProcedurePhase::ForceTare);
+}
+
+void ProcedureController::startForceTareBeforeFineApproach()
+{
+    fine_approach_after_tare_ = true;
+    tare_next_ = ProcedurePhase::Idle;
+    enterPhase(ProcedurePhase::ForceTare);
+}
+
+void ProcedureController::commandFineApproach()
+{
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+    phase_ = ProcedurePhase::PointApproach;
+    machine_.setActiveMotionProfile(motion.v_fine_testpoints, motion.a_testpoints,
+                                    motion.corner_testpoints);
+    machine_.setCollisionContext(CollisionContext::Contact);
+    std::fprintf(stderr,
+                 "[PointApproach] FINE z=%.3f v_fine_testpoints=%.3f pose=(%.3f,%.3f,%.3f) "
+                 "fz=%.3f\n",
+                 target_machine_.z, motion.v_fine_testpoints, machine_.x(), machine_.y(),
+                 machine_.z(), machine_.hostInputs().force.fz);
+    commandLowerToZ(target_machine_.z);
+    approach_leg_ = 3;
+}
+
+void ProcedureController::handleForceTare()
+{
+    if (machine_.forceTareActive())
+    {
+        return;
+    }
+    if (fine_approach_after_tare_)
+    {
+        fine_approach_after_tare_ = false;
+        commandFineApproach();
+        return;
+    }
+    enterPhase(tare_next_);
 }
 
 void ProcedureController::handleMoveSafePose()
@@ -612,6 +671,7 @@ void ProcedureController::handlePointApproach()
     const float coarse_z = target_machine_.z + standoff;
 
     // Fine approach may end early on contact force (real HW); sim usually reaches Z.
+    // The rest tare already ran at the coarse standoff, so PreClamp sees this force.
     if (approach_leg_ == 3)
     {
         const float fz = machine_.hostInputs().force.fz;
@@ -673,17 +733,9 @@ void ProcedureController::handlePointApproach()
     }
     if (approach_leg_ == 2)
     {
-        // Fine Z is single-axis; corner unused but kept for profile consistency.
-        machine_.setActiveMotionProfile(motion.v_fine_testpoints, motion.a_testpoints,
-                                        motion.corner_testpoints);
-        machine_.setCollisionContext(CollisionContext::Contact);
-        std::fprintf(stderr,
-                     "[PointApproach] FINE z=%.3f v_fine_testpoints=%.3f pose=(%.3f,%.3f,%.3f) "
-                     "fz=%.3f\n",
-                     target_machine_.z, motion.v_fine_testpoints, machine_.x(), machine_.y(),
-                     machine_.z(), machine_.hostInputs().force.fz);
-        commandLowerToZ(target_machine_.z);
-        approach_leg_ = 3;
+        // Standstill above the point. Tare here so the fine descent and the
+        // following XY correction both see force relative to this rest value.
+        startForceTareBeforeFineApproach();
         return;
     }
     enterPhase(ProcedurePhase::PreClampXyCorrect);
@@ -691,15 +743,52 @@ void ProcedureController::handlePointApproach()
 
 void ProcedureController::handleProbeApproach()
 {
-    if (!motionSettled())
-    {
-        return;
-    }
     const CalibrationSet& calib = machine_.calibrationSet();
     const MachineConfig::Probe& probe = machine_.machineConfig().probe;
     const TestPoint target = calib.probe_center;
     const float standoff = probe.approach_distance;
     const float coarse_z = target.z + standoff;
+
+    // Leg 2: blind coarse Z toward hub. Abort immediately on Messtaster contact —
+    // typically stored probe_center.z too low vs. the real disc.
+    if (approach_leg_ == 2)
+    {
+        TestPoint contact{};
+        if (machine_.consumeProbeTrigger(contact))
+        {
+            std::fprintf(stderr,
+                         "[ProbeApproach] CONTACT during coarse Z at (%.3f,%.3f,%.3f) "
+                         "target_hub_z=%.3f probe_center.z=%.3f — abort\n",
+                         contact.x, contact.y, contact.z, coarse_z, target.z);
+            machine_.brakeToStop(probe.a_probe_brake);
+            machine_.latchFaultReason(FaultReason::ProbeApproachContact);
+            abortProcess("ProbeApproach: probe contact during coarse Z approach");
+            return;
+        }
+        if (!motionSettled())
+        {
+            return;
+        }
+        // Hub reached without early contact — start M19 OffsetOnly from current TCP.
+        machine_.consumeProbeTrigger();
+        std::fprintf(stderr,
+                     "[ProbeApproach] start M19 at hub pose=(%.3f,%.3f,%.3f) "
+                     "v_search=%.3f\n",
+                     machine_.x(), machine_.y(), machine_.z(), probe.v_search);
+        const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
+        if (!probe_calib_.start(machine_, hub, ProbeCalibration::StorePolicy::OffsetOnly))
+        {
+            abortProcess();
+            return;
+        }
+        phase_ = ProcedurePhase::ProbeCalibrate;
+        return;
+    }
+
+    if (!motionSettled())
+    {
+        return;
+    }
     if (approach_leg_ == 0)
     {
         if (!atSafeZ())
@@ -731,6 +820,8 @@ void ProcedureController::handleProbeApproach()
             abortProcess("ProbeApproach leg1: left Safe-Z before coarse Z");
             return;
         }
+        // Discard stale latch from jog / prior search before the open-loop descent.
+        machine_.consumeProbeTrigger();
         machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
                                         probe.corner_probe_transfer);
         machine_.setCollisionContext(CollisionContext::Approach);
@@ -743,20 +834,6 @@ void ProcedureController::handleProbeApproach()
         approach_leg_ = 2;
         return;
     }
-    // Start M19 at the hub TCP (standoff pose). probe_center was only used to
-    // drive ProbeApproach to this hub; the search itself does not use it as a target.
-    std::fprintf(stderr,
-                 "[ProbeApproach] start M19 at hub pose=(%.3f,%.3f,%.3f) "
-                 "v_search=%.3f\n",
-                 machine_.x(), machine_.y(), machine_.z(), probe.v_search);
-    const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
-    // Procedure ProbeApproach → OffsetOnly (keep probeCenter, update toolOffset only).
-    if (!probe_calib_.start(machine_, hub, ProbeCalibration::StorePolicy::OffsetOnly))
-    {
-        abortProcess();
-        return;
-    }
-    phase_ = ProcedurePhase::ProbeCalibrate;
 }
 
 void ProcedureController::handleProbeCalibrate(float dt)
@@ -818,7 +895,7 @@ void ProcedureController::handleClamp()
 {
     if (!machine_.spreaderBusy() && machine_.hostOutputs().spreaderExtended)
     {
-        enterPhase(ProcedurePhase::InsertInitial);
+        startForceTare(ProcedurePhase::InsertInitial);
     }
 }
 
@@ -841,7 +918,7 @@ void ProcedureController::handleInsertInitial()
         std::fprintf(stderr,
                      "[InsertInitial] Phase1 done insertion_z=%.3f extraction_z=%.3f force_free_z=%.3f → OptimizeInsert\n",
                      insertion_z_, extraction_z_, force_free_z_);
-        enterPhase(ProcedurePhase::OptimizeInsert);
+        startForceTare(ProcedurePhase::OptimizeInsert);
         return;
     }
 
@@ -961,7 +1038,7 @@ void ProcedureController::handleOptimizeInsert()
     if (std::fabs(error) <= p2.force_tolerance_N)
     {
         std::fprintf(stderr, "[OptimizeInsert] force in tolerance → TestOrAge\n");
-        enterPhase(ProcedurePhase::TestOrAge);
+        startForceTare(ProcedurePhase::TestOrAge);
         return;
     }
 
@@ -1048,7 +1125,7 @@ void ProcedureController::handleTestOrAge()
                  machine_.testConfiguration().mode == TestMode::Test ? "Test" : "Aging");
     if (cycle_iteration_ >= machine_.testConfiguration().iterations)
     {
-        enterPhase(ProcedurePhase::Unclamp);
+        startForceTare(ProcedurePhase::Unclamp);
         return;
     }
     force_path_.setIteration(static_cast<std::uint16_t>(cycle_iteration_));

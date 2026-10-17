@@ -16,6 +16,7 @@ enum class ForceWatchdogTrip : uint8_t
 };
 
 // Evaluate raw Newton values. Never blocks. Order: finite, hard limits, then phase threshold.
+// Each axis is compared with its own limit.
 inline ForceWatchdogTrip evaluateForceWatchdog(const ForceVector& force, const MachineConfig& config,
                                                CollisionContext context, bool phase_enabled = true)
 {
@@ -24,8 +25,9 @@ inline ForceWatchdogTrip evaluateForceWatchdog(const ForceVector& force, const M
         return ForceWatchdogTrip::NonFinite;
     }
 
-    const float hard_N = config.force.hard_limit_N;
-    if (std::fabs(force.fx) > hard_N || std::fabs(force.fy) > hard_N || std::fabs(force.fz) > hard_N)
+    if (std::fabs(force.fx) > config.force.hard_limit_x_N ||
+        std::fabs(force.fy) > config.force.hard_limit_y_N ||
+        std::fabs(force.fz) > config.force.hard_limit_N)
     {
         return ForceWatchdogTrip::HardLimit;
     }
@@ -35,9 +37,8 @@ inline ForceWatchdogTrip evaluateForceWatchdog(const ForceVector& force, const M
         return ForceWatchdogTrip::None;
     }
 
-    const float threshold_N = config.collisionThreshold(context);
-    if (std::fabs(force.fx) > threshold_N || std::fabs(force.fy) > threshold_N ||
-        std::fabs(force.fz) > threshold_N)
+    const AxisForceLimit limit = config.collisionLimit(context);
+    if (std::fabs(force.fx) > limit.x || std::fabs(force.fy) > limit.y || std::fabs(force.fz) > limit.z)
     {
         return ForceWatchdogTrip::CollisionContext;
     }

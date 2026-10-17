@@ -550,7 +550,23 @@ int main()
         program.add(TestPoint{1.0f, 0.0f, 0.0f});
         ex.setProgram(program);
         ex.start();
-        if (!runUntilPhase(ex, machine, ProcedurePhase::TestOrAge, 12000, 0.1f))
+        bool reached = false;
+        for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
+        {
+            if (ex.procedurePhase() == ProcedurePhase::TestOrAge)
+            {
+                reached = true;
+                break;
+            }
+            const ProcedurePhase ph = ex.procedurePhase();
+            const float fz = (ph == ProcedurePhase::InsertInitial || ph == ProcedurePhase::OptimizeInsert ||
+                              ph == ProcedurePhase::TestOrAge)
+                                 ? 0.1f
+                                 : 0.0f;
+            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            ex.tick(0.05f);
+        }
+        if (!reached && ex.procedurePhase() != ProcedurePhase::TestOrAge)
         {
             return 29;
         }
@@ -600,15 +616,17 @@ int main()
         }
 
         // Keep preload while Clamp finishes so enterPhase(InsertInitial) sees force.
+        // The rest tare between Clamp and InsertInitial must sample 0 N.
         float z_at_insert = 0.0f;
         bool entered_insert = false;
         bool saw_extract = false;
         bool reached_optimize = false;
         for (int i = 0; i < 1200 && ex.processState() == ProcessState::Running; ++i)
         {
-            float fz = 3.0f;
+            float fz = 0.0f;
             if (ex.procedurePhase() == ProcedurePhase::InsertInitial)
             {
+                fz = 3.0f;
                 if (!entered_insert)
                 {
                     entered_insert = true;
@@ -739,7 +757,7 @@ int main()
         bool saw_extract = false;
         for (int i = 0; i < 4000 && ex.processState() == ProcessState::Running; ++i)
         {
-            float fz = 5.0f;
+            float fz = ex.procedurePhase() == ProcedurePhase::ForceTare ? 0.0f : 5.0f;
             if (ex.procedurePhase() == ProcedurePhase::InsertInitial)
             {
                 if (machine.z() > z_at_insert + 0.2f)
@@ -777,6 +795,12 @@ int main()
 
         for (int i = 0; i < 6000 && ex.processState() == ProcessState::Running; ++i)
         {
+            if (ex.procedurePhase() == ProcedurePhase::ForceTare)
+            {
+                machine.setHostInputs(withPlantInputs(machine, makeInputs()));
+                ex.tick(0.05f);
+                continue;
+            }
             if (ex.procedurePhase() != ProcedurePhase::OptimizeInsert)
             {
                 break;

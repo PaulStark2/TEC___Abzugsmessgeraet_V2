@@ -22,6 +22,16 @@ static void setForce(Machine& machine, float fx, float fy, float fz)
     machine.setHostInputs(withFreshForce(in));
 }
 
+// Z travels before XY. Settle so a correction step is the active leg.
+static void settleMotion(Machine& machine, float dt)
+{
+    setForce(machine, 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < 80 && machine.motionState() != MotionState::AtTarget; ++i)
+    {
+        machine.tick(dt);
+    }
+}
+
 static void runUntilNotRunning(TestExecutor& ex, int max_steps, float dt, Machine& machine,
                                  float fx, float fy, float fz_after_each_tick,
                                  bool force_constant = true)
@@ -46,8 +56,8 @@ static void runUntilNotRunning(TestExecutor& ex, int max_steps, float dt, Machin
 
 int main()
 {
-    // Common dt for stable deterministic behavior.
-    constexpr float kDt = 0.02f;
+    // One XY correction step per 50 ms, matching simulation_protocol and the STM32 accumulator.
+    constexpr float kDt = 0.05f;
 
     // -------------------------------
     // A) XY: ignore before SlowZApproach
@@ -96,6 +106,7 @@ int main()
         Machine m(params);
         m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
+        settleMotion(m, kDt);
 
         const float x0 = m.x();
 
@@ -175,6 +186,7 @@ int main()
         Machine m(params);
         m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
+        settleMotion(m, kDt);
 
         // Stage 1: only Fx active.
         setForce(m, +12.0f, 0.0f, 0.0f);
@@ -386,6 +398,7 @@ int main()
         Machine m(params);
         m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
+        settleMotion(m, kDt);
 
         // +Fx drives target in -X; clamp at commanded_x - max_x_correction.
         for (int i = 0; i < 50; ++i)
@@ -429,6 +442,44 @@ int main()
         if (!nearEqual(m.y(), y_at_limit, 1e-3f))
         {
             return 29; // further -Fy must not shift Y past the limit
+        }
+    }
+
+    // 1 ms ticks (STM32) must not emit a correction step every millisecond.
+    {
+        Machine::ForceControlParams params{};
+        params.fx_threshold_on_N = 10.0f;
+        params.fx_threshold_off_N = 5.0f;
+        params.fy_threshold_on_N = 10.0f;
+        params.fy_threshold_off_N = 5.0f;
+        params.dx_step_units = 0.02f;
+        params.dy_step_units = 0.02f;
+        params.slow_z_distance_threshold_units = 1000.0f;
+        params.fz_safety_threshold_N = 1000000.0f;
+
+        Machine m(params);
+        m.setPreClampXyEnabled(true);
+        m.moveTo(0.0f, 0.0f, 2.0f);
+        setForce(m, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 20 && m.motionState() != MotionState::AtTarget; ++i)
+        {
+            m.tick(0.05f);
+        }
+        setForce(m, +12.0f, 0.0f, 0.0f);
+
+        const float x0 = m.x();
+        for (int i = 0; i < 49; ++i)
+        {
+            m.tick(0.001f);
+        }
+        if (!nearEqual(m.x(), x0))
+        {
+            return 30; // 49 ms is short of the 50 ms correction period
+        }
+        m.tick(0.001f);
+        if (!(m.x() < x0))
+        {
+            return 31; // the 50th millisecond emits one step
         }
     }
 

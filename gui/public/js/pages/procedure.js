@@ -111,30 +111,70 @@ export function renderProcedure(container) {
     `;
   }
 
-  function renderProgress(status) {
+  function fmtNum(v, digits = 2) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(digits) : '—';
+  }
+
+  function renderProgress(status, machine) {
     const p = status.progress || {};
-    const complete = p.isComplete || status.state === 'completed';
-    const rawPhase = p.procedurePhase || status.procedurePhase || '';
+    const m = machine || {};
+    const active = status.state === 'running' || status.state === 'paused';
+    const complete = status.state === 'completed';
+    const stopped = status.state === 'stopped';
+    const rawPhase =
+      (active && m.procedurePhase) ||
+      p.procedurePhase ||
+      status.procedurePhase ||
+      m.procedurePhase ||
+      '';
     const phaseLabel = formatProcedurePhaseLabel(rawPhase);
+    const processLabel = active
+      ? describeRunningCoreProcess(rawPhase).processLabel
+      : complete
+        ? 'Letzte Prozedur abgeschlossen'
+        : stopped
+          ? 'Prozedur abgebrochen / gestoppt'
+          : 'Bereit — keine Prozedur aktiv';
+    const fault =
+      m.faultReason && m.faultReason !== 'None'
+        ? m.faultReason
+        : p.faultReason && p.faultReason !== 'None'
+          ? p.faultReason
+          : null;
+    const percent = active ? Number(p.percent) || 0 : complete ? 100 : 0;
+
     return `
-      <div class="progress-card${complete ? ' progress-card--complete' : ''}">
+      <div class="progress-card${complete ? ' progress-card--complete' : ''}${
+        stopped ? ' progress-card--error' : ''
+      }">
         <h3>Fortschritt</h3>
-        ${
-          complete
-            ? `<p class="procedure-complete-banner" role="status">Prozedur abgeschlossen</p>`
-            : ''
-        }
+        <p class="procedure-complete-banner" role="status">${escapeHtml(processLabel)}</p>
         <p class="placeholder-note">
-          Iteration: <b>${escapeHtml(p.currentIteration ?? '—')}</b> /
-          <b>${escapeHtml(p.totalIterations ?? '—')}</b><br/>
+          Core-Prozess: <b>${escapeHtml(m.processState || status.processState || '—')}</b>
+          · Maschinenstatus: <b>${escapeHtml(m.machineState || p.machineState || '—')}</b><br/>
+          Phase: <b>${escapeHtml(phaseLabel)}</b>
+          ${fault ? `<br/>Fault: <b>${escapeHtml(fault)}</b>` : ''}<br/>
           Punkt: <b>${escapeHtml(p.pointsDone ?? p.currentPointIndex ?? '—')}</b> /
-          <b>${escapeHtml(p.totalPoints ?? '—')}</b><br/>
-          Phase: <b>${escapeHtml(phaseLabel)}</b><br/>
-          Fortschritt: <b>${escapeHtml(p.percent ?? 0)}%</b>
+          <b>${escapeHtml(p.totalPoints ?? '—')}</b>
+          · Iteration: <b>${escapeHtml(p.currentIteration ?? '—')}</b> /
+          <b>${escapeHtml(p.totalIterations ?? '—')}</b><br/>
+          Fortschritt: <b>${escapeHtml(percent)}%</b>
         </p>
         <div class="progress-bar" aria-hidden="true">
-          <div class="progress-bar__fill" style="width:${Number(p.percent) || 0}%"></div>
+          <div class="progress-bar__fill" style="width:${percent}%"></div>
         </div>
+        <h4 style="margin:12px 0 4px;">Live-Signale</h4>
+        <p class="placeholder-note">
+          Pose TCP: X=<b>${escapeHtml(fmtNum(m.x))}</b>
+          Y=<b>${escapeHtml(fmtNum(m.y))}</b>
+          Z=<b>${escapeHtml(fmtNum(m.z))}</b> mm<br/>
+          Kraft: Fx=<b>${escapeHtml(fmtNum(m.fx))}</b>
+          Fy=<b>${escapeHtml(fmtNum(m.fy))}</b>
+          Fz=<b>${escapeHtml(fmtNum(m.fz))}</b> N<br/>
+          Spreizer: <b>${escapeHtml(m.spreaderState || p.spreaderState || '—')}</b>
+          · Homed: <b>${m.isHomed === true ? 'ja' : m.isHomed === false ? 'nein' : '—'}</b>
+        </p>
       </div>
     `;
   }
@@ -186,6 +226,7 @@ export function renderProcedure(container) {
     const machine = latestMachine || {};
     const active = status.state === 'running' || status.state === 'paused';
     const completed = status.state === 'completed';
+    const stopped = status.state === 'stopped';
     const coreRunning = isCoreProcessRunning(machine.processState);
     const startDisabled = isProcedureStartButtonDisabled({
       procedureState: status.state,
@@ -229,7 +270,7 @@ export function renderProcedure(container) {
         </label>
       </form>
 
-      ${renderProgress(status)}
+      ${renderProgress(status, machine)}
 
       <div class="control-actions page-actions">
         <button type="button" id="btn-proc-start" ${startDisabled ? 'disabled' : ''} title="${
@@ -349,8 +390,22 @@ export function renderProcedure(container) {
       }
     });
 
-    if (completed) {
-      setFeedback('Prozedur abgeschlossen — Ergebnisse verfügbar.', false);
+    const fault =
+      machine.faultReason && machine.faultReason !== 'None' ? machine.faultReason : null;
+    if (fault === 'ProbeApproachContact') {
+      setFeedback(
+        'Messtaster-Kontakt während der Approach-Z-Fahrt (ProbeApproach). ' +
+          'Gespeichertes probeCenter.z liegt vermutlich zu tief oder die Anfahrt war zu aggressiv. ' +
+          'STOP/Homing, Kalibrierkennwerte prüfen, dann erneut.',
+        true
+      );
+    } else if (stopped && fault === 'ProbeSearchNoContact') {
+      setFeedback(
+        'Kein Messtasterkontakt während der Suche (Timeout). Kalibrierung/Geometrie prüfen.',
+        true
+      );
+    } else if (completed) {
+      setFeedback('Letzte Prozedur abgeschlossen — Ergebnisse verfügbar.', false);
     } else if (status.state === 'unavailable') {
       setFeedback(status.error || 'Controller offline.', true);
     } else if (coreRunning && !active) {

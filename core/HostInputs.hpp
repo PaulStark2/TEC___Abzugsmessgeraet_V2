@@ -45,11 +45,12 @@ struct HostInputs
     bool e_stop; // hardware e-stop active
 
     // Probe/touch sensor (authoritative host: STM32 or SimPlant).
-    // The host latches pose at the trigger instant. Core consumes the event;
-    // it does not reconstruct pose from a later tick or from the Pi UART time.
+    // CRITICAL: Core latches only when poseValid + finite XYZ + new sequence.
+    // Level (probeTriggered) alone is ignored — see Machine::setHostInputs and
+    // docs/M19_ProbeCalibration.md. Host must stamp TCP at the contact edge.
     // probeTriggerX/Y/Z are machine-frame TCP (same as Machine::x/y/z). SimPlant
     // latches raw plant TCP; SimProtocolBridge converts with referenceOffset.
-    // An STM32 adapter must present machine-frame (or convert equivalently).
+    // FirmwareHost latches machine_.x/y/z() directly (already machine frame).
     bool probeTriggered; // measuring probe contact (level)
     bool probeTriggerPoseValid = false; // host provided XYZ at the trigger edge
     std::uint32_t probeTriggerSequence = 0; // incremented on each new trigger event

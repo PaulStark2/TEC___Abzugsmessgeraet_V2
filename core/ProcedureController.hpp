@@ -65,6 +65,10 @@ private:
     void handleUnclamp();
     void handleNextPoint();
     void handleMoveSafeEnd();
+    void startForceTare(ProcedurePhase next);
+    void startForceTareBeforeFineApproach();
+    void commandFineApproach();
+    void handleForceTare();
 
     Machine& machine_;
     TestProgram program_;
@@ -91,4 +95,8 @@ private:
     float phase2_measured_fz_; // Fz latched at insertion_z after insert leg
     float phase2_motion_fz_; // last Fz observed while inserting
     bool probe_calib_standalone_;
+    ProcedurePhase tare_next_;
+    // Coarse Z has stopped. After ForceTare, resume PointApproach leg 3
+    // instead of enterPhase(tare_next_), which would restart the approach.
+    bool fine_approach_after_tare_;
 };

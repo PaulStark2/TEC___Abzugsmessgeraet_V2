@@ -118,6 +118,10 @@ function createMockMachineClient() {
     return beginMotion({ x: 0, y: 0, z: 0 }, 'Homing');
   }
 
+  function forceTare() {
+    return { ok: true, status: getStatus() };
+  }
+
   function defineMcs() {
     return beginMotion({ x: 0, y: 0, z: 0 }, 'Homing');
   }
@@ -216,6 +220,7 @@ function createMockMachineClient() {
       return { ok: true, status: getStatus() };
     },
     home,
+    forceTare,
     defineMcs,
     invalidateHoming,
     restoreMcs,

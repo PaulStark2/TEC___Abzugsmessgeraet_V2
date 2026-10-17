@@ -35,9 +35,45 @@ static bool g_spreader_pins_latched = false;
 static bool g_spreader_open_latched = false;
 static std::uint32_t g_status_divider = 0;
 
+// Limit lines pick up stepper EMI (spikes to ~2 V). Core treats a single High
+// sample as +max during homing — debounce at 1 kHz before publishing.
+static constexpr std::uint8_t kLimitDebounceMs = 10;
+
+struct DebouncedLevel
+{
+    bool stable = false;
+    std::uint8_t streak = 0;
+};
+
+static DebouncedLevel g_lim_xn{};
+static DebouncedLevel g_lim_xp{};
+static DebouncedLevel g_lim_yn{};
+static DebouncedLevel g_lim_yp{};
+static DebouncedLevel g_lim_zn{};
+static DebouncedLevel g_lim_zp{};
+
 static bool pinHigh(GPIO_TypeDef* port, std::uint16_t pin)
 {
     return HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_SET;
+}
+
+static bool debounceLevel(DebouncedLevel& state, bool raw, std::uint8_t need_ms)
+{
+    if (raw == state.stable)
+    {
+        state.streak = 0;
+        return state.stable;
+    }
+    if (state.streak < 255u)
+    {
+        ++state.streak;
+    }
+    if (state.streak >= need_ms)
+    {
+        state.stable = raw;
+        state.streak = 0;
+    }
+    return state.stable;
 }
 
 static void rxPush(std::uint8_t byte)
@@ -126,11 +162,47 @@ static bool enqueueFrame(const simbridge::OutboundFrame& frame)
     return true;
 }
 
-static void enqueueFrames(const std::vector<simbridge::OutboundFrame>& frames)
+// Command ACKs/NACKs must not be silently dropped when the TX ring is tight.
+static constexpr std::size_t kPendingTxCap = 8;
+static simbridge::OutboundFrame g_pending_tx[kPendingTxCap]{};
+static std::size_t g_pending_tx_n = 0;
+static std::uint8_t g_adc_push_div = 0;
+
+static void flushPendingTx()
+{
+    while (g_pending_tx_n > 0u)
+    {
+        if (!enqueueFrame(g_pending_tx[0]))
+        {
+            break;
+        }
+        for (std::size_t i = 1; i < g_pending_tx_n; ++i)
+        {
+            g_pending_tx[i - 1u] = g_pending_tx[i];
+        }
+        --g_pending_tx_n;
+    }
+}
+
+static void enqueueFramesPriority(const std::vector<simbridge::OutboundFrame>& frames)
 {
     for (const simbridge::OutboundFrame& frame : frames)
     {
-        (void)enqueueFrame(frame);
+        if (enqueueFrame(frame))
+        {
+            continue;
+        }
+        if (g_pending_tx_n < kPendingTxCap)
+        {
+            g_pending_tx[g_pending_tx_n++] = frame;
+            continue;
+        }
+        // Queue full: drop oldest pending slot to keep the newest reply (usually ACK/STOP).
+        for (std::size_t i = 1; i < kPendingTxCap; ++i)
+        {
+            g_pending_tx[i - 1u] = g_pending_tx[i];
+        }
+        g_pending_tx[kPendingTxCap - 1u] = frame;
     }
 }
 
@@ -243,7 +315,9 @@ static void Uart_Init()
         Error_Handler();
     }
 
-    HAL_NVIC_SetPriority(TEC_HOST_USART_IRQn, 6, 0);
+    // Higher priority than StepGenerator TIM IRQs (prio 4): during motion, TIM at
+    // prio 3 used to starve USART TXE → TX ring full → ACKs dropped → GUI hangs.
+    HAL_NVIC_SetPriority(TEC_HOST_USART_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(TEC_HOST_USART_IRQn);
     __HAL_UART_ENABLE_IT(&g_uart, UART_IT_RXNE);
 }
@@ -272,13 +346,15 @@ HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_se
     inputs.forceSampleSequence = force_sequence;
     inputs.hostHeartbeatValid = true;
     inputs.hostHeartbeatSequence = heartbeat_sequence;
-    inputs.limitXMin = pinHigh(PIN_LIM_XN_PORT, PIN_LIM_XN_PIN);
-    inputs.limitXMax = pinHigh(PIN_LIM_XP_PORT, PIN_LIM_XP_PIN);
-    inputs.limitYMin = pinHigh(PIN_LIM_YN_PORT, PIN_LIM_YN_PIN);
-    inputs.limitYMax = pinHigh(PIN_LIM_YP_PORT, PIN_LIM_YP_PIN);
-    inputs.limitZMin = pinHigh(PIN_LIM_ZN_PORT, PIN_LIM_ZN_PIN);
-    inputs.limitZMax = pinHigh(PIN_LIM_ZP_PORT, PIN_LIM_ZP_PIN);
+    inputs.limitXMin = debounceLevel(g_lim_xn, pinHigh(PIN_LIM_XN_PORT, PIN_LIM_XN_PIN), kLimitDebounceMs);
+    inputs.limitXMax = debounceLevel(g_lim_xp, pinHigh(PIN_LIM_XP_PORT, PIN_LIM_XP_PIN), kLimitDebounceMs);
+    inputs.limitYMin = debounceLevel(g_lim_yn, pinHigh(PIN_LIM_YN_PORT, PIN_LIM_YN_PIN), kLimitDebounceMs);
+    inputs.limitYMax = debounceLevel(g_lim_yp, pinHigh(PIN_LIM_YP_PORT, PIN_LIM_YP_PIN), kLimitDebounceMs);
+    inputs.limitZMin = debounceLevel(g_lim_zn, pinHigh(PIN_LIM_ZN_PORT, PIN_LIM_ZN_PIN), kLimitDebounceMs);
+    inputs.limitZMax = debounceLevel(g_lim_zp, pinHigh(PIN_LIM_ZP_PORT, PIN_LIM_ZP_PIN), kLimitDebounceMs);
+    // E-Stop: no debounce — fail fast. Hardware should still cut power.
     inputs.e_stop = pinHigh(PIN_ESTOP_PORT, PIN_ESTOP_PIN);
+    // Level only (NC: Low = contact). Pose/sequence latch is in FirmwareHost.
     inputs.probeTriggered = !pinHigh(PIN_PROBE_PORT, PIN_PROBE_PIN);
     inputs.probeTriggerPoseValid = false;
     inputs.probeTriggerSequence = 0;
@@ -312,6 +388,8 @@ void latestAdc(std::uint16_t& fx, std::uint16_t& fy, std::uint16_t& fz)
 
 void serviceProtocol(FirmwareHost& host)
 {
+    flushPendingTx();
+
     std::uint8_t byte = 0;
     while (rxPop(byte))
     {
@@ -325,21 +403,27 @@ void serviceProtocol(FirmwareHost& host)
         std::vector<simbridge::OutboundFrame> out;
         out.reserve(4);
         host.handleFrame(decoded, decode_result, out);
-        enqueueFrames(out);
+        enqueueFramesPriority(out);
     }
 
-    // StatusReport 50 Hz. Skip a tick if the TX ring is tight so ACKs are never starved.
+    flushPendingTx();
+
+    // StatusReport 50 Hz; MsgRawAdc 10 Hz. Skip if TX tight or pending replies wait.
     ++g_status_divider;
     if (g_status_divider >= 20u)
     {
         g_status_divider = 0;
-        // StatusReport (~49 B) + MsgRawAdc (~15 B).
-        if (txFreeSpace() >= 96u)
+        const bool include_adc = (++g_adc_push_div % 5u) == 0u;
+        const std::size_t need = include_adc ? 96u : 64u;
+        if (g_pending_tx_n == 0u && txFreeSpace() >= need)
         {
             std::vector<simbridge::OutboundFrame> status;
             status.reserve(2);
-            host.appendStatusPush(status);
-            enqueueFrames(status);
+            host.appendStatusPush(status, include_adc);
+            for (const simbridge::OutboundFrame& frame : status)
+            {
+                (void)enqueueFrame(frame);
+            }
         }
     }
 }

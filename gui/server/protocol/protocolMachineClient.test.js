@@ -466,6 +466,12 @@ async function testReconnectAllowsCommandsAgain() {
 
 async function testPneumaticAndSetSpeed() {
   const { server, port } = await startMockHost((socket, frame) => {
+    if (frame.messageId === MessageId.CmdSetManualSpeed) {
+      assert.strictEqual(frame.payload.length, 4);
+      assert.ok(Math.abs(frame.payload.readFloatLE(0) - 20) < 1e-6);
+      replyAck(socket, MessageId.CmdSetManualSpeed);
+      return;
+    }
     if (frame.messageId === MessageId.CmdSetSpreader) {
       const bool = decodeBoolPayload(frame.payload);
       assert.strictEqual(bool.value, 1);
@@ -481,8 +487,8 @@ async function testPneumaticAndSetSpeed() {
   try {
     await withClient(port, async (client) => {
       const speed = await client.setSpeed(20);
-      assert.strictEqual(speed.ok, false);
-      assert.strictEqual(speed.error, 'Not supported over protocol');
+      assert.strictEqual(speed.ok, true);
+      assert.strictEqual(speed.status.manualSpeed, 20);
 
       const open = await client.pneumaticOpen();
       assert.ok(open.ok, open.error);

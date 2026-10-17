@@ -38,6 +38,35 @@ else()
 endif()
 message(STATUS "TEC_HOST_UART=${TEC_HOST_UART}")
 
+# Open-loop steps/mm (firmware only; Core stays in mm). Per-axis overrides optional.
+# Zielkinematik: all 200. Bench Zortrax: XY belt 20 steps/mm, Z 4 mm lead at 1/4 µstep = 200.
+set(TEC_STEPS_PER_MM "200" CACHE STRING "Default steps/mm when axis-specific unset")
+set(TEC_STEPS_PER_MM_X "" CACHE STRING "X steps/mm (empty = TEC_STEPS_PER_MM)")
+set(TEC_STEPS_PER_MM_Y "" CACHE STRING "Y steps/mm (empty = TEC_STEPS_PER_MM)")
+set(TEC_STEPS_PER_MM_Z "" CACHE STRING "Z steps/mm (empty = TEC_STEPS_PER_MM)")
+
+function(tec_resolve_steps_per_mm axis_var out_var)
+    set(_v "${${axis_var}}")
+    if(_v STREQUAL "")
+        set(_v "${TEC_STEPS_PER_MM}")
+    endif()
+    if(NOT _v MATCHES "^[0-9]+([.][0-9]+)?$")
+        message(FATAL_ERROR "${axis_var} must be a positive number (got '${_v}')")
+    endif()
+    set(${out_var} "${_v}" PARENT_SCOPE)
+endfunction()
+
+tec_resolve_steps_per_mm(TEC_STEPS_PER_MM_X TEC_SPM_X)
+tec_resolve_steps_per_mm(TEC_STEPS_PER_MM_Y TEC_SPM_Y)
+tec_resolve_steps_per_mm(TEC_STEPS_PER_MM_Z TEC_SPM_Z)
+add_compile_definitions(
+    TEC_STEPS_PER_MM=${TEC_STEPS_PER_MM}
+    TEC_STEPS_PER_MM_X=${TEC_SPM_X}
+    TEC_STEPS_PER_MM_Y=${TEC_SPM_Y}
+    TEC_STEPS_PER_MM_Z=${TEC_SPM_Z}
+)
+message(STATUS "TEC_STEPS_PER_MM default=${TEC_STEPS_PER_MM} → X=${TEC_SPM_X} Y=${TEC_SPM_Y} Z=${TEC_SPM_Z}")
+
 add_link_options(
     ${TEC_MCU_FLAGS}
     -T${CMAKE_CURRENT_SOURCE_DIR}/linker/STM32F446RETX_FLASH.ld

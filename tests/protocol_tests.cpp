@@ -114,6 +114,7 @@ int main()
             static_cast<uint8_t>(tecomm::MessageId::CmdResume),
             static_cast<uint8_t>(tecomm::MessageId::CmdStart),
             static_cast<uint8_t>(tecomm::MessageId::CmdClearFault),
+            static_cast<uint8_t>(tecomm::MessageId::CmdForceTare),
             static_cast<uint8_t>(tecomm::MessageId::CmdRequestStatus),
         };
         for (uint8_t id : empty_ids)

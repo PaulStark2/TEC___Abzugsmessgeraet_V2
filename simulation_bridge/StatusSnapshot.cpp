@@ -91,6 +91,10 @@ tecomm::StatusReportPayload buildStatusReport(const Machine& machine, const Test
     {
         flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagMcsValid);
     }
+    if (machine.forceTareActive())
+    {
+        flags |= static_cast<uint8_t>(1u << tecomm::kStatusFlagTareActive);
+    }
     status.flags = flags;
     status.procedure_phase = static_cast<uint8_t>(executor.procedurePhase());
     status.fault_reason = static_cast<uint8_t>(machine.lastFaultReason());

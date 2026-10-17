@@ -15,5 +15,11 @@ constexpr Console kConsole = Console::Both;
 constexpr std::uint32_t kStepsPerMm = 200;
 constexpr std::uint16_t kSpeedHz[6] = {0, 100, 200, 500, 1000, 2000};
 
+// Fixed-distance Z jog via Serial: "+" / "-" (default count) or "+N" / "-N".
+// 800 pulses = 1 motor rev at 200 full-steps × 1/4 µstep.
+constexpr std::uint32_t kBurstStepsDefault = 800;
+constexpr std::uint16_t kBurstHz = 500;
+constexpr std::uint32_t kBurstStepsMax = 200000;
+
 constexpr std::uint32_t kStatusPeriodMs = 500;
 constexpr std::uint32_t kUartBaud = 115200;

@@ -51,10 +51,15 @@ auf `Console::Usart2Only` (nur Laptop) oder `Console::Usart3Only` (nur Pi) setze
 | `?` | Status sofort |
 | `H` oder `HELP` | Kurzhilfe, inklusive der Stufen aus der Tabelle |
 | `STOP` | alle Achsen aus |
-| `X+3` | X in Plusrichtung, Stufe 3 |
+| `+` | **Z:** genau **800** STEP-Pulse in Plusrichtung, dann Stop |
+| `-` | **Z:** genau **800** STEP-Pulse in Minusrichtung, dann Stop |
+| `+1600` / `-400` | Z-Burst mit anderer Pulsanzahl |
+| `X+3` | X in Plusrichtung, Stufe 3 (Dauerlauf) |
 | `X-1` | X in Minusrichtung, Stufe 1 |
 | `X0` | nur X aus |
-| `Y…` `Z…` | wie X |
+| `Y…` `Z+3` … | Dauerlauf wie X (nicht exakte Pulsanzahl) |
+
+Nach einem Z-Burst kommt `DONE Z+` bzw. `DONE Z-`. Bei 1/4-µStep und 200 Vollschritten/U sind 800 Pulse **eine Motorumdrehung**.
 
 Groß- und Kleinschreibung ist egal. Leerzeichen um Vorzeichen und Stufe sind erlaubt (`X + 3`). Eine neue Zeile für dieselbe Achse ersetzt den vorherigen Auftrag. Mehrere Achsen dürfen gleichzeitig laufen. Nach `STOP`, E-Stop oder Endanschlag startet nichts von selbst wieder.
 

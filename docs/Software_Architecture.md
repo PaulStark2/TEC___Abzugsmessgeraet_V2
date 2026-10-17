@@ -109,5 +109,7 @@ The M12 StatusReport is 41 bytes (`homingState`, `blockedDirections`, `flags`,
 [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md),
 [`docs/M17_Procedure.md`](M17_Procedure.md), and [`docs/M18_Procedure.md`](M18_Procedure.md).
 Probe calibration on the 3-axis Core is **M19.0**
-([`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md)). STM32 firmware
-hosting follows later. M19.0 is not a hardware release.
+([`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md)). The STM32 host must
+latch machine-frame probe pose + sequence into `HostInputs` on the contact edge
+(`FirmwareHost`); GPIO level alone is not consumed by Core. See also
+[`firmware/README.md`](../firmware/README.md).

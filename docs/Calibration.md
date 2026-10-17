@@ -4,10 +4,11 @@
 
 | Funktion | Semantik |
 |----------|----------|
-| **Geometrische Kalibrierung** | Eigenes Untermenü: MCS und Bauplatte/Messtaster neu, oder nur Bauplatte/Messtaster bei bestehendem MCS |
+| **Geometrische Kalibrierung** | Eigenes Untermenü: MCS und Bauplatte/Messtaster neu, nur Bauplatte/Messtaster bei bestehendem MCS, oder **Kalibrierkennwerte** |
+| **Kalibrierkennwerte (Geometrie)** | Anzeige der gespeicherten MCS-/Plate-/Probe-/ToolOffset-Posen plus Live-TCP zum Abgleich |
 | **Kraftkalibrierung der Kraftmessdose** | Eigenes Untermenü: Kalibrierprozess starten oder Kalibrierkennwerte |
 | **Kalibrierprozess starten** | Z-Regression, siehe [Force_Calibration.md](Force_Calibration.md) |
-| **Kalibrierkennwerte** | Gespeicherte Kennlinie, Gleichung und Auswahlbedingungen, ohne Aktorsteuerung |
+| **Kalibrierkennwerte (Kraft)** | Gespeicherte Kennlinie, Gleichung und Auswahlbedingungen, ohne Aktorsteuerung |
 
 ## Define / Commit / Abort
 
@@ -54,3 +55,21 @@ Legacy-Dateien ohne MCS-Block oder ohne `origin=positiveMaxSwitches`: `mcs_valid
 Bauplatte-/Messtaster-Schritte nutzen dieselbe Jog-UI wie der Handmodus
 (`jogPanel` → `jogControls`): Einzelschritt / Dauerhalt und eintippbare
 Schrittweite mit Raster `jog_min_step_mm` (Host-Parameter, siehe `gui/README.md` G7).
+
+## Messtaster / Probe Calibration am STM32
+
+Das Einmessprotokoll (`CmdStartProbeCalib` / FullCalib) braucht denselben
+Host-Vertrag wie die Simulation — siehe
+[M19_ProbeCalibration.md](M19_ProbeCalibration.md) Abschnitt **Host contract**.
+
+Kurz:
+
+- Hardware: **NC**, Ruhe High, Kontakt Low an `PA5`
+- GPIO-Low allein reicht **nicht**: Firmware muss an der Kontaktflanke
+  Maschinenpose + `probeTriggerSequence` in `HostInputs` legen
+  (`FirmwareHost`, 1 kHz). Fehlt das, „erkennt“ Core den Taster nicht.
+- Details und Nucleo-LD2-Hinweis: [firmware/README.md](../firmware/README.md)
+- Wenn die Achsen „fertig“ wirken, die GUI aber **abgebrochen** meldet: oft
+  **Kreis-Fit** am Ende (Radius ≠ Soll) oder **CommunicationTimeout** — siehe
+  Failure-modes in [M19_ProbeCalibration.md](M19_ProbeCalibration.md); Statusleiste
+  `Fault` / Phase beachten.

@@ -135,8 +135,24 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
       case 'Running':
         return procedureStore.getStatus().state === 'paused' ? 'paused' : 'running';
       case 'Completed':
+        // Residual Completed from ProbeCalib / prior Core runs must not mark the
+        // procedure UI complete before this start has observed Running.
+        if (!seenRunningSinceStart) {
+          const prev = procedureStore.getStatus().state;
+          if (prev === 'running' || prev === 'paused') {
+            return prev;
+          }
+          return 'idle';
+        }
         return 'completed';
       case 'Aborted':
+        if (!seenRunningSinceStart) {
+          const prev = procedureStore.getStatus().state;
+          if (prev === 'running' || prev === 'paused') {
+            return prev;
+          }
+          return 'idle';
+        }
         return 'stopped';
       default:
         return procedureStore.getStatus().state === 'idle' ? 'idle' : procedureStore.getStatus().state;
@@ -256,14 +272,14 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
       currentPointIndex = idx;
     }
 
-    const nextProcedureState =
-      processState === 'Completed' && seenRunningSinceStart
-        ? 'completed'
-        : mapGuiState(processState, connected);
+    const nextProcedureState = mapGuiState(processState, connected);
+    // Only treat Core Completed as procedure completion after this start saw Running.
+    const progressProcessState =
+      processState === 'Completed' && !seenRunningSinceStart ? 'Idle' : processState;
     const derived = derivePointProgress({
       totalPoints,
       index0Based: currentPointIndex,
-      processState,
+      processState: progressProcessState,
       procedureState: nextProcedureState,
     });
 

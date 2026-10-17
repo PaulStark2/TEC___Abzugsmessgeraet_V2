@@ -6,6 +6,7 @@
 
 const CRITICAL_CONFIG_KEYS = Object.freeze([
   'a_testpoints',
+  'a_manual',
   'corner_testpoints',
   'a_homing',
   'phase1_a',

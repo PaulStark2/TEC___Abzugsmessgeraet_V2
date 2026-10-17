@@ -48,6 +48,9 @@ struct Axis
     std::int8_t dir = 0;
     std::uint8_t level = 0;
     char name = '?';
+    // Fixed-step burst (TIM update IRQ). 0 = continuous level mode or idle.
+    volatile std::uint32_t burst_remaining = 0;
+    bool burst_active = false;
 };
 
 struct UartPort
@@ -71,6 +74,8 @@ ADC_HandleTypeDef g_adc{};
 std::uint32_t g_nextStatus = 0;
 bool g_announceEstop = false;
 bool g_announceLimit[3]{};
+bool g_announceBurstDone = false;
+char g_announceBurstDir = '+';
 
 bool useUsart2()
 {
@@ -109,9 +114,15 @@ void stepIdle(Axis& axis)
 
 void axisStop(Axis& axis)
 {
+    if (axis.tim.Instance != nullptr)
+    {
+        __HAL_TIM_DISABLE_IT(&axis.tim, TIM_IT_UPDATE);
+    }
     stepIdle(axis);
     axis.dir = 0;
     axis.level = 0;
+    axis.burst_remaining = 0;
+    axis.burst_active = false;
 }
 
 void disarmRunning()
@@ -163,6 +174,13 @@ void flushAnnounce()
         g_announceLimit[i] = false;
         char msg[20];
         std::snprintf(msg, sizeof msg, "STOP %c limit\r\n", g_axis[i].name);
+        consoleWrite(msg);
+    }
+    if (g_announceBurstDone)
+    {
+        g_announceBurstDone = false;
+        char msg[20];
+        std::snprintf(msg, sizeof msg, "DONE Z%c\r\n", g_announceBurstDir);
         consoleWrite(msg);
     }
 }
@@ -242,9 +260,7 @@ void axisRun(Axis& axis, int dir, int level)
         return;
     }
 
-    stepIdle(axis);
-    axis.dir = 0;
-    axis.level = 0;
+    axisStop(axis);
     HAL_GPIO_WritePin(axis.dirPort, axis.dirPin, dir > 0 ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_Delay(1);
     if (const char* err = blockReason(axis, dir))
@@ -265,6 +281,84 @@ void axisRun(Axis& axis, int dir, int level)
     char msg[24];
     std::snprintf(msg, sizeof msg, "OK %c%c%d\r\n", axis.name, dir > 0 ? '+' : '-', level);
     consoleWrite(msg);
+}
+
+// Exact pulse count (one TIM update = one STEP period). Used for Z spindle checks.
+void axisBurst(Axis& axis, int dir, std::uint32_t steps)
+{
+    if (dir == 0 || steps == 0 || steps > kBurstStepsMax)
+    {
+        consoleWrite("ERR cmd\r\n");
+        return;
+    }
+    if (axis.burst_active || axis.dir != 0)
+    {
+        consoleWrite("ERR busy\r\n");
+        return;
+    }
+    if (const char* err = blockReason(axis, dir))
+    {
+        consoleWrite(err);
+        return;
+    }
+
+    axisStop(axis);
+    HAL_GPIO_WritePin(axis.dirPort, axis.dirPin, dir > 0 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_Delay(1);
+    if (const char* err = blockReason(axis, dir))
+    {
+        consoleWrite(err);
+        return;
+    }
+
+    applyFrequency(axis, kBurstHz);
+    stepPinAf(axis);
+    axis.burst_remaining = steps;
+    axis.burst_active = true;
+    axis.dir = static_cast<std::int8_t>(dir);
+    axis.level = 0;
+
+    __HAL_TIM_CLEAR_FLAG(&axis.tim, TIM_FLAG_UPDATE);
+    __HAL_TIM_ENABLE_IT(&axis.tim, TIM_IT_UPDATE);
+    if (HAL_TIM_PWM_Start(&axis.tim, axis.channel) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    char msg[40];
+    std::snprintf(msg, sizeof msg, "OK %c%c %lu steps @ %u Hz\r\n", axis.name, dir > 0 ? '+' : '-',
+                  static_cast<unsigned long>(steps), static_cast<unsigned>(kBurstHz));
+    consoleWrite(msg);
+}
+
+void onTimUpdateFromIsr(Axis& axis)
+{
+    if (!axis.burst_active)
+    {
+        return;
+    }
+    if (axis.burst_remaining > 0)
+    {
+        --axis.burst_remaining;
+    }
+    if (axis.burst_remaining == 0)
+    {
+        g_announceBurstDir = (axis.dir > 0) ? '+' : '-';
+        // Stop PWM in ISR; print DONE from main loop.
+        __HAL_TIM_DISABLE_IT(&axis.tim, TIM_IT_UPDATE);
+        HAL_TIM_PWM_Stop(&axis.tim, axis.channel);
+        GPIO_InitTypeDef gpio{};
+        gpio.Pin = axis.stepPin;
+        gpio.Mode = GPIO_MODE_OUTPUT_PP;
+        gpio.Pull = GPIO_NOPULL;
+        gpio.Speed = GPIO_SPEED_FREQ_LOW;
+        HAL_GPIO_Init(axis.stepPort, &gpio);
+        HAL_GPIO_WritePin(axis.stepPort, axis.stepPin, GPIO_PIN_RESET);
+        axis.dir = 0;
+        axis.level = 0;
+        axis.burst_active = false;
+        g_announceBurstDone = true;
+    }
 }
 
 void formatVolts(char* out, std::size_t outLen, bool ok, std::uint16_t counts)
@@ -365,7 +459,12 @@ void sendStatus()
 
 void sendHelp()
 {
-    consoleWrite("HWTEST: ? | H | STOP | X+3 X-1 X0 (Y,Z gleich)\r\n");
+    consoleWrite("HWTEST: ? | H | STOP | + | - | +N | -N | X+3 X-1 X0 (Y,Z gleich)\r\n");
+    char burst[96];
+    std::snprintf(burst, sizeof burst,
+                  "+ / - = Z burst default %lu steps @ %u Hz (1 rev @ 1/4 ue-step)\r\n",
+                  static_cast<unsigned long>(kBurstStepsDefault), static_cast<unsigned>(kBurstHz));
+    consoleWrite(burst);
 
     std::uint32_t mmMilli[5];
     for (int i = 0; i < 5; ++i)
@@ -458,6 +557,47 @@ void handleLine(char* line)
             axisStop(axis);
         }
         consoleWrite("OK STOP\r\n");
+        return;
+    }
+
+    // "+" / "-" or "+N" / "-N" → exact Z step burst (default N = 800).
+    if (line[0] == '+' || line[0] == '-')
+    {
+        const int dir = (line[0] == '+') ? 1 : -1;
+        const char* cursor = line + 1;
+        while (*cursor == ' ' || *cursor == '\t')
+        {
+            ++cursor;
+        }
+        std::uint32_t steps = kBurstStepsDefault;
+        if (*cursor != '\0')
+        {
+            std::uint32_t value = 0;
+            bool any = false;
+            while (*cursor >= '0' && *cursor <= '9')
+            {
+                any = true;
+                const std::uint32_t digit = static_cast<std::uint32_t>(*cursor - '0');
+                if (value > (kBurstStepsMax - digit) / 10u)
+                {
+                    consoleWrite("ERR cmd\r\n");
+                    return;
+                }
+                value = value * 10u + digit;
+                ++cursor;
+            }
+            while (*cursor == ' ' || *cursor == '\t')
+            {
+                ++cursor;
+            }
+            if (!any || *cursor != '\0' || value == 0)
+            {
+                consoleWrite("ERR cmd\r\n");
+                return;
+            }
+            steps = value;
+        }
+        axisBurst(g_axis[2], dir, steps);
         return;
     }
 
@@ -604,6 +744,8 @@ void initAxis(Axis& axis, TIM_TypeDef* instance, std::uint32_t timerHz, GPIO_Typ
     axis.dir = 0;
     axis.level = 0;
     axis.name = name;
+    axis.burst_remaining = 0;
+    axis.burst_active = false;
 
     if (instance == TIM3)
     {
@@ -616,6 +758,8 @@ void initAxis(Axis& axis, TIM_TypeDef* instance, std::uint32_t timerHz, GPIO_Typ
     else if (instance == TIM10)
     {
         __HAL_RCC_TIM10_CLK_ENABLE();
+        HAL_NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 5, 0);
+        HAL_NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
     }
 
     axis.tim = TIM_HandleTypeDef{};
@@ -857,6 +1001,18 @@ extern "C" void USART3_IRQHandler(void)
     uartOnIrq(g_uart3);
 }
 
+extern "C" void TIM1_UP_TIM10_IRQHandler(void)
+{
+    if (__HAL_TIM_GET_FLAG(&g_axis[2].tim, TIM_FLAG_UPDATE) != RESET)
+    {
+        if (__HAL_TIM_GET_IT_SOURCE(&g_axis[2].tim, TIM_IT_UPDATE) != RESET)
+        {
+            __HAL_TIM_CLEAR_IT(&g_axis[2].tim, TIM_IT_UPDATE);
+            onTimUpdateFromIsr(g_axis[2]);
+        }
+    }
+}
+
 extern "C" void NMI_Handler(void) {}
 
 extern "C" void HardFault_Handler(void)
@@ -917,8 +1073,10 @@ int main(void)
         initUart(g_uart3, USART3, USART3_IRQn, PIN_UART_TX_PORT, PIN_UART_TX_PIN, PIN_UART_RX_PIN, GPIO_AF7_USART3);
     }
 
-    char banner[64];
-    std::snprintf(banner, sizeof banner, "HWTEST ready console=%s. H fuer Hilfe.\r\n", consoleName());
+    char banner[96];
+    std::snprintf(banner, sizeof banner,
+                  "HWTEST ready console=%s. + / - = Z %lu steps. H fuer Hilfe.\r\n", consoleName(),
+                  static_cast<unsigned long>(kBurstStepsDefault));
     consoleWrite(banner);
     sendStatus();
     g_nextStatus = HAL_GetTick() + kStatusPeriodMs;

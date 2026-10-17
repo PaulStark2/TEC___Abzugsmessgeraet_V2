@@ -19,8 +19,8 @@ public:
 
     void handleFrame(const tecomm::DecodedFrame& frame, tecomm::DecodeResult decode_result,
                      std::vector<simbridge::OutboundFrame>& out);
-    // MsgStatusReport + MsgRawAdc (same pair as simulation_protocol).
-    void appendStatusPush(std::vector<simbridge::OutboundFrame>& out);
+    // MsgStatusReport always; MsgRawAdc when include_adc (throttle on UART).
+    void appendStatusPush(std::vector<simbridge::OutboundFrame>& out, bool include_adc = true);
 
     Machine& machine();
     const Machine& machine() const;
@@ -41,4 +41,12 @@ private:
     std::uint32_t tick_count_;
     std::uint32_t force_sequence_;
     std::uint32_t heartbeat_sequence_;
+
+    // Host-side probe edge latch (Core requires pose+sequence; level alone is ignored).
+    bool prev_probe_triggered_;
+    std::uint32_t probe_trigger_sequence_;
+    bool latched_probe_pose_valid_;
+    float latched_probe_x_;
+    float latched_probe_y_;
+    float latched_probe_z_;
 };

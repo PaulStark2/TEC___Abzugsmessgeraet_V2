@@ -49,6 +49,14 @@ const GROUPS = [
         info: 'Achsbeschleunigung für Prüfpunkt-/Safe-Z-Verfahren. 0 = konstante Geschwindigkeit.',
       },
       {
+        key: 'a_manual',
+        label: 'a (Handfahrt)',
+        unit: 'mm/s²',
+        minExclusive: 0,
+        max: 500,
+        info: 'Beschleunigung nur für Handfahrt, Jog und Kalibrieren. Automatik und Homing behalten ihre Profile. Senken, wenn der Schrittmotor unter Last Schritte verliert.',
+      },
+      {
         key: 'corner_testpoints',
         label: 'corner (test points)',
         unit: 'mm',
@@ -299,12 +307,28 @@ const GROUPS = [
         info: 'Betrag des Messbereichs für alle Achsen. Default 30 N. Kalibrierpunkte und die Eingliederkraft dürfen ihn nicht überschreiten. Darüber liegt nur die Notbremse von 500 N gegen Tippfehler.',
       },
       {
-        key: 'force_hard_limit_N',
-        label: 'Harte Sicherheitsgrenze',
+        key: 'force_hard_limit_x_N',
+        label: 'Harte Sicherheitsgrenze X',
         unit: 'N',
         minExclusive: 0,
         max: 500,
-        info: 'Auslöseschwelle des Kraft-Watchdogs, Betrag. Default 30 N. Muss kleiner oder gleich dem Messbereich sein.',
+        info: 'Fault, wenn |Fx| darüber liegt. Gilt immer, auch bei ausgeschalteter Phasenprüfung. Default 30 N. Muss kleiner oder gleich dem Messbereich sein.',
+      },
+      {
+        key: 'force_hard_limit_y_N',
+        label: 'Harte Sicherheitsgrenze Y',
+        unit: 'N',
+        minExclusive: 0,
+        max: 500,
+        info: 'Fault, wenn |Fy| darüber liegt. Gilt immer, auch bei ausgeschalteter Phasenprüfung. Default 30 N. Muss kleiner oder gleich dem Messbereich sein.',
+      },
+      {
+        key: 'force_hard_limit_N',
+        label: 'Harte Sicherheitsgrenze Z',
+        unit: 'N',
+        minExclusive: 0,
+        max: 500,
+        info: 'Fault, wenn |Fz| darüber liegt. Gilt immer, auch bei ausgeschalteter Phasenprüfung. Default 30 N. Muss kleiner oder gleich dem Messbereich sein.',
       },
       {
         key: 'force_calib_points',
@@ -406,12 +430,24 @@ const GROUPS = [
     id: 'collision',
     title: 'Collision',
     fields: [
-      { key: 'collision_approach_N', label: 'collisionApproach', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Approach. Darf den eingestellten Messbereich nicht überschreiten.' },
-      { key: 'collision_retract_N', label: 'collisionRetract', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Retract. Darf den eingestellten Messbereich nicht überschreiten.' },
-      { key: 'collision_clamp_N', label: 'collisionClamp', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Clamp. Darf den eingestellten Messbereich nicht überschreiten.' },
-      { key: 'collision_unclamp_N', label: 'collisionUnclamp', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Unclamp. Darf den eingestellten Messbereich nicht überschreiten.' },
-      { key: 'collision_contact_N', label: 'collisionContact', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Contact / Eingliedern (Phase 1). Darf den eingestellten Messbereich nicht überschreiten.' },
-      { key: 'collision_measure_N', label: 'collisionMeasure', unit: 'N', minExclusive: 0, max: 500, info: 'Phasengrenze Measure / Prüfung (Phase 3). Darf den eingestellten Messbereich nicht überschreiten.' },
+      { key: 'collision_approach_x_N', label: 'Kollision Anfahrt X', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fx| in Approach darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_approach_y_N', label: 'Kollision Anfahrt Y', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fy| in Approach darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_approach_N', label: 'Kollision Anfahrt Z', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fz| in Approach darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_retract_x_N', label: 'Kollision Retract X', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fx| in Retract darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_retract_y_N', label: 'Kollision Retract Y', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fy| in Retract darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_retract_N', label: 'Kollision Retract Z', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fz| in Retract darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_clamp_x_N', label: 'Kollision Klemmen X', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fx| in Clamp darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_clamp_y_N', label: 'Kollision Klemmen Y', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fy| in Clamp darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_clamp_N', label: 'Kollision Klemmen Z', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fz| in Clamp darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_unclamp_x_N', label: 'Kollision Unclamp X', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fx| in Unclamp darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_unclamp_y_N', label: 'Kollision Unclamp Y', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fy| in Unclamp darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_unclamp_N', label: 'Kollision Unclamp Z', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fz| in Unclamp darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_contact_x_N', label: 'Kollision Kontakt X', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fx| in Contact / Phase 1 darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_contact_y_N', label: 'Kollision Kontakt Y', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fy| in Contact / Phase 1 darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_contact_N', label: 'Kollision Kontakt Z', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fz| in Contact / Phase 1 darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_measure_x_N', label: 'Kollision Messen X', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fx| in Measure / Phase 3 darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_measure_y_N', label: 'Kollision Messen Y', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fy| in Measure / Phase 3 darüber liegt. Darf den Messbereich nicht überschreiten.' },
+      { key: 'collision_measure_N', label: 'Kollision Messen Z', unit: 'N', minExclusive: 0, max: 500, info: 'Fault, wenn |Fz| in Measure / Phase 3 darüber liegt. Darf den Messbereich nicht überschreiten.' },
     ],
   },
   {
@@ -668,6 +704,7 @@ function defaultMachineConfigPayload() {
     v_unclamp: 1,
     v_homing: 5,
     a_testpoints: 0,
+    a_manual: 500,
     corner_testpoints: 0,
     a_homing: 0,
     jog_min_step_mm: 0.1,
@@ -690,14 +727,28 @@ function defaultMachineConfigPayload() {
     insertion_buffer: 1,
     insert_search_distance: 10,
     force_range_N: 30,
+    force_hard_limit_x_N: 30,
+    force_hard_limit_y_N: 30,
     force_hard_limit_N: 30,
     force_calib_points: 5,
     force_calib_step_g: 500,
+    collision_approach_x_N: 20,
+    collision_approach_y_N: 20,
     collision_approach_N: 20,
+    collision_retract_x_N: 30,
+    collision_retract_y_N: 30,
     collision_retract_N: 30,
+    collision_clamp_x_N: 20,
+    collision_clamp_y_N: 20,
     collision_clamp_N: 20,
+    collision_unclamp_x_N: 20,
+    collision_unclamp_y_N: 20,
     collision_unclamp_N: 20,
+    collision_contact_x_N: 30,
+    collision_contact_y_N: 30,
     collision_contact_N: 30,
+    collision_measure_x_N: 30,
+    collision_measure_y_N: 30,
     collision_measure_N: 30,
     spreader_extend_time_s: 0.5,
     spreader_retract_time_s: 0.5,
@@ -825,16 +876,31 @@ function validateMachineConfigPayload(cfg) {
     }
   }
   const range = cfg.force_range_N;
-  const hard = cfg.force_hard_limit_N;
-  if (!(hard > 0) || hard > range) {
-    return { ok: false, error: 'force_hard_limit_N muss größer als 0 und kleiner oder gleich dem Messbereich sein' };
+  const hardKeys = ['force_hard_limit_x_N', 'force_hard_limit_y_N', 'force_hard_limit_N'];
+  for (const key of hardKeys) {
+    const hard = cfg[key];
+    if (!(hard > 0) || hard > range) {
+      return { ok: false, error: `${key} muss größer als 0 und kleiner oder gleich dem Messbereich sein` };
+    }
   }
   const collisionKeys = [
+    'collision_approach_x_N',
+    'collision_approach_y_N',
     'collision_approach_N',
+    'collision_retract_x_N',
+    'collision_retract_y_N',
     'collision_retract_N',
+    'collision_clamp_x_N',
+    'collision_clamp_y_N',
     'collision_clamp_N',
+    'collision_unclamp_x_N',
+    'collision_unclamp_y_N',
     'collision_unclamp_N',
+    'collision_contact_x_N',
+    'collision_contact_y_N',
     'collision_contact_N',
+    'collision_measure_x_N',
+    'collision_measure_y_N',
     'collision_measure_N',
   ];
   for (const key of collisionKeys) {

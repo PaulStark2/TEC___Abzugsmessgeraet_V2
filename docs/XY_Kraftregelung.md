@@ -50,37 +50,11 @@ Der STM32-Plan trennt Messung und Regelung: ADC und Skalierung auf dem Host, die
 
 ## 2. Wann die Korrektur läuft
 
-`PointApproach` senkt Z ohne XY-Kraftkorrektur ab. Die Phase endet, wenn die Feinabfahrt steht oder — noch während der Feinabfahrt — `Fz` die Sollkraft erreicht. Danach startet `PreClampXyCorrect`.
-
-```614:622:core/ProcedureController.cpp
-    if (approach_leg_ == 3)
-    {
-        const float fz = machine_.hostInputs().force.fz;
-        const float target = machine_.testConfiguration().target_force_N;
-        if (fz >= target)
-        {
-            enterPhase(ProcedurePhase::PreClampXyCorrect);
-            return;
-        }
-    }
-```
-
-```675:689:core/ProcedureController.cpp
-    if (approach_leg_ == 2)
-    {
-        machine_.setActiveMotionProfile(motion.v_fine_testpoints, motion.a_testpoints,
-                                        motion.corner_testpoints);
-        machine_.setCollisionContext(CollisionContext::Contact);
-        commandLowerToZ(target_machine_.z);
-        approach_leg_ = 3;
-        return;
-    }
-    enterPhase(ProcedurePhase::PreClampXyCorrect);
-```
+`PointApproach` senkt Z ohne XY-Kraftkorrektur ab. Nach dem Stillstand der groben Anfahrt läuft eine Ruheprobe (`ForceTare`). Erst danach beginnt die feine Z-Abfahrt, bereits mit dem neuen Offset. Die Phase endet, wenn die Feinabfahrt steht oder — noch während der Feinabfahrt — `Fz` die Sollkraft erreicht. Dann startet `PreClampXyCorrect` direkt, ohne eine zweite Ruheprobe. Sonst wäre die Kontaktkraft vor der XY-Korrektur wieder genullt.
 
 Beim Eintritt wird die Kollisionsgrenze auf `Contact` gestellt, das Bewegungsprofil auf die Feingeschwindigkeit, der Versuchszähler genullt, die Kraftparameter aus `MachineConfig` geladen und die Korrektur eingeschaltet. Das Bewegungsziel ist die **aktuelle** Pose. Die nachfolgenden XY-Schritte werden gegen dieses Ziel begrenzt, nicht gegen einen zweiten, versteckten Prüfpunkt.
 
-```395:403:core/ProcedureController.cpp
+```403:410:core/ProcedureController.cpp
     case ProcedurePhase::PreClampXyCorrect:
         machine_.setCollisionContext(CollisionContext::Contact);
         machine_.setActiveMotionProfile(motion.v_fine_testpoints, motion.a_testpoints,
@@ -93,7 +67,7 @@ Beim Eintritt wird die Kollisionsgrenze auf `Contact` gestellt, das Bewegungspro
 
 Erfolg: beide Beträge liegen bei oder unter `xy_tolerance_N` und die Bahn steht. Dann wird die Korrektur ausgeschaltet und `Clamp` startet. Die korrigierte Pose wird erst in `InsertInitial` als `point_x_` / `point_y_` übernommen. Der spätere Einfahrhub benutzt also die korrigierte XY-Lage, regelt sie aber nicht mehr.
 
-```803:808:core/ProcedureController.cpp
+```880:885:core/ProcedureController.cpp
     if (std::fabs(fx) <= force_cfg.xy_tolerance_N && std::fabs(fy) <= force_cfg.xy_tolerance_N &&
         motionSettled())
     {
@@ -252,7 +226,9 @@ Mechanische Annahme, die der Code **nicht** prüft: Eine positive Sensorkraft so
 
 ## 4. Innerer Lageregler
 
-Der Kraftschritt ändert nur das Positionsziel. Die Achse folgt mit dem Trapezprofil von `Axis`. Bei Beschleunigung 0 (Default `a_testpoints = 0`) ist das konstante Geschwindigkeit:
+Der Kraftschritt ändert das Positionsziel **einmal pro 50 ms**, nicht einmal pro `tick`. Das ist die Taktperiode der Simulation. Der STM32 ruft `tick(0.001)` auf; der Core sammelt diese Millisekunden, bis 50 ms voll sind, und gibt dann denselben Schritt aus. `xy_max_attempts` zählt diese Schritte. Bei 1 kHz ohne diese Teilung wäre das Limit von 80 Versuchen in 80 ms erreicht.
+
+Die Hysterese wird jeden Tick aktualisiert. Der Schritt auf das Positionsziel folgt erst, wenn die 50-ms-Periode voll ist. Die Achse folgt diesem Ziel mit dem Trapezprofil von `Axis`. Bei Beschleunigung 0 (Default `a_testpoints = 0`) ist das konstante Geschwindigkeit:
 
 ```text
 Δp = v_fine · dt          wenn der Restweg größer ist
@@ -379,11 +355,12 @@ Harte Grenzen, nicht aus der GUI schreibbar (`core/SafetyLimits.hpp`):
 
 Der separate M10-Parameter `fz_safety_threshold_N` (Default `1e6` N in `ForceControlParams`) wird von `loadPreClampForceParams` nicht gesetzt. In der Prozedur ist die Fz-Prüfung inside `tickActiveMotion` damit praktisch aus. Fz, Fx und Fy begrenzt der Watchdog, der vor der Kinematik in `Machine::tick` und nach der Kinematik im Prozedur-Tick läuft.
 
-In `PreClampXyCorrect` ist der Kontext `Contact`. Default `contact_N = 30` N liegt auf der harten Grenze. Eine Querkraft unter 30 N bricht die Phase nicht als Kollision ab; sie wird korrigiert oder läuft in Zeit- bzw. Versuchsabbruch. Schwellen über dem Messbereich lehnt die Konfiguration ab. Die Notbremse dafür ist 500 N.
+In `PreClampXyCorrect` ist der Kontext `Contact`. Default `contact_N` ist 30 N je Achse und liegt auf der harten Grenze dieser Achse. Eine Querkraft unter der X- oder Y-Grenze bricht die Phase nicht als Kollision ab; sie wird korrigiert oder läuft in Zeit- bzw. Versuchsabbruch. Schwellen über dem Messbereich lehnt die Konfiguration ab. Die Notbremse dafür ist 500 N.
 
-```27:43:core/ForceWatchdog.hpp
-    const float hard_N = config.force.hard_limit_N;
-    if (std::fabs(force.fx) > hard_N || std::fabs(force.fy) > hard_N || std::fabs(force.fz) > hard_N)
+```28:44:core/ForceWatchdog.hpp
+    if (std::fabs(force.fx) > config.force.hard_limit_x_N ||
+        std::fabs(force.fy) > config.force.hard_limit_y_N ||
+        std::fabs(force.fz) > config.force.hard_limit_N)
     {
         return ForceWatchdogTrip::HardLimit;
     }
@@ -393,9 +370,8 @@ In `PreClampXyCorrect` ist der Kontext `Contact`. Default `contact_N = 30` N lie
         return ForceWatchdogTrip::None;
     }
 
-    const float threshold_N = config.collisionThreshold(context);
-    if (std::fabs(force.fx) > threshold_N || std::fabs(force.fy) > threshold_N ||
-        std::fabs(force.fz) > threshold_N)
+    const AxisForceLimit limit = config.collisionLimit(context);
+    if (std::fabs(force.fx) > limit.x || std::fabs(force.fy) > limit.y || std::fabs(force.fz) > limit.z)
     {
         return ForceWatchdogTrip::CollisionContext;
     }

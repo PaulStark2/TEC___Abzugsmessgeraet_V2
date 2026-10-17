@@ -81,11 +81,42 @@ function migrateForceRange(parsed) {
   return true;
 }
 
+/** Files that only stored one limit per phase keep that value on X, Y and Z. */
+function migratePerAxisLimits(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return false;
+  }
+  const groups = [
+    ['force_hard_limit_N', 'force_hard_limit_x_N', 'force_hard_limit_y_N'],
+    ['collision_approach_N', 'collision_approach_x_N', 'collision_approach_y_N'],
+    ['collision_retract_N', 'collision_retract_x_N', 'collision_retract_y_N'],
+    ['collision_clamp_N', 'collision_clamp_x_N', 'collision_clamp_y_N'],
+    ['collision_unclamp_N', 'collision_unclamp_x_N', 'collision_unclamp_y_N'],
+    ['collision_contact_N', 'collision_contact_x_N', 'collision_contact_y_N'],
+    ['collision_measure_N', 'collision_measure_x_N', 'collision_measure_y_N'],
+  ];
+  let changed = false;
+  for (const [zKey, xKey, yKey] of groups) {
+    if (parsed[zKey] === undefined) {
+      continue;
+    }
+    if (parsed[xKey] === undefined) {
+      parsed[xKey] = parsed[zKey];
+      changed = true;
+    }
+    if (parsed[yKey] === undefined) {
+      parsed[yKey] = parsed[zKey];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function load() {
   try {
     const raw = fs.readFileSync(FILE_PATH, 'utf8');
     const parsed = migrateLegacyKeys(JSON.parse(raw));
-    const changed = migrateForceRange(parsed);
+    const changed = migrateForceRange(parsed) || migratePerAxisLimits(parsed);
     const merged = { ...defaultMachineConfigPayload(), ...parsed };
     if (changed) {
       ensureDir();

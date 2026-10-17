@@ -11,6 +11,7 @@ add_library(core STATIC
     MachineConfig.cpp
     TestConfiguration.cpp
     ForceCalibration.cpp
+    ForceTare.cpp
 )
 
 target_include_directories(core

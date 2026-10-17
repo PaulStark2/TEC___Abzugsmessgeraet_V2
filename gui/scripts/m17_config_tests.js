@@ -18,6 +18,7 @@ function run() {
   assert.strictEqual(cfg.v_approach_testpoints, 10);
   assert.strictEqual(cfg.v_unclamp, 1);
   assert.strictEqual(cfg.a_testpoints, 0);
+  assert.strictEqual(cfg.a_manual, 500);
   assert.strictEqual(cfg.corner_testpoints, 0);
   assert.strictEqual(cfg.a_homing, 0);
   assert.strictEqual(cfg.v_search, 2);

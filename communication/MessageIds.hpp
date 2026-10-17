@@ -16,6 +16,7 @@ enum class MessageId : uint8_t
     CmdStart = 0x13,
     CmdClearFault = 0x14,
     CmdHome = 0x15,
+    CmdSetManualSpeed = 0x16, // float32 mm/s — jog / manual moveTo velocity
     CmdMoveTo = 0x20,
     CmdLoadProgram = 0x30,
     CmdSetSpreader = 0x40,
@@ -32,6 +33,7 @@ enum class MessageId : uint8_t
     CmdSetForceCalibration = 0x59,
     CmdSelectForceCurve = 0x5A,
     CmdSetCollisionGuard = 0x5B,
+    CmdForceTare = 0x5C, // empty — start a 20-sample rest tare while axes are still
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.

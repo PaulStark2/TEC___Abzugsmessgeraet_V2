@@ -12,6 +12,12 @@ FirmwareHost::FirmwareHost()
     , tick_count_(0)
     , force_sequence_(0)
     , heartbeat_sequence_(0)
+    , prev_probe_triggered_(false)
+    , probe_trigger_sequence_(0)
+    , latched_probe_pose_valid_(false)
+    , latched_probe_x_(0.0f)
+    , latched_probe_y_(0.0f)
+    , latched_probe_z_(0.0f)
 {
     MachineConfig cfg{};
     ConfigValidationError err{};
@@ -30,6 +36,36 @@ void FirmwareHost::tickOneMillisecond(HostInputs inputs, std::uint16_t adc_x, st
         inputs.force.fx = static_cast<float>(force_calib_.evaluateSensorNewton(adc_x));
         inputs.force.fy = static_cast<float>(force_calib_.evaluateSensorNewton(adc_y));
         inputs.force.fz = static_cast<float>(force_calib_.evaluateSensorNewton(adc_z));
+    }
+
+    // Core ProbeSearch/Calibration ignore probeTriggered unless the host latches
+    // machine-frame TCP + a new sequence (see HostInputs / Machine::setHostInputs).
+    // SimPlant does this; firmware must too (1 kHz poll; EXTI can refine later).
+    if (inputs.probeTriggered && !prev_probe_triggered_)
+    {
+        ++probe_trigger_sequence_;
+        if (probe_trigger_sequence_ == 0u)
+        {
+            ++probe_trigger_sequence_;
+        }
+        latched_probe_pose_valid_ = true;
+        latched_probe_x_ = machine_.x();
+        latched_probe_y_ = machine_.y();
+        latched_probe_z_ = machine_.z();
+    }
+    if (!inputs.probeTriggered)
+    {
+        latched_probe_pose_valid_ = false;
+    }
+    prev_probe_triggered_ = inputs.probeTriggered;
+
+    if (latched_probe_pose_valid_)
+    {
+        inputs.probeTriggerPoseValid = true;
+        inputs.probeTriggerSequence = probe_trigger_sequence_;
+        inputs.probeTriggerX = latched_probe_x_;
+        inputs.probeTriggerY = latched_probe_y_;
+        inputs.probeTriggerZ = latched_probe_z_;
     }
 
     machine_.setHostInputs(inputs);
@@ -59,7 +95,7 @@ void FirmwareHost::handleFrame(const tecomm::DecodedFrame& frame, tecomm::Decode
     dispatcher_.dispatch(frame, decode_result, out);
 }
 
-void FirmwareHost::appendStatusPush(std::vector<simbridge::OutboundFrame>& out)
+void FirmwareHost::appendStatusPush(std::vector<simbridge::OutboundFrame>& out, bool include_adc)
 {
     const tecomm::StatusReportPayload status =
         simbridge::buildStatusReport(machine_, executor_, dispatcher_.programPointCount());
@@ -72,6 +108,11 @@ void FirmwareHost::appendStatusPush(std::vector<simbridge::OutboundFrame>& out)
     {
         frame.length = encoded.bytes_written;
         out.push_back(frame);
+    }
+
+    if (!include_adc)
+    {
+        return;
     }
 
     simbridge::OutboundFrame adc_frame{};

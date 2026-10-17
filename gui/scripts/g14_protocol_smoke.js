@@ -173,14 +173,11 @@ async function main() {
   assert(r.body.ok, `pneumaticClose: ${r.body.error}`);
   console.log('7. Pneumatic close: PASS');
 
-  // 7) setSpeed unsupported
+  // 7) setSpeed via CmdSetManualSpeed
   r = await command({ command: 'setSpeed', speed: 20 });
-  assert(!r.body.ok, 'setSpeed should fail');
-  assert(
-    String(r.body.error || '').includes('Not supported'),
-    `setSpeed error message: ${r.body.error}`
-  );
-  console.log('8. setSpeed unsupported: PASS');
+  assert(r.body.ok, `setSpeed should succeed: ${r.body.error || ''}`);
+  assert(r.body.status && Number(r.body.status.manualSpeed) === 20, 'manualSpeed echoed');
+  console.log('8. setSpeed: PASS');
 
   // 8) Force fields present from protocol status
   status = await getStatusOnce();

@@ -168,6 +168,23 @@ struct MachineConfigPayload
     // Measuring range and watchdog hard limit [N]. Both default to 30.
     float force_range_N = 30.0f;
     float force_hard_limit_N = 30.0f;
+    // Manual jog / hold / calibration acceleration [mm/s^2]. Appended so older fields stay put.
+    float a_manual = 500.0f;
+    // Per-axis hard limit and collision limits. The unsuffixed fields above are Z.
+    float force_hard_limit_x_N = 30.0f;
+    float force_hard_limit_y_N = 30.0f;
+    float collision_approach_x_N = 20.0f;
+    float collision_approach_y_N = 20.0f;
+    float collision_retract_x_N = 30.0f;
+    float collision_retract_y_N = 30.0f;
+    float collision_clamp_x_N = 20.0f;
+    float collision_clamp_y_N = 20.0f;
+    float collision_unclamp_x_N = 20.0f;
+    float collision_unclamp_y_N = 20.0f;
+    float collision_contact_x_N = 30.0f;
+    float collision_contact_y_N = 30.0f;
+    float collision_measure_x_N = 30.0f;
+    float collision_measure_y_N = 30.0f;
 };
 
 struct TestConfigurationPayload

@@ -39,11 +39,14 @@ wait, no heap-per-sample in the control path.
 Logical process after M18:
 
 ```text
-Homing → Safe-Z → XY to point → Z down → PreClamp XY → Clamp
-  → Phase 1 (constant-speed insert until Fz) → InsertionPoint / ExtractionPoint
-  → Phase 2 (discrete Z correction) → Phase 3 (Test or Aging)
-  → Unclamp → Safe-Z → next point → Safe-End
+Homing → Safe-Z → XY to point → Z coarse → Ruheprobe → Z fine → PreClamp XY → Clamp
+  → Ruheprobe → Phase 1 (constant-speed insert until Fz) → InsertionPoint / ExtractionPoint
+  → Ruheprobe → Phase 2 (discrete Z correction)
+  → Ruheprobe → Phase 3 (Test or Aging)
+  → Ruheprobe → Unclamp → Safe-Z → next point → Safe-End
 ```
+
+Jede Ruheprobe ist eine Aufnahme, nicht zwei an derselben Stelle. Details: `docs/Force_Calibration.md`.
 
 ---
 
@@ -55,7 +58,12 @@ machine SM (`Machine`). They must not contradict after a safety event:
 | Event | Motion | Process |
 |-------|--------|---------|
 | STOP / abort / force / comm timeout / E-Stop | `Machine::stop()` → Stopped or Fault | Aborted / Fault |
+| Probe contact during ProbeApproach coarse Z | brake + `FaultReason::ProbeApproachContact` | Aborted |
 | Successful run | Stopped at Safe-Z | Completed |
+
+ProbeApproach Z descent is open-loop to `probe_center.z + approach_distance` but
+**abort on Messtaster latch** (`ProbeApproachContact`). Details:
+[`docs/M19_ProbeCalibration.md`](M19_ProbeCalibration.md).
 
 There is **no automatic resume** after a safety fault. Heartbeat returning after a
 timeout does not continue the process.

@@ -120,7 +120,9 @@ enum class ProcedurePhase : uint8_t
     NextPoint = 13,
     MoveSafeEnd = 14,
     Completed = 15,
-    Aborted = 16
+    Aborted = 16,
+    // Rest sample before the next process phase. Appended so older ordinals stay put.
+    ForceTare = 17
 };
 
 // Latched reason for MachineState::Fault (M18). None when not in Fault.
@@ -135,7 +137,9 @@ enum class FaultReason : uint8_t
     ForceStale = 6,
     CommunicationTimeout = 7,
     ProcedureAbort = 8,
-    ProbeSearchNoContact = 9
+    ProbeSearchNoContact = 9,
+    // Early Messtaster contact during ProbeApproach coarse Z (stored center too low / wrong).
+    ProbeApproachContact = 10
 };
 
 // Electrical/timing view of the spreader. There is no end-position sensor.

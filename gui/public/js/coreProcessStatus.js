@@ -20,6 +20,7 @@ const PROCEDURE_PHASES = new Set([
   'Unclamp',
   'NextPoint',
   'MoveSafeEnd',
+  'ForceTare',
 ]);
 
 const PHASE_LABELS_DE = Object.freeze({
@@ -38,6 +39,7 @@ const PHASE_LABELS_DE = Object.freeze({
   Unclamp: 'Öffnen',
   NextPoint: 'Nächster Punkt',
   MoveSafeEnd: 'Sichere Endpose',
+  ForceTare: 'Ruheprobe',
   Completed: 'Abgeschlossen',
   Aborted: 'Abgebrochen',
 });

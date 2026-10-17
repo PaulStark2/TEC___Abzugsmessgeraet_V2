@@ -15,6 +15,7 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.motion.a_testpoints = p.a_testpoints;
     cfg.motion.corner_testpoints = p.corner_testpoints;
     cfg.motion.a_homing = p.a_homing;
+    cfg.motion.a_manual = p.a_manual;
     cfg.motion.phase1_v_extract = p.phase1_v_extract;
     cfg.motion.phase1_v_insert = p.phase1_v_insert;
     cfg.motion.phase1_a = p.phase1_a;
@@ -33,11 +34,23 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.force.xy_max_correction = p.xy_max_correction;
     cfg.force.insertion_buffer = p.insertion_buffer;
     cfg.collision.approach_N = p.collision_approach_N;
+    cfg.collision.approach_x_N = p.collision_approach_x_N;
+    cfg.collision.approach_y_N = p.collision_approach_y_N;
     cfg.collision.retract_N = p.collision_retract_N;
+    cfg.collision.retract_x_N = p.collision_retract_x_N;
+    cfg.collision.retract_y_N = p.collision_retract_y_N;
     cfg.collision.clamp_N = p.collision_clamp_N;
+    cfg.collision.clamp_x_N = p.collision_clamp_x_N;
+    cfg.collision.clamp_y_N = p.collision_clamp_y_N;
     cfg.collision.unclamp_N = p.collision_unclamp_N;
+    cfg.collision.unclamp_x_N = p.collision_unclamp_x_N;
+    cfg.collision.unclamp_y_N = p.collision_unclamp_y_N;
     cfg.collision.contact_N = p.collision_contact_N;
+    cfg.collision.contact_x_N = p.collision_contact_x_N;
+    cfg.collision.contact_y_N = p.collision_contact_y_N;
     cfg.collision.measure_N = p.collision_measure_N;
+    cfg.collision.measure_x_N = p.collision_measure_x_N;
+    cfg.collision.measure_y_N = p.collision_measure_y_N;
     cfg.spreader.extend_time_s = p.spreader_extend_time_s;
     cfg.spreader.retract_time_s = p.spreader_retract_time_s;
     cfg.phase2.force_tolerance_N = p.force_tolerance_N;
@@ -75,6 +88,8 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
     cfg.force.xy_correct_timeout_s = p.xy_correct_timeout_s;
     cfg.force.range_N = p.force_range_N;
     cfg.force.hard_limit_N = p.force_hard_limit_N;
+    cfg.force.hard_limit_x_N = p.force_hard_limit_x_N;
+    cfg.force.hard_limit_y_N = p.force_hard_limit_y_N;
     return cfg;
 }
 
@@ -88,6 +103,7 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.a_testpoints = cfg.motion.a_testpoints;
     p.corner_testpoints = cfg.motion.corner_testpoints;
     p.a_homing = cfg.motion.a_homing;
+    p.a_manual = cfg.motion.a_manual;
     p.phase1_v_extract = cfg.motion.phase1_v_extract;
     p.phase1_v_insert = cfg.motion.phase1_v_insert;
     p.phase1_a = cfg.motion.phase1_a;
@@ -106,11 +122,23 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.xy_max_correction = cfg.force.xy_max_correction;
     p.insertion_buffer = cfg.force.insertion_buffer;
     p.collision_approach_N = cfg.collision.approach_N;
+    p.collision_approach_x_N = cfg.collision.approach_x_N;
+    p.collision_approach_y_N = cfg.collision.approach_y_N;
     p.collision_retract_N = cfg.collision.retract_N;
+    p.collision_retract_x_N = cfg.collision.retract_x_N;
+    p.collision_retract_y_N = cfg.collision.retract_y_N;
     p.collision_clamp_N = cfg.collision.clamp_N;
+    p.collision_clamp_x_N = cfg.collision.clamp_x_N;
+    p.collision_clamp_y_N = cfg.collision.clamp_y_N;
     p.collision_unclamp_N = cfg.collision.unclamp_N;
+    p.collision_unclamp_x_N = cfg.collision.unclamp_x_N;
+    p.collision_unclamp_y_N = cfg.collision.unclamp_y_N;
     p.collision_contact_N = cfg.collision.contact_N;
+    p.collision_contact_x_N = cfg.collision.contact_x_N;
+    p.collision_contact_y_N = cfg.collision.contact_y_N;
     p.collision_measure_N = cfg.collision.measure_N;
+    p.collision_measure_x_N = cfg.collision.measure_x_N;
+    p.collision_measure_y_N = cfg.collision.measure_y_N;
     p.spreader_extend_time_s = cfg.spreader.extend_time_s;
     p.spreader_retract_time_s = cfg.spreader.retract_time_s;
     p.force_tolerance_N = cfg.phase2.force_tolerance_N;
@@ -158,6 +186,8 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.probe_center_z = 0.0f;
     p.force_range_N = cfg.force.range_N;
     p.force_hard_limit_N = cfg.force.hard_limit_N;
+    p.force_hard_limit_x_N = cfg.force.hard_limit_x_N;
+    p.force_hard_limit_y_N = cfg.force.hard_limit_y_N;
     return p;
 }
 

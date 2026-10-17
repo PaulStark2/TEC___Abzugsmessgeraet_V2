@@ -41,7 +41,10 @@
 #error "Define TEC_HOST_UART_USART2 or TEC_HOST_UART_USART3 (CMake TEC_HOST_UART)"
 #endif
 
-// Probe NC: idle High, contact Low. Internal pull-down. Polled in Phase 2 (EXTI latch later).
+// Probe NC: idle High, contact Low. Internal pull-down.
+// HostIo sets probeTriggered level only; FirmwareHost must latch machine pose +
+// sequence on the contact edge or Core ProbeSearch ignores the event
+// (docs/M19_ProbeCalibration.md). Nucleo LD2 often shares PA5 — disconnect SB.
 #define PIN_PROBE_PORT GPIOA
 #define PIN_PROBE_PIN GPIO_PIN_5
 
@@ -94,5 +97,21 @@
 #define PIN_DEBUG_LED_PORT GPIOC
 #define PIN_DEBUG_LED_PIN GPIO_PIN_7
 
-// Open-loop conversion (57HS56, 1/4 µstep, SFU1204).
-constexpr float kStepsPerMm = 200.0f;
+// Open-loop mm↔step per axis. Default = Zielkinematik (57HS56, 1/4 µstep, SFU1204 → 200).
+// Bench Zortrax: XY belt = 20. Z screw = 200 (4 mm lead, 1/4 µstep, measured 2026-10-15).
+#ifndef TEC_STEPS_PER_MM
+#define TEC_STEPS_PER_MM 200
+#endif
+#ifndef TEC_STEPS_PER_MM_X
+#define TEC_STEPS_PER_MM_X TEC_STEPS_PER_MM
+#endif
+#ifndef TEC_STEPS_PER_MM_Y
+#define TEC_STEPS_PER_MM_Y TEC_STEPS_PER_MM
+#endif
+#ifndef TEC_STEPS_PER_MM_Z
+#define TEC_STEPS_PER_MM_Z TEC_STEPS_PER_MM
+#endif
+constexpr float kStepsPerMmX = static_cast<float>(TEC_STEPS_PER_MM_X);
+constexpr float kStepsPerMmY = static_cast<float>(TEC_STEPS_PER_MM_Y);
+constexpr float kStepsPerMmZ = static_cast<float>(TEC_STEPS_PER_MM_Z);
+constexpr float kStepsPerMm[3] = {kStepsPerMmX, kStepsPerMmY, kStepsPerMmZ};

@@ -35,6 +35,10 @@ public:
     // Set the commanded maximum velocity magnitude (must be non-negative).
     void setVelocity(float velocity);
 
+    // Drop the integrated speed. Position and target stay. Used when a hard STOP
+    // already halted the axis, so the next move must not brake a stale speed.
+    void clearCurrentVelocity();
+
     // Set the commanded acceleration magnitude (must be non-negative).
     void setAcceleration(float acceleration);
 

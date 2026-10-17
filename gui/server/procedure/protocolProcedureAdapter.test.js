@@ -167,6 +167,24 @@ function withPreparedStores(fn) {
   };
 }
 
+async function testIdlePollIgnoresStaleCoreCompleted() {
+  await withPreparedStores(async () => {
+    const client = createMockClient({
+      processState: 'Completed',
+      procedurePhase: 'Completed',
+    });
+    const adapter = createProtocolProcedureAdapter(client);
+    const status = adapter.getStatus();
+    assert.strictEqual(
+      status.state,
+      'idle',
+      'Core Completed from prior ProbeCalib must not show procedure as completed before start'
+    );
+    assert.strictEqual(status.progress.isComplete, false);
+    adapter.dispose();
+  })();
+}
+
 async function testStaleCompletedDoesNotFinishNewStart() {
   await withPreparedStores(async () => {
     const client = createMockClient({
@@ -303,6 +321,7 @@ async function testOffsetOnlyCompletionPersistsToolOnly() {
 }
 
 async function main() {
+  await testIdlePollIgnoresStaleCoreCompleted();
   await testStaleCompletedDoesNotFinishNewStart();
   await testStartWhileIdleSendsFullChain();
   await testStartAfterM19CompletedSendsFullChain();

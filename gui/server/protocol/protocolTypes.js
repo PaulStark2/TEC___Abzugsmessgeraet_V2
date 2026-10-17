@@ -14,13 +14,14 @@ const MIN_FRAME_SIZE = 8;
 const MAX_FRAME_SIZE = 520;
 
 const MOVE_TO_PAYLOAD_WIRE_SIZE = 12;
+const MANUAL_SPEED_PAYLOAD_WIRE_SIZE = 4;
 const BOOL_PAYLOAD_WIRE_SIZE = 1;
 const ACK_PAYLOAD_WIRE_SIZE = 2;
 const NACK_PAYLOAD_WIRE_SIZE = 3;
 const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 41;
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
-const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 296;
+const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 356;
 const TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE = 8;
 const PLATE_ORIGIN_PAYLOAD_WIRE_SIZE = 12;
 const FORCE_PATH_CHUNK_MAX_SAMPLES = 32;
@@ -42,6 +43,7 @@ const MessageId = Object.freeze({
   CmdStart: 0x13,
   CmdClearFault: 0x14,
   CmdHome: 0x15,
+  CmdSetManualSpeed: 0x16,
   CmdMoveTo: 0x20,
   CmdLoadProgram: 0x30,
   CmdSetSpreader: 0x40,
@@ -58,6 +60,7 @@ const MessageId = Object.freeze({
   CmdSetForceCalibration: 0x59,
   CmdSelectForceCurve: 0x5a,
   CmdSetCollisionGuard: 0x5b,
+  CmdForceTare: 0x5c,
   CmdRequestStatus: 0x7f,
   RspAck: 0x80,
   RspNack: 0x81,
@@ -95,6 +98,7 @@ const StatusFlag = Object.freeze({
   PlateOriginValid: 4,
   ProbeCenterValid: 5,
   McsValid: 6,
+  TareActive: 7,
 });
 
 const MotionState = Object.freeze({
@@ -132,6 +136,7 @@ const PROCEDURE_PHASE_NAMES = Object.freeze([
   'MoveSafeEnd',
   'Completed',
   'Aborted',
+  'ForceTare',
 ]);
 
 const FAULT_REASON_NAMES = Object.freeze([
@@ -145,6 +150,7 @@ const FAULT_REASON_NAMES = Object.freeze([
   'CommunicationTimeout',
   'ProcedureAbort',
   'ProbeSearchNoContact',
+  'ProbeApproachContact',
 ]);
 
 const SPREADER_STATE_NAMES = Object.freeze([
@@ -232,6 +238,7 @@ module.exports = {
   MIN_FRAME_SIZE,
   MAX_FRAME_SIZE,
   MOVE_TO_PAYLOAD_WIRE_SIZE,
+  MANUAL_SPEED_PAYLOAD_WIRE_SIZE,
   BOOL_PAYLOAD_WIRE_SIZE,
   ACK_PAYLOAD_WIRE_SIZE,
   NACK_PAYLOAD_WIRE_SIZE,

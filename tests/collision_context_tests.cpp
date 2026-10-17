@@ -106,5 +106,41 @@ int main()
         }
     }
 
+    // X, Y and Z fault on their own limits.
+    {
+        MachineConfig cfg{};
+        cfg.collision.approach_x_N = 10.0f;
+        cfg.collision.approach_y_N = 18.0f;
+        cfg.collision.approach_N = 16.0f;
+        cfg.force.hard_limit_x_N = 25.0f;
+        cfg.force.hard_limit_y_N = 25.0f;
+        cfg.force.hard_limit_N = 25.0f;
+        if (evaluateForceWatchdog(ForceVector{12.0f, 0.0f, 0.0f}, cfg, CollisionContext::Approach) !=
+            ForceWatchdogTrip::CollisionContext)
+        {
+            return 30;
+        }
+        if (evaluateForceWatchdog(ForceVector{0.0f, 12.0f, 0.0f}, cfg, CollisionContext::Approach) !=
+            ForceWatchdogTrip::None)
+        {
+            return 31;
+        }
+        if (evaluateForceWatchdog(ForceVector{0.0f, 0.0f, 12.0f}, cfg, CollisionContext::Approach) !=
+            ForceWatchdogTrip::None)
+        {
+            return 32;
+        }
+        if (evaluateForceWatchdog(ForceVector{26.0f, 0.0f, 0.0f}, cfg, CollisionContext::Approach, false) !=
+            ForceWatchdogTrip::HardLimit)
+        {
+            return 33;
+        }
+        if (evaluateForceWatchdog(ForceVector{0.0f, 0.0f, 20.0f}, cfg, CollisionContext::Approach, false) !=
+            ForceWatchdogTrip::None)
+        {
+            return 34;
+        }
+    }
+
     return 0;
 }

@@ -14,6 +14,10 @@ constexpr std::uint32_t kMaxHzZ = 5000u;
 constexpr std::uint32_t kMinHz = 200u;
 constexpr bool kInvertDir[3] = {false, false, false};
 
+// One-pulse PWM mode 2: the pin stays low until CCR, then high until the
+// period ends. The rising edge is the motor step. The update event only
+// falls the pin and stops the counter (OPM), so stopping there cannot emit
+// a second step. The next pulse starts only when software sets CEN again.
 struct AxisHw
 {
     GPIO_TypeDef* step_port;
@@ -39,10 +43,13 @@ constexpr AxisHw kHw[3] = {
 
 struct AxisState
 {
-    std::int32_t current = 0;
-    std::int32_t target = 0;
-    bool dir_positive = true;
-    bool pwm_running = false;
+    volatile std::int32_t current = 0;
+    volatile std::int32_t target = 0;
+    volatile bool dir_positive = true;
+    volatile bool pulse_active = false;
+    volatile bool block_rearm = false;
+    volatile bool abort = false;
+    volatile bool rise_seen = false;
     std::uint32_t last_hz = 0;
     TIM_HandleTypeDef htim{};
 };
@@ -50,10 +57,10 @@ struct AxisState
 static AxisState g_axis[3]{};
 static bool g_active = false;
 static bool g_inited = false;
-static bool g_test_tone = false;
+static volatile bool g_test_tone = false;
 static stepgen::Axis g_test_axis = stepgen::Axis::X;
 static std::uint32_t g_test_remaining_ms = 0;
-static std::uint32_t g_pulse_count = 0;
+static volatile std::uint32_t g_pulse_count = 0;
 static std::uint32_t g_tim_clk_apb1 = 90000000u;
 static std::uint32_t g_tim_clk_apb2 = 180000000u;
 
@@ -62,9 +69,27 @@ static std::uint8_t axisIndex(stepgen::Axis a)
     return static_cast<std::uint8_t>(a);
 }
 
-static std::int32_t mmToSteps(float mm)
+static int axisFromTimer(TIM_TypeDef* tim)
 {
-    return static_cast<std::int32_t>(std::lround(static_cast<double>(mm) * static_cast<double>(kStepsPerMm)));
+    if (tim == TIM4)
+    {
+        return 0;
+    }
+    if (tim == TIM3)
+    {
+        return 1;
+    }
+    if (tim == TIM10)
+    {
+        return 2;
+    }
+    return -1;
+}
+
+static std::int32_t mmToSteps(std::uint8_t axis, float mm)
+{
+    return static_cast<std::int32_t>(
+        std::lround(static_cast<double>(mm) * static_cast<double>(kStepsPerMm[axis])));
 }
 
 static void busyWaitUs(unsigned us)
@@ -108,22 +133,34 @@ static void setDir(std::uint8_t i, bool positive_machine)
     g_axis[i].dir_positive = positive_machine;
 }
 
-static void stopPwm(std::uint8_t i)
+static void setOc1Mode(TIM_TypeDef* tim, std::uint32_t mode)
 {
-    AxisState& st = g_axis[i];
-    if (!st.pwm_running)
-    {
-        return;
-    }
-    HAL_TIM_PWM_Stop(&st.htim, TIM_CHANNEL_1);
-    __HAL_TIM_DISABLE_IT(&st.htim, TIM_IT_UPDATE);
-    st.pwm_running = false;
-    st.last_hz = 0;
+    std::uint32_t ccmr = tim->CCMR1;
+    ccmr &= ~TIM_CCMR1_OC1M;
+    ccmr |= (mode & TIM_CCMR1_OC1M);
+    tim->CCMR1 = ccmr;
 }
 
-static void applyPwmHz(std::uint8_t i, std::uint32_t hz)
+// Drive STEP low and leave the timer stopped. Caller masks IRQs when racing the pulse ISR.
+static void silenceAxis(std::uint8_t i)
 {
     AxisState& st = g_axis[i];
+    TIM_TypeDef* tim = kHw[i].tim;
+    st.abort = true;
+    st.block_rearm = true;
+    tim->CR1 &= ~TIM_CR1_CEN;
+    tim->CNT = 0;
+    setOc1Mode(tim, TIM_OCMODE_FORCED_INACTIVE);
+    tim->SR = 0;
+    st.pulse_active = false;
+    st.last_hz = 0;
+    st.abort = false;
+    st.block_rearm = false;
+    setOc1Mode(tim, TIM_OCMODE_PWM2);
+}
+
+static std::uint32_t clampHz(std::uint8_t i, std::uint32_t hz)
+{
     const std::uint32_t max_hz = kHw[i].max_hz;
     if (hz < kMinHz)
     {
@@ -133,85 +170,99 @@ static void applyPwmHz(std::uint8_t i, std::uint32_t hz)
     {
         hz = max_hz;
     }
-    if (st.pwm_running && st.last_hz == hz)
-    {
-        return;
-    }
+    return hz;
+}
+
+// Start exactly one PWM2 period. Timer must be stopped. Rising edge is at CCR.
+static void armPulse(std::uint8_t i, std::uint32_t hz)
+{
+    AxisState& st = g_axis[i];
+    TIM_TypeDef* tim = kHw[i].tim;
+    hz = clampHz(i, hz);
 
     const std::uint32_t tim_clk = kHw[i].apb1_timer ? g_tim_clk_apb1 : g_tim_clk_apb2;
-    const std::uint32_t psc = (tim_clk / 1000000u);
+    const std::uint32_t psc = tim_clk / 1000000u;
     const std::uint32_t psc_reg = (psc > 0u) ? (psc - 1u) : 0u;
     const std::uint32_t tick_hz = tim_clk / (psc_reg + 1u);
     const std::uint32_t arr = (tick_hz / hz) - 1u;
-    const std::uint32_t ccr = (arr + 1u) / 2u; // 50 % duty
+    const std::uint32_t ccr = (arr + 1u) / 2u;
 
-    __HAL_TIM_SET_PRESCALER(&st.htim, psc_reg);
-    __HAL_TIM_SET_AUTORELOAD(&st.htim, arr);
-    __HAL_TIM_SET_COMPARE(&st.htim, TIM_CHANNEL_1, ccr);
+    tim->CR1 &= ~TIM_CR1_CEN;
+    tim->ARR = arr;
+    tim->CCR1 = ccr;
+    tim->CNT = 0;
+    setOc1Mode(tim, TIM_OCMODE_PWM2);
+    tim->CCER |= TIM_CCER_CC1E;
+    tim->SR = 0;
     st.last_hz = hz;
+    st.abort = false;
+    st.rise_seen = false;
+    st.pulse_active = true;
+    tim->CR1 |= TIM_CR1_OPM;
+    tim->CR1 |= TIM_CR1_CEN;
+}
 
-    if (!st.pwm_running)
+static std::uint32_t hzForError(std::uint8_t i)
+{
+    const std::int32_t err = g_axis[i].target - g_axis[i].current;
+    if (err == 0)
     {
-        __HAL_TIM_SET_COUNTER(&st.htim, 0);
-        if (HAL_TIM_PWM_Start(&st.htim, TIM_CHANNEL_1) != HAL_OK)
-        {
-            Error_Handler();
-        }
-        __HAL_TIM_ENABLE_IT(&st.htim, TIM_IT_UPDATE);
-        st.pwm_running = true;
+        return 0u;
     }
+    const std::uint32_t abs_err = static_cast<std::uint32_t>(err > 0 ? err : -err);
+    const std::uint32_t max_hz = kHw[i].max_hz;
+    if (abs_err > (max_hz / 1000u))
+    {
+        return max_hz;
+    }
+    return abs_err * 1000u;
 }
 
 static void chaseAxis(std::uint8_t i)
 {
     AxisState& st = g_axis[i];
     const std::int32_t err = st.target - st.current;
-    if (err == 0)
+    if (err != 0)
     {
-        stopPwm(i);
+        const bool positive = err > 0;
+        if (positive != st.dir_positive)
+        {
+            st.block_rearm = true;
+            if (st.pulse_active)
+            {
+                return;
+            }
+            setDir(i, positive);
+            busyWaitUs(10);
+        }
+    }
+    st.block_rearm = false;
+    if (err == 0 || st.pulse_active)
+    {
         return;
     }
-
-    const bool positive = err > 0;
-    if (positive != st.dir_positive)
-    {
-        stopPwm(i);
-        setDir(i, positive);
-        busyWaitUs(10);
-    }
-
-    std::uint32_t abs_err = static_cast<std::uint32_t>(err > 0 ? err : -err);
-    applyPwmHz(i, abs_err * 1000u);
+    armPulse(i, hzForError(i));
 }
 
-static void onTimerUpdate(TIM_TypeDef* instance)
+static void onPulseRise(TIM_TypeDef* instance)
 {
-    std::uint8_t i = 255;
-    if (instance == TIM4)
-    {
-        i = 0;
-    }
-    else if (instance == TIM3)
-    {
-        i = 1;
-    }
-    else if (instance == TIM10)
-    {
-        i = 2;
-    }
-    else
+    const int index = axisFromTimer(instance);
+    if (index < 0)
     {
         return;
     }
+    AxisState& st = g_axis[static_cast<std::uint8_t>(index)];
+    if (!st.pulse_active || st.abort || st.rise_seen)
+    {
+        return;
+    }
+    st.rise_seen = true;
 
     ++g_pulse_count;
-
-    if (g_test_tone && axisIndex(g_test_axis) == i)
+    if (g_test_tone && axisIndex(g_test_axis) == static_cast<std::uint8_t>(index))
     {
         return;
     }
-
-    AxisState& st = g_axis[i];
     if (st.current < st.target)
     {
         ++st.current;
@@ -220,18 +271,55 @@ static void onTimerUpdate(TIM_TypeDef* instance)
     {
         --st.current;
     }
+}
 
-    if (st.current == st.target)
+static void onPulseEnd(TIM_TypeDef* instance)
+{
+    const int index = axisFromTimer(instance);
+    if (index < 0)
     {
-        stopPwm(i);
+        return;
     }
+    const auto i = static_cast<std::uint8_t>(index);
+    AxisState& st = g_axis[i];
+    if (!st.pulse_active || st.abort)
+    {
+        st.pulse_active = false;
+        return;
+    }
+
+    if (g_test_tone && axisIndex(g_test_axis) == i)
+    {
+        if (g_test_tone)
+        {
+            armPulse(i, 2000u);
+        }
+        else
+        {
+            st.pulse_active = false;
+        }
+        return;
+    }
+
+    const std::int32_t err = st.target - st.current;
+    const bool positive = err > 0;
+    if (err == 0 || st.block_rearm || positive != st.dir_positive)
+    {
+        st.pulse_active = false;
+        if (err != 0 && positive != st.dir_positive)
+        {
+            st.block_rearm = true;
+        }
+        return;
+    }
+    armPulse(i, hzForError(i));
 }
 
 static bool anyLag()
 {
     for (std::uint8_t i = 0; i < 3; ++i)
     {
-        if (g_axis[i].current != g_axis[i].target || g_axis[i].pwm_running)
+        if (g_axis[i].current != g_axis[i].target || g_axis[i].pulse_active)
         {
             return true;
         }
@@ -280,19 +368,23 @@ void init()
         gpio.Alternate = hw.gpio_af;
         HAL_GPIO_Init(hw.step_port, &gpio);
 
+        const std::uint32_t tim_clk = hw.apb1_timer ? g_tim_clk_apb1 : g_tim_clk_apb2;
+        const std::uint32_t psc = tim_clk / 1000000u;
+        const std::uint32_t psc_reg = (psc > 0u) ? (psc - 1u) : 0u;
+
         g_axis[i].htim.Instance = hw.tim;
-        g_axis[i].htim.Init.Prescaler = 89;
+        g_axis[i].htim.Init.Prescaler = psc_reg;
         g_axis[i].htim.Init.CounterMode = TIM_COUNTERMODE_UP;
         g_axis[i].htim.Init.Period = 999;
         g_axis[i].htim.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-        g_axis[i].htim.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+        g_axis[i].htim.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
         if (HAL_TIM_PWM_Init(&g_axis[i].htim) != HAL_OK)
         {
             Error_Handler();
         }
 
         TIM_OC_InitTypeDef oc{};
-        oc.OCMode = TIM_OCMODE_PWM1;
+        oc.OCMode = TIM_OCMODE_PWM2;
         oc.Pulse = 500;
         oc.OCPolarity = TIM_OCPOLARITY_HIGH;
         oc.OCFastMode = TIM_OCFAST_DISABLE;
@@ -301,13 +393,33 @@ void init()
             Error_Handler();
         }
 
-        HAL_NVIC_SetPriority(hw.irqn, 3, 0);
+        // CCR and ARR are written only while the timer is stopped. Preload would
+        // keep the previous period for the pulse that is about to start.
+        hw.tim->CCMR1 &= ~TIM_CCMR1_OC1PE;
+        hw.tim->CCER &= ~TIM_CCER_CC1E;
+        hw.tim->PSC = psc_reg;
+        hw.tim->EGR = TIM_EGR_UG;
+        hw.tim->SR = 0;
+        hw.tim->CNT = 0;
+        setOc1Mode(hw.tim, TIM_OCMODE_PWM2);
+        hw.tim->CCER |= TIM_CCER_CC1E;
+        // This HAL's PWM_Init does not write OnePulseMode. OPM makes the
+        // update event stop the counter after a single period.
+        hw.tim->CR1 |= TIM_CR1_OPM;
+
+        __HAL_TIM_ENABLE_IT(&g_axis[i].htim, TIM_IT_CC1);
+        __HAL_TIM_ENABLE_IT(&g_axis[i].htim, TIM_IT_UPDATE);
+
+        // Below host UART (prio 2) so M12 TX/RX is not starved while stepping.
+        HAL_NVIC_SetPriority(hw.irqn, 4, 0);
         HAL_NVIC_EnableIRQ(hw.irqn);
         setDir(i, true);
         g_axis[i].current = 0;
         g_axis[i].target = 0;
         g_axis[i].dir_positive = true;
-        g_axis[i].pwm_running = false;
+        g_axis[i].pulse_active = false;
+        g_axis[i].block_rearm = false;
+        g_axis[i].abort = false;
         g_axis[i].last_hz = 0;
     }
 
@@ -325,9 +437,9 @@ void followRawPose(float raw_x_mm, float raw_y_mm, float raw_z_mm)
         return;
     }
 
-    g_axis[0].target = mmToSteps(raw_x_mm);
-    g_axis[1].target = mmToSteps(raw_y_mm);
-    g_axis[2].target = mmToSteps(raw_z_mm);
+    g_axis[0].target = mmToSteps(0, raw_x_mm);
+    g_axis[1].target = mmToSteps(1, raw_y_mm);
+    g_axis[2].target = mmToSteps(2, raw_z_mm);
 
     chaseAxis(0);
     chaseAxis(1);
@@ -338,24 +450,29 @@ void followRawPose(float raw_x_mm, float raw_y_mm, float raw_z_mm)
 void stopAndResync(float raw_x_mm, float raw_y_mm, float raw_z_mm)
 {
     stopTestTone();
+    __disable_irq();
     for (std::uint8_t i = 0; i < 3; ++i)
     {
-        stopPwm(i);
+        silenceAxis(i);
     }
-    g_axis[0].current = g_axis[0].target = mmToSteps(raw_x_mm);
-    g_axis[1].current = g_axis[1].target = mmToSteps(raw_y_mm);
-    g_axis[2].current = g_axis[2].target = mmToSteps(raw_z_mm);
+    g_axis[0].current = g_axis[0].target = mmToSteps(0, raw_x_mm);
+    g_axis[1].current = g_axis[1].target = mmToSteps(1, raw_y_mm);
+    g_axis[2].current = g_axis[2].target = mmToSteps(2, raw_z_mm);
     g_active = false;
+    __enable_irq();
 }
 
 void emergencyStop()
 {
-    stopTestTone();
+    g_test_tone = false;
+    g_test_remaining_ms = 0;
+    __disable_irq();
     for (std::uint8_t i = 0; i < 3; ++i)
     {
-        stopPwm(i);
+        silenceAxis(i);
     }
     g_active = false;
+    __enable_irq();
 }
 
 void startTestTone(Axis axis, std::uint32_t duration_ms)
@@ -364,24 +481,33 @@ void startTestTone(Axis axis, std::uint32_t duration_ms)
     {
         duration_ms = 3000u;
     }
-    stopTestTone();
+    const std::uint8_t i = axisIndex(axis);
+    __disable_irq();
+    g_test_tone = false;
+    silenceAxis(i);
     g_test_axis = axis;
     g_test_tone = true;
     g_test_remaining_ms = duration_ms;
     g_active = true;
-    applyPwmHz(axisIndex(axis), 2000u);
+    __enable_irq();
+    armPulse(i, 2000u);
 }
 
 void stopTestTone()
 {
-    if (!g_test_tone)
+    if (!g_test_tone && !g_axis[axisIndex(g_test_axis)].pulse_active)
     {
+        g_test_tone = false;
+        g_test_remaining_ms = 0;
         return;
     }
-    stopPwm(axisIndex(g_test_axis));
+    const std::uint8_t i = axisIndex(g_test_axis);
+    __disable_irq();
     g_test_tone = false;
     g_test_remaining_ms = 0;
+    silenceAxis(i);
     g_active = anyLag();
+    __enable_irq();
 }
 
 bool testToneActive()
@@ -442,11 +568,20 @@ extern "C" void TIM1_UP_TIM10_IRQHandler(void)
     HAL_TIM_IRQHandler(&g_axis[2].htim);
 }
 
+extern "C" void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef* htim)
+{
+    if (htim == nullptr || htim->Instance == nullptr)
+    {
+        return;
+    }
+    onPulseRise(htim->Instance);
+}
+
 extern "C" void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
     if (htim == nullptr || htim->Instance == nullptr)
     {
         return;
     }
-    onTimerUpdate(htim->Instance);
+    onPulseEnd(htim->Instance);
 }

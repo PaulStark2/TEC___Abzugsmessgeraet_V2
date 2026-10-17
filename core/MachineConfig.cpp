@@ -57,22 +57,27 @@ static bool blendProfileOk(float velocity, float acceleration, float corner_radi
 
 float MachineConfig::collisionThreshold(CollisionContext context) const
 {
+    return collisionLimit(context).z;
+}
+
+AxisForceLimit MachineConfig::collisionLimit(CollisionContext context) const
+{
     switch (context)
     {
     case CollisionContext::Approach:
-        return collision.approach_N;
+        return AxisForceLimit{collision.approach_x_N, collision.approach_y_N, collision.approach_N};
     case CollisionContext::Retract:
-        return collision.retract_N;
+        return AxisForceLimit{collision.retract_x_N, collision.retract_y_N, collision.retract_N};
     case CollisionContext::Clamp:
-        return collision.clamp_N;
+        return AxisForceLimit{collision.clamp_x_N, collision.clamp_y_N, collision.clamp_N};
     case CollisionContext::Unclamp:
-        return collision.unclamp_N;
+        return AxisForceLimit{collision.unclamp_x_N, collision.unclamp_y_N, collision.unclamp_N};
     case CollisionContext::Contact:
-        return collision.contact_N;
+        return AxisForceLimit{collision.contact_x_N, collision.contact_y_N, collision.contact_N};
     case CollisionContext::Measure:
-        return collision.measure_N;
+        return AxisForceLimit{collision.measure_x_N, collision.measure_y_N, collision.measure_N};
     default:
-        return collision.approach_N;
+        return AxisForceLimit{collision.approach_x_N, collision.approach_y_N, collision.approach_N};
     }
 }
 
@@ -108,6 +113,16 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
             config.motion.phase1_a < 0.0f || config.motion.phase2_a < 0.0f ||
             config.motion.phase3_a < 0.0f || config.probe.a_probe_transfer < 0.0f ||
             config.probe.a_probe_search < 0.0f || config.probe.a_probe_brake < 0.0f)
+        {
+            return ConfigValidationError::AccelerationNegative;
+        }
+        return ConfigValidationError::AccelerationExceedsSafety;
+    }
+
+    // Manual jog must be able to ramp. 0 would be an instant velocity step.
+    if (!(config.motion.a_manual > 0.0f) || config.motion.a_manual > SafetyLimits::kMaxAcceleration)
+    {
+        if (!(config.motion.a_manual > 0.0f))
         {
             return ConfigValidationError::AccelerationNegative;
         }
@@ -165,9 +180,12 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     }
 
     if (!forceAbsOk(config.force.range_N, SafetyLimits::kMaxFzAbs_N) ||
+        !forceAbsOk(config.force.hard_limit_x_N, config.force.range_N) ||
+        !forceAbsOk(config.force.hard_limit_y_N, config.force.range_N) ||
         !forceAbsOk(config.force.hard_limit_N, config.force.range_N))
     {
-        if (!(config.force.range_N > 0.0f) || !(config.force.hard_limit_N > 0.0f))
+        if (!(config.force.range_N > 0.0f) || !(config.force.hard_limit_x_N > 0.0f) ||
+            !(config.force.hard_limit_y_N > 0.0f) || !(config.force.hard_limit_N > 0.0f))
         {
             return ConfigValidationError::ForceNotPositive;
         }
@@ -176,17 +194,35 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
 
     if (!forceAbsOk(config.force.xy_tolerance_N, SafetyLimits::kMaxFxAbs_N) ||
         !forceAbsOk(config.phase2.force_tolerance_N, SafetyLimits::kMaxFzAbs_N) ||
+        !forceAbsOk(config.collision.approach_x_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.approach_y_N, config.force.range_N) ||
         !forceAbsOk(config.collision.approach_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.retract_x_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.retract_y_N, config.force.range_N) ||
         !forceAbsOk(config.collision.retract_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.clamp_x_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.clamp_y_N, config.force.range_N) ||
         !forceAbsOk(config.collision.clamp_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.unclamp_x_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.unclamp_y_N, config.force.range_N) ||
         !forceAbsOk(config.collision.unclamp_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.contact_x_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.contact_y_N, config.force.range_N) ||
         !forceAbsOk(config.collision.contact_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.measure_x_N, config.force.range_N) ||
+        !forceAbsOk(config.collision.measure_y_N, config.force.range_N) ||
         !forceAbsOk(config.collision.measure_N, config.force.range_N))
     {
         if (config.force.xy_tolerance_N <= 0.0f || config.phase2.force_tolerance_N <= 0.0f ||
-            config.collision.approach_N <= 0.0f || config.collision.retract_N <= 0.0f ||
-            config.collision.clamp_N <= 0.0f || config.collision.unclamp_N <= 0.0f ||
-            config.collision.contact_N <= 0.0f || config.collision.measure_N <= 0.0f)
+            config.collision.approach_x_N <= 0.0f || config.collision.approach_y_N <= 0.0f ||
+            config.collision.approach_N <= 0.0f || config.collision.retract_x_N <= 0.0f ||
+            config.collision.retract_y_N <= 0.0f || config.collision.retract_N <= 0.0f ||
+            config.collision.clamp_x_N <= 0.0f || config.collision.clamp_y_N <= 0.0f ||
+            config.collision.clamp_N <= 0.0f || config.collision.unclamp_x_N <= 0.0f ||
+            config.collision.unclamp_y_N <= 0.0f || config.collision.unclamp_N <= 0.0f ||
+            config.collision.contact_x_N <= 0.0f || config.collision.contact_y_N <= 0.0f ||
+            config.collision.contact_N <= 0.0f || config.collision.measure_x_N <= 0.0f ||
+            config.collision.measure_y_N <= 0.0f || config.collision.measure_N <= 0.0f)
         {
             return ConfigValidationError::ForceNotPositive;
         }

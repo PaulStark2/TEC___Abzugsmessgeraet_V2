@@ -118,6 +118,8 @@ export function applyStatus(status) {
   if (processLabelEl) {
     if (isCoreProcessRunning(status.processState)) {
       processLabelEl.textContent = describeRunningCoreProcess(status.procedurePhase).processLabel;
+    } else if (status.tareActive) {
+      processLabelEl.textContent = 'Ruheprobe';
     } else if (status.processState === 'Completed') {
       processLabelEl.textContent = 'Abgeschlossen';
     } else if (status.processState === 'Aborted') {

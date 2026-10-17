@@ -5,6 +5,14 @@
 namespace
 {
 
+// One XY correction step per simulation control cycle. simulation_protocol ticks
+// at 50 ms; the STM32 host ticks at 1 ms. The step size in MachineConfig is
+// defined for that 50 ms cycle, not for every tick.
+// Fifty additions of 0.001f land a few ULPs under 0.05f, so the compare has a
+// slack well below one millisecond.
+constexpr float kXyCorrectionPeriodS = 0.05f;
+constexpr float kXyCorrectionPeriodSlackS = 1.0e-4f;
+
 bool isBlockedTowardTarget(float position, float target, bool limit_min, bool limit_max)
 {
     if (limit_min && target < position - kPositionTolerance)
@@ -162,7 +170,9 @@ bool Machine::limitWarningActive() const
 
 void Machine::setHostInputs(const HostInputs& inputs)
 {
+    raw_force_ = inputs.force;
     host_inputs_ = inputs;
+    host_inputs_.force = force_tare_.apply(raw_force_);
     if (inputs.forceSampleValid &&
         (!have_force_sample_ || inputs.forceSampleSequence != last_force_sample_sequence_))
     {
@@ -378,6 +388,8 @@ void Machine::enterSafetyFault(FaultReason reason)
     pre_clamp_xy_enabled_ = false;
     x_force_correction_active_ = false;
     y_force_correction_active_ = false;
+    xy_correction_accum_s_ = 0.0f;
+    force_tare_.cancel();
     if (homing_state_ == HomingState::HomingZ || homing_state_ == HomingState::HomingX ||
         homing_state_ == HomingState::HomingY)
     {
@@ -960,7 +972,7 @@ void Machine::evaluateHostSafety(float dt)
     }
 
     last_force_watchdog_trip_ = evaluateForceWatchdog(host_inputs_.force, machine_config_, collision_context_,
-                                                     collision_phase_enabled_);
+                                                     collision_phase_enabled_ && !force_tare_.active());
     if (last_force_watchdog_trip_ == ForceWatchdogTrip::NonFinite)
     {
         enterSafetyFault(FaultReason::ForceNonFinite);
@@ -975,6 +987,11 @@ void Machine::evaluateHostSafety(float dt)
     {
         enterSafetyFault(FaultReason::ForceCollision);
         return;
+    }
+
+    if (force_tare_.tick(dt, raw_force_))
+    {
+        host_inputs_.force = force_tare_.apply(raw_force_);
     }
 
     if (force_sample_fresh_)
@@ -1075,13 +1092,13 @@ void Machine::tickActiveMotion(float dt)
     {
         x_force_correction_active_ = false;
         y_force_correction_active_ = false;
+        xy_correction_accum_s_ = 0.0f;
     }
 
     if (force_phase_ == ForceControlPhase::SlowZApproach)
     {
         const float fx = host_inputs_.force.fx;
         const float absFx = std::fabs(fx);
-
         if (!x_force_correction_active_ && absFx >= force_params_.fx_threshold_on_N)
         {
             x_force_correction_active_ = true;
@@ -1091,36 +1108,8 @@ void Machine::tickActiveMotion(float dt)
             x_force_correction_active_ = false;
         }
 
-        if (x_force_correction_active_)
-        {
-            ++xy_correction_steps_;
-            if (fx > 0.0f)
-            {
-                stored_target_x_ -= force_params_.dx_step_units;
-            }
-            else if (fx < 0.0f)
-            {
-                stored_target_x_ += force_params_.dx_step_units;
-            }
-
-            const float min_x = commanded_target_x_ - force_params_.max_x_correction_units;
-            const float max_x = commanded_target_x_ + force_params_.max_x_correction_units;
-            if (stored_target_x_ < min_x)
-            {
-                stored_target_x_ = min_x;
-            }
-            if (stored_target_x_ > max_x)
-            {
-                stored_target_x_ = max_x;
-            }
-        }
-    }
-
-    if (force_phase_ == ForceControlPhase::SlowZApproach)
-    {
         const float fy = host_inputs_.force.fy;
         const float absFy = std::fabs(fy);
-
         if (!y_force_correction_active_ && absFy >= force_params_.fy_threshold_on_N)
         {
             y_force_correction_active_ = true;
@@ -1129,29 +1118,74 @@ void Machine::tickActiveMotion(float dt)
         {
             y_force_correction_active_ = false;
         }
+    }
 
-        if (y_force_correction_active_)
+    bool xy_step_due = false;
+    if (x_force_correction_active_ || y_force_correction_active_)
+    {
+        xy_correction_accum_s_ += dt;
+        if (xy_correction_accum_s_ + kXyCorrectionPeriodSlackS >= kXyCorrectionPeriodS)
         {
-            ++xy_correction_steps_;
-            if (fy > 0.0f)
+            xy_correction_accum_s_ -= kXyCorrectionPeriodS;
+            if (xy_correction_accum_s_ < 0.0f || xy_correction_accum_s_ >= kXyCorrectionPeriodS)
             {
-                stored_target_y_ -= force_params_.dy_step_units;
+                xy_correction_accum_s_ = 0.0f;
             }
-            else if (fy < 0.0f)
-            {
-                stored_target_y_ += force_params_.dy_step_units;
-            }
+            xy_step_due = true;
+        }
+    }
+    else
+    {
+        xy_correction_accum_s_ = 0.0f;
+    }
 
-            const float min_y = commanded_target_y_ - force_params_.max_y_correction_units;
-            const float max_y = commanded_target_y_ + force_params_.max_y_correction_units;
-            if (stored_target_y_ < min_y)
-            {
-                stored_target_y_ = min_y;
-            }
-            if (stored_target_y_ > max_y)
-            {
-                stored_target_y_ = max_y;
-            }
+    if (xy_step_due && x_force_correction_active_)
+    {
+        const float fx = host_inputs_.force.fx;
+        ++xy_correction_steps_;
+        if (fx > 0.0f)
+        {
+            stored_target_x_ -= force_params_.dx_step_units;
+        }
+        else if (fx < 0.0f)
+        {
+            stored_target_x_ += force_params_.dx_step_units;
+        }
+
+        const float min_x = commanded_target_x_ - force_params_.max_x_correction_units;
+        const float max_x = commanded_target_x_ + force_params_.max_x_correction_units;
+        if (stored_target_x_ < min_x)
+        {
+            stored_target_x_ = min_x;
+        }
+        if (stored_target_x_ > max_x)
+        {
+            stored_target_x_ = max_x;
+        }
+    }
+
+    if (xy_step_due && y_force_correction_active_)
+    {
+        const float fy = host_inputs_.force.fy;
+        ++xy_correction_steps_;
+        if (fy > 0.0f)
+        {
+            stored_target_y_ -= force_params_.dy_step_units;
+        }
+        else if (fy < 0.0f)
+        {
+            stored_target_y_ += force_params_.dy_step_units;
+        }
+
+        const float min_y = commanded_target_y_ - force_params_.max_y_correction_units;
+        const float max_y = commanded_target_y_ + force_params_.max_y_correction_units;
+        if (stored_target_y_ < min_y)
+        {
+            stored_target_y_ = min_y;
+        }
+        if (stored_target_y_ > max_y)
+        {
+            stored_target_y_ = max_y;
         }
     }
 
@@ -1204,6 +1238,7 @@ void Machine::stop()
     motion_planner_.setMotionParams(default_max_velocity_, default_acceleration_,
                                     default_corner_radius_);
     applySpreaderSafeState();
+    force_tare_.cancel();
 
     if (machine_state_ == MachineState::Homing)
     {
@@ -1382,7 +1417,15 @@ const CalibrationSet& Machine::calibrationSet() const
 void Machine::setActiveVelocity(float velocity)
 {
     const float v = (velocity > 0.0f) ? velocity : machine_config_.motion.v_approach_testpoints;
-    setActiveMotionProfile(v, default_acceleration_, default_corner_radius_);
+    default_max_velocity_ = v;
+    useManualMotionProfile();
+}
+
+void Machine::useManualMotionProfile()
+{
+    const float v = (default_max_velocity_ > 0.0f) ? default_max_velocity_
+                                                    : machine_config_.motion.v_approach_testpoints;
+    setActiveMotionProfile(v, machine_config_.motion.a_manual, 0.0f);
 }
 
 void Machine::setActiveMotionProfile(float velocity, float acceleration, float corner_radius)
@@ -1417,11 +1460,13 @@ void Machine::setPreClampXyEnabled(bool enabled)
     if (enabled)
     {
         xy_correction_steps_ = 0;
+        xy_correction_accum_s_ = 0.0f;
     }
     else
     {
         x_force_correction_active_ = false;
         y_force_correction_active_ = false;
+        xy_correction_accum_s_ = 0.0f;
         force_params_.fx_threshold_on_N = 100000.0f;
         force_params_.fx_threshold_off_N = 50000.0f;
         force_params_.fy_threshold_on_N = 100000.0f;
@@ -1469,6 +1514,21 @@ void Machine::setCollisionPhaseEnabled(bool enabled)
 bool Machine::collisionPhaseEnabled() const
 {
     return collision_phase_enabled_;
+}
+
+bool Machine::beginForceTare()
+{
+    return force_tare_.begin(raw_force_);
+}
+
+void Machine::cancelForceTare()
+{
+    force_tare_.cancel();
+}
+
+bool Machine::forceTareActive() const
+{
+    return force_tare_.active();
 }
 
 ForceWatchdogTrip Machine::lastForceWatchdogTrip() const

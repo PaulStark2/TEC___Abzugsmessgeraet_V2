@@ -4,6 +4,14 @@
 #include "TestPoint.hpp"
 #include "Types.hpp"
 
+// Per-axis force magnitude [N]. Compared with |Fx|, |Fy| and |Fz|.
+struct AxisForceLimit
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
 // Writable machine parameters (GUI Parametereinstellungen / M12 CmdSetMachineConfig).
 // Must be validated against SafetyLimits; invalid incoming values are rejected.
 struct MachineConfig
@@ -16,6 +24,9 @@ struct MachineConfig
         float v_unclamp = 1.0f;
         float a_testpoints = 0.0f; // 0 = constant velocity
         float corner_testpoints = 0.0f; // 0 = full stop between axes
+        // Jog, hold, and calibration moves only. Must be > 0 so a direction
+        // change can stop without a long coast. Automatic profiles stay on a_testpoints.
+        float a_manual = 500.0f;
 
         float v_homing = 5.0f;
         float a_homing = 0.0f; // seek/retract only; endstop hit is hard stop
@@ -52,18 +63,34 @@ struct MachineConfig
         // Measuring range magnitude for every axis [N]. Calibration points and
         // target_force_N must stay inside it. Collision thresholds may rise up to it.
         float range_N = 30.0f;
-        // Watchdog hard-limit magnitude [N]. Must be <= range_N.
+        // Watchdog hard-limit magnitude [N], per axis. Must be <= range_N.
+        // hard_limit_N is Z. The name stays so older parameter files keep their Z limit.
         float hard_limit_N = 30.0f;
+        float hard_limit_x_N = 30.0f;
+        float hard_limit_y_N = 30.0f;
     };
 
     struct Collision
     {
+        // Z limits keep the historical names. X and Y default to the same value.
         float approach_N = 20.0f;
+        float approach_x_N = 20.0f;
+        float approach_y_N = 20.0f;
         float retract_N = 30.0f;
+        float retract_x_N = 30.0f;
+        float retract_y_N = 30.0f;
         float clamp_N = 20.0f;
+        float clamp_x_N = 20.0f;
+        float clamp_y_N = 20.0f;
         float unclamp_N = 20.0f;
+        float unclamp_x_N = 20.0f;
+        float unclamp_y_N = 20.0f;
         float contact_N = 30.0f;
+        float contact_x_N = 30.0f;
+        float contact_y_N = 30.0f;
         float measure_N = 30.0f;
+        float measure_x_N = 30.0f;
+        float measure_y_N = 30.0f;
     };
 
     struct Spreader
@@ -132,8 +159,10 @@ struct MachineConfig
     Calibration calibration{};
     Communication communication{};
 
-    // Threshold for a collision context (raw, no clamp).
+    // Z threshold for a collision context (raw, no clamp).
     float collisionThreshold(CollisionContext context) const;
+    // Per-axis threshold for the same context. x/y/z are |Fx|/|Fy|/|Fz|.
+    AxisForceLimit collisionLimit(CollisionContext context) const;
 };
 
 // Return Ok if every field is inside SafetyLimits; otherwise the first error found.

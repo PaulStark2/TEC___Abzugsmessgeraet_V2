@@ -177,13 +177,37 @@ ProbeCalibration übernimmt Messpunkt
 
 `HostInputs.probeTriggerX/Y/Z` are machine-frame, the same as `Machine::x/y/z()`.
 SimPlant remains a raw-world sensor; the conversion belongs at the plant→Core
-boundary. A later STM32 adapter must present machine-frame trigger poses (or
-apply the same `raw − referenceOffset` step).
+boundary. The STM32 firmware adapter must present machine-frame trigger poses
+(already machine-frame on the open-loop MCU path — no plant `referenceOffset`).
+
+### Host contract (Sim **and** STM32) — mandatory
+
+`Machine::setHostInputs` latches a probe event **only** when the host supplies
+all of:
+
+| Field | Role |
+|-------|------|
+| `probeTriggered` | Digital level (true = contact) |
+| `probeTriggerPoseValid` | Host latched TCP at the edge |
+| `probeTriggerX/Y/Z` | Finite machine-frame pose |
+| `probeTriggerSequence` | Non-zero, new value each contact edge |
+
+**Level alone is ignored.** If `probeTriggerPoseValid` is false, Core never sets
+`probe_trigger_latched_`; `ProbeSearch` / Einmessprotokoll will not react even
+when the GPIO is Low. This is intentional production hardening (no silent
+fallback to “current TCP on a later tick”).
+
+**Simulation:** `SimPlant` latches raw TCP + sequence; `SimProtocolBridge`
+converts to machine frame (`raw − referenceOffset`).
+
+**STM32 firmware:** `HostIo` reads NC GPIO only (`PA5`, idle High / contact Low,
+`probeTriggered = !pinHigh`). `FirmwareHost` on the contact **rising edge**
+(false→true of `probeTriggered`) stores `machine_.x/y/z()`, bumps sequence, and
+keeps pose valid while contact remains. Poll rate = Core tick **1 kHz** (not
+EXTI yet; EXTI can refine latency later without changing this contract).
 
 `consumeProbeTrigger()` consumes a host-provided event. It does not create the
-trigger. A later TCP move must not overwrite the latched pose. Sequence numbers
-prepare the STM32 event counter. SimPlant latches on the discrete tick of the
-rising edge; sub-tick interpolation is not required.
+trigger. A later TCP move must not overwrite the latched pose.
 
 Do **not** call `Machine::stop()` merely to end a search; that would abort the
 whole process (M18).
@@ -241,6 +265,13 @@ ProbeApproach (Safe-Z → XY to probe_center → approach Z = hub P)
 ```
 
 Safe-Z from M18 is mandatory for XY traverse. No 3D point-to-point.
+
+**ProbeApproach coarse Z** is open-loop to `probe_center.z + approach_distance`
+at `v_approach_probe`. During that descent the Core **monitors the Messtaster
+latch**. Early contact → hard brake, `FaultReason::ProbeApproachContact`, process
+**Aborted** (typical cause: stored `probe_center.z` too low vs. the real disc).
+Stale triggers are consumed before the descent starts. Manual Install skips
+ProbeApproach entirely (operator jogs the hub).
 
 ## SimPlant
 
@@ -307,15 +338,41 @@ and `gui/server/protocol/m12Codec.js`.
 |------|--------|
 | No trigger / timeout | Error, no new calib |
 | STOP / Abort / Fault during search | Abort, previous calib kept |
+| Probe contact during ProbeApproach coarse Z | `ProbeApproachContact`, abort, previous calib kept |
 | Degenerate 4-point fit / unrealistic radius | Error, previous calib kept |
 | Invalid config (NaN/Inf, out of SafetyLimits) | Rejected, previous config kept |
 | Repeat successful calib | Offset replaced; no drift |
+
+### Bench: kinematics OK, GUI says „abgebrochen“
+
+Often the five search legs **look** fine, then `finishAndStore()` rejects the
+result. Core expects the four XY contact TCPs to lie on a circle of radius
+
+`expected = measuring_head_diameter/2 + tool_diameter/2` (default **5.25 mm**)
+
+within `max(25 %, 1 mm)`. Otherwise → `ProbeCalibration` Error → process
+**Aborted**, previous `probeCenter` kept — **no** `FaultReason` in that case.
+
+Also check status-bar **Fault**:
+
+| Fault | Meaning |
+|-------|---------|
+| `CommunicationTimeout` | Comm-watchdog during Automatic (`CmdNop` gap > `heartbeat_timeout_s`, default 0.3 s) |
+| `ProbeSearchNoContact` | A search timed out without a latched contact |
+| `ProbeApproachContact` | Messtaster fired during ProbeApproach coarse Z (hub target below real disc) |
+| other / None + Aborted | Usually circle-fit / geometry reject at the end |
+
+Checklist: start hub **above disc center**; real disc/tool diameters in
+MachineConfig; XY `steps/mm` correct (Zortrax bench ≠ 200); open-loop lag can
+shrink the measured radius vs. expected.
 
 ## Known limits / later STM32
 
 - No Rx/Ry, no second probe, no automatic spreader-state sensing.
 - Disc stem/base in the 3D view are visual only.
-- STM32 must detect the digital trigger within a few milliseconds and latch
-  the current commanded/encoder pose into `HostInputs` with a sequence bump.
-- Hardware validation is a separate release. **This milestone does not
-  authorize hardware use.**
+- STM32: **1 kHz poll latch** in `FirmwareHost` (see Host contract above).
+  Optional later: EXTI edge for sub-millisecond pose stamp; same `HostInputs`
+  fields.
+- Nucleo note: `PA5` is also LD2 on many F446 Nucleo boards — disconnect the
+  LED solder bridge if the probe shares PA5, or the High level is loaded down.
+- Hardware bench validation continues under M19.x firmware bring-up.

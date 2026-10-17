@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-// Open-loop XYZ step PWM: TIM4/PB6, TIM3/PB4, TIM10/PB8 (50 % duty).
-// 200 steps/mm. High DIR = +machine. Z capped at 5 kHz (25 mm/s).
+// Open-loop XYZ one-pulse PWM2: TIM4/PB6, TIM3/PB4, TIM10/PB8.
+// One software step is one rising edge. High DIR = +machine. Z capped at 5 kHz.
 namespace stepgen
 {
 

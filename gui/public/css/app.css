@@ -522,6 +522,10 @@ button:disabled {
   border-color: var(--accent);
 }
 
+.progress-card--error {
+  border-color: #e57373;
+}
+
 .procedure-complete-banner {
   margin: 0 0 0.5rem;
   padding: 0.45rem 0.65rem;
@@ -529,6 +533,16 @@ button:disabled {
   background: rgba(76, 175, 80, 0.15);
   color: #81c784;
   font-weight: 600;
+}
+
+.progress-card--error .procedure-complete-banner {
+  background: rgba(229, 115, 115, 0.15);
+  color: #ef9a9a;
+}
+
+.progress-card:not(.progress-card--complete):not(.progress-card--error) .procedure-complete-banner {
+  background: rgba(120, 144, 156, 0.15);
+  color: #b0bec5;
 }
 
 .gui-display-state {

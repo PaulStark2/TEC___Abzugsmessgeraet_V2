@@ -35,6 +35,14 @@ export function mountManualControls(container, opts) {
     </div>
 
     <div class="manual-section">
+      <h3>Kraft</h3>
+      <p class="placeholder-note">Ruheprobe im Stillstand: 20 Messwerte im Abstand von 100 ms, Dauer etwa 1,9 s. Die Achsen dürfen dabei nicht fahren.</p>
+      <div class="control-actions">
+        <button type="button" id="btn-force-tare">Ruheprobe</button>
+      </div>
+    </div>
+
+    <div class="manual-section">
       <h3>Spreizer</h3>
       <div class="control-actions">
         <button type="button" id="btn-pneumatic-open">Spreizer öffnen</button>
@@ -57,6 +65,7 @@ export function mountManualControls(container, opts) {
   const applySpeedBtn = container.querySelector('#btn-apply-speed');
   const openBtn = container.querySelector('#btn-pneumatic-open');
   const closeBtn = container.querySelector('#btn-pneumatic-close');
+  const tareBtn = container.querySelector('#btn-force-tare');
   const homeBtn = container.querySelector('#btn-home');
   const feedbackEl = container.querySelector('#manual-feedback');
 
@@ -71,6 +80,15 @@ export function mountManualControls(container, opts) {
     try {
       await sendCommand({ command: 'setSpeed', speed });
       setFeedback(`Geschwindigkeit auf ${speed} gesetzt`, false);
+    } catch (err) {
+      setFeedback(err.message || String(err), true);
+    }
+  };
+
+  const onTare = async () => {
+    try {
+      await sendCommand({ command: 'forceTare' });
+      setFeedback('Ruheprobe gestartet (etwa 1,9 s). Achsen nicht verfahren.', false);
     } catch (err) {
       setFeedback(err.message || String(err), true);
     }
@@ -116,6 +134,7 @@ export function mountManualControls(container, opts) {
   };
 
   applySpeedBtn.addEventListener('click', onApplySpeed);
+  tareBtn.addEventListener('click', onTare);
   openBtn.addEventListener('click', onOpen);
   closeBtn.addEventListener('click', onClose);
   homeBtn.addEventListener('click', onHome);
@@ -123,6 +142,7 @@ export function mountManualControls(container, opts) {
 
   return () => {
     applySpeedBtn.removeEventListener('click', onApplySpeed);
+    tareBtn.removeEventListener('click', onTare);
     openBtn.removeEventListener('click', onOpen);
     closeBtn.removeEventListener('click', onClose);
     homeBtn.removeEventListener('click', onHome);

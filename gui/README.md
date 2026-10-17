@@ -229,7 +229,7 @@ npm run proof:offline
 
 **Unterschiede zu Mock:**
 
-- `setSpeed` → `{ ok: false, error: 'Not supported over protocol' }` (kein M12-Command)
+- `setSpeed` → `CmdSetManualSpeed` (0x16, float mm/s) → Core `setActiveVelocity` (1…50)
 - `home` → Workaround `moveTo(0,0,0)` (kein echtes Homing in Core)
 - `jog` → `moveTo` relativ zur aktuellen Pose
 - Kein `tick()` in Node.js — Host treibt die Simulation
@@ -344,7 +344,10 @@ Tests: `node scripts/g3_smoke.js`, `node scripts/g4_nav_smoke.js` (Server muss l
 
 HMI-Nacharbeit vor der nächsten größeren Prüfprozedur-Arbeit. Keine Controller-Logik im Browser.
 
-- Fortschritt: `pointsDone / totalPoints` (letzter Punkt `n/n`), Abschlussbanner „Prozedur abgeschlossen“
+- Fortschritt: Phase (Core `procedurePhase`), `pointsDone / totalPoints`, Live-Pose/Kraft/Spreizer;
+  Banner unterscheidet Bereit / läuft / letzte Prozedur abgeschlossen / abgebrochen.
+  Rest-`Completed` vom Core (z. B. nach Messtaster-Install) markiert die Prüfprozedur **nicht**
+  vor dem Start als fertig. Early Messtaster in ProbeApproach → Fault `ProbeApproachContact`.
 - `DELETE /api/program/current`: Programm + Auswahl löschen; 409 bei laufender/pausierter Prozedur; Ergebnisse bleiben
 - „Prüfstellen laden“: alle Punkte, scrollbare Tabelle (`Geladene Prüfstellen (N)`)
 - Fault-Banner + Button `Fault zurücksetzen` (`clearFault` / `CmdClearFault`); Mock simuliert keinen erfolgreichen Reset

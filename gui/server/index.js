@@ -275,6 +275,12 @@ async function handleCommand(body) {
       }
       result = await machineClient.fixtureClose();
       break;
+    case 'forceTare':
+      if (typeof machineClient.forceTare !== 'function') {
+        return { ok: false, error: 'forceTare not supported by client' };
+      }
+      result = await machineClient.forceTare();
+      break;
     case 'home':
       if (typeof machineClient.home !== 'function') {
         return { ok: false, error: 'home not supported by client' };

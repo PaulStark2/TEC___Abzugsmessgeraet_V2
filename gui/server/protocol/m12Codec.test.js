@@ -296,6 +296,10 @@ function testMachineConfigRoundtrip() {
   assert.ok(nearEqual(decoded.v_approach_probe, 10));
   assert.ok(nearEqual(decoded.force_range_N, 30));
   assert.ok(nearEqual(decoded.force_hard_limit_N, 30));
+  assert.ok(nearEqual(decoded.force_hard_limit_x_N, 30));
+  assert.ok(nearEqual(decoded.force_hard_limit_y_N, 30));
+  assert.ok(nearEqual(decoded.collision_approach_x_N, 20));
+  assert.ok(nearEqual(decoded.a_manual, 500));
   assert.strictEqual(decoded.max_optimization_iterations, 10);
   const frame = encodeFrame(MessageId.CmdSetMachineConfig, payload);
   assert.ok(frame.ok);

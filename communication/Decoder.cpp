@@ -25,6 +25,7 @@ bool isEmptyCommandId(uint8_t message_id)
     case MessageId::CmdStartProbeCalib:
     case MessageId::CmdDefineMcs:
     case MessageId::CmdInvalidateHoming:
+    case MessageId::CmdForceTare:
     case MessageId::CmdRequestStatus:
         return true;
     default:
@@ -50,6 +51,7 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdStart:
     case MessageId::CmdClearFault:
     case MessageId::CmdHome:
+    case MessageId::CmdSetManualSpeed:
     case MessageId::CmdMoveTo:
     case MessageId::CmdLoadProgram:
     case MessageId::CmdSetSpreader:
@@ -66,6 +68,7 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdSetForceCalibration:
     case MessageId::CmdSelectForceCurve:
     case MessageId::CmdSetCollisionGuard:
+    case MessageId::CmdForceTare:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
     case MessageId::MsgRawAdc:
@@ -108,6 +111,21 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
             if (!readF32LE(payload, payload_length, offset, x, true) ||
                 !readF32LE(payload, payload_length, offset, y, true) ||
                 !readF32LE(payload, payload_length, offset, z, true) || offset != payload_length)
+            {
+                return false;
+            }
+        }
+        return true;
+
+    case MessageId::CmdSetManualSpeed:
+        if (payload_length != kManualSpeedPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            std::size_t offset = 0;
+            float speed = 0.0f;
+            if (!readF32LE(payload, payload_length, offset, speed, true) || offset != payload_length)
             {
                 return false;
             }

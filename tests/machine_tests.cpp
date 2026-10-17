@@ -301,6 +301,42 @@ int main()
         (void)out; // suppress unused warning
     }
 
+    // STOP drops the latched speed. The next opposite move must not coast onward.
+    {
+        Machine m;
+        MachineConfig cfg = m.machineConfig();
+        cfg.motion.a_testpoints = 5.0f;
+        cfg.motion.a_manual = 500.0f;
+        ConfigValidationError err{};
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 30;
+        }
+        m.setActiveMotionProfile(40.0f, 5.0f, 0.0f);
+        m.moveTo(200.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 40; ++i)
+        {
+            tickWithForce(m, 0.05f);
+        }
+        const float x_stop = m.x();
+        if (!(x_stop > 1.0f))
+        {
+            return 31;
+        }
+        m.stop();
+        m.setActiveMotionProfile(40.0f, 5.0f, 0.0f);
+        m.moveTo(0.0f, 0.0f, 0.0f);
+        tickWithForce(m, 0.02f);
+        if (m.x() > x_stop + 1e-4f)
+        {
+            return 32; // stale +X speed was braked by driving further +X
+        }
+        if (!(m.x() < x_stop))
+        {
+            return 33; // reverse must start immediately
+        }
+    }
+
     // All Machine tests passed.
     return 0;
 }

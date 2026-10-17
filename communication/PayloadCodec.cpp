@@ -34,6 +34,8 @@ std::size_t encodedPayloadSize(uint8_t message_id, const LoadProgramPayload* loa
     {
     case MessageId::CmdMoveTo:
         return kMoveToPayloadWireSize;
+    case MessageId::CmdSetManualSpeed:
+        return kManualSpeedPayloadWireSize;
     case MessageId::CmdSetSpreader:
     case MessageId::CmdSetFixture:
         return kBoolPayloadWireSize;
@@ -472,7 +474,22 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.probe_center_y) &&
         writeF32LE(out, capacity, offset, payload.probe_center_z) &&
         writeF32LE(out, capacity, offset, payload.force_range_N) &&
-        writeF32LE(out, capacity, offset, payload.force_hard_limit_N);
+        writeF32LE(out, capacity, offset, payload.force_hard_limit_N) &&
+        writeF32LE(out, capacity, offset, payload.a_manual) &&
+        writeF32LE(out, capacity, offset, payload.force_hard_limit_x_N) &&
+        writeF32LE(out, capacity, offset, payload.force_hard_limit_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_approach_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_approach_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_retract_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_retract_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_clamp_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_clamp_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_unclamp_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_unclamp_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_contact_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_contact_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_measure_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_measure_y_N);
     return ok && offset == kMachineConfigPayloadWireSize;
 }
 
@@ -554,7 +571,22 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.probe_center_y, true) &&
         readF32LE(data, length, offset, out.probe_center_z, true) &&
         readF32LE(data, length, offset, out.force_range_N, true) &&
-        readF32LE(data, length, offset, out.force_hard_limit_N, true);
+        readF32LE(data, length, offset, out.force_hard_limit_N, true) &&
+        readF32LE(data, length, offset, out.a_manual, true) &&
+        readF32LE(data, length, offset, out.force_hard_limit_x_N, true) &&
+        readF32LE(data, length, offset, out.force_hard_limit_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_approach_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_approach_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_retract_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_retract_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_clamp_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_clamp_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_unclamp_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_unclamp_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_contact_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_contact_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_measure_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_measure_y_N, true);
     return ok && offset == length && length == kMachineConfigPayloadWireSize;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CalibrationSet.hpp"
+#include "ForceTare.hpp"
 #include "ForceWatchdog.hpp"
 #include "HostInputs.hpp" // host input container
 #include "HostOutputs.hpp" // host output container
@@ -167,6 +168,8 @@ public:
     const CalibrationSet& calibrationSet() const;
 
     void setActiveVelocity(float velocity);
+    // Keep the current manual speed and install a_manual with no corner blend.
+    void useManualMotionProfile();
     // Apply velocity / acceleration / corner blend for the next motion segment.
     void setActiveMotionProfile(float velocity, float acceleration, float corner_radius);
     // Decelerate to a hold at the current pose (probe trigger); does not Process-STOP.
@@ -183,6 +186,10 @@ public:
     void setCollisionPhaseEnabled(bool enabled);
     bool collisionPhaseEnabled() const;
     ForceWatchdogTrip lastForceWatchdogTrip() const;
+    // Start a rest tare from the latest raw force. False while one is already running.
+    bool beginForceTare();
+    void cancelForceTare();
+    bool forceTareActive() const;
     FaultReason lastFaultReason() const;
     // Latch a process abort reason without entering MachineState::Fault.
     void latchFaultReason(FaultReason reason);
@@ -264,6 +271,7 @@ private:
     SpreaderTimer spreader_timer_;
     bool pre_clamp_xy_enabled_;
     unsigned xy_correction_steps_;
+    float xy_correction_accum_s_ = 0.0f;
     FaultReason last_fault_reason_;
     float force_sample_age_s_;
     std::uint32_t last_force_sample_sequence_;
@@ -281,7 +289,9 @@ private:
     std::uint32_t last_probe_trigger_sequence_;
 
     // Host I/O containers (no evaluation). // placeholders
-    HostInputs host_inputs_; // last inputs
+    HostInputs host_inputs_; // last inputs, force already tared
+    ForceVector raw_force_{0.0f, 0.0f, 0.0f};
+    ForceTare force_tare_;
     HostOutputs host_outputs_; // produced outputs
 
     HostInputUpdateCallback host_input_update_callback_{};

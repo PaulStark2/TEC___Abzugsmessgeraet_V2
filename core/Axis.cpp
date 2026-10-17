@@ -73,6 +73,11 @@ void Axis::setVelocity(float velocity)
     max_velocity_ = (velocity < 0.0f) ? 0.0f : velocity;
 }
 
+void Axis::clearCurrentVelocity()
+{
+    current_velocity_ = 0.0f;
+}
+
 // Store a new non-negative acceleration command.
 void Axis::setAcceleration(float acceleration)
 {

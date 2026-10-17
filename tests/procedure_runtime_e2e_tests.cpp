@@ -160,6 +160,7 @@ static int testPointApproachCoarseThenFine()
         // fine→PreClamp leaves TCP at target.z (phase already advanced).
         if (!saw_coarse && nearEqual(machine.z(), coarse_z, 0.2f) &&
             (ex.procedurePhase() == ProcedurePhase::PointApproach ||
+             ex.procedurePhase() == ProcedurePhase::ForceTare ||
              ex.procedurePhase() == ProcedurePhase::PreClampXyCorrect))
         {
             saw_coarse = true;

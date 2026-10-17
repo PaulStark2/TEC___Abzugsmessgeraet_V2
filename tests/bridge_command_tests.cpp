@@ -751,5 +751,78 @@ int main()
         }
     }
 
+    // CmdMoveTo installs a_manual even after a slow automatic profile.
+    {
+        Machine m;
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+        MachineConfig cfg = m.machineConfig();
+        cfg.motion.a_testpoints = 1.0f;
+        cfg.motion.a_manual = 500.0f;
+        ConfigValidationError err{};
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 96;
+        }
+        m.setActiveMotionProfile(40.0f, cfg.motion.a_testpoints, 0.0f);
+
+        tecomm::MoveToPayload move{80.0f, 0.0f, 0.0f};
+        uint8_t payload[tecomm::kMoveToPayloadWireSize];
+        tecomm::encodeMoveToPayload(move, payload, sizeof(payload));
+        std::vector<simbridge::OutboundFrame> out;
+        tecomm::DecodedFrame frame =
+            makeDecoded(static_cast<uint8_t>(tecomm::MessageId::CmdMoveTo), payload, sizeof(payload));
+        d.dispatch(frame, tecomm::DecodeResult::Ok, out);
+        tickWithForce(m, 0.05f);
+        // a=500 mm/s² from rest over 50 ms → 0.625 mm. a=1 mm/s² → 0.00125 mm.
+        if (!(m.x() > 0.4f) || m.x() > 1.0f)
+        {
+            return 97;
+        }
+
+        // A following procedure profile is not stuck on a_manual.
+        m.stop();
+        m.setActiveMotionProfile(40.0f, cfg.motion.a_testpoints, 0.0f);
+        const float x_before = m.x();
+        m.moveTo(x_before + 80.0f, 0.0f, 0.0f);
+        tickWithForce(m, 0.05f);
+        if (m.x() - x_before > 0.05f)
+        {
+            return 98; // automatic moveTo must keep a_testpoints
+        }
+    }
+
+    // CmdForceTare only while axes are still and no procedure is running.
+    {
+        Machine m;
+        TestExecutor ex(m);
+        simbridge::CommandDispatcher d(m, ex);
+        std::vector<simbridge::OutboundFrame> out;
+        if (!dispatchEmpty(d, tecomm::MessageId::CmdForceTare, tecomm::AckResultCode::Ok, out))
+        {
+            return 100;
+        }
+        if (!m.forceTareActive())
+        {
+            return 101;
+        }
+        out.clear();
+        if (!dispatchEmpty(d, tecomm::MessageId::CmdForceTare, tecomm::AckResultCode::InvalidState, out))
+        {
+            return 102;
+        }
+        m.stop();
+        m.moveTo(10.0f, 0.0f, 0.0f);
+        out.clear();
+        if (m.motionState() != MotionState::Moving)
+        {
+            return 103;
+        }
+        if (!dispatchEmpty(d, tecomm::MessageId::CmdForceTare, tecomm::AckResultCode::InvalidState, out))
+        {
+            return 104;
+        }
+    }
+
     return 0;
 }

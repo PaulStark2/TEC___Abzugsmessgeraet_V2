@@ -97,6 +97,17 @@ target_link_libraries(forcecontrol_tests
 
 add_test(NAME forcecontrol_tests COMMAND forcecontrol_tests)
 
+add_executable(force_tare_tests
+    force_tare_tests.cpp
+)
+
+target_link_libraries(force_tare_tests
+    PRIVATE
+    core
+)
+
+add_test(NAME force_tare_tests COMMAND force_tare_tests)
+
 # CMake definition for Core unit tests of safety (Milestone 11).
 add_executable(safety_tests
     safety_tests.cpp

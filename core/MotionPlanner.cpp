@@ -186,6 +186,9 @@ void MotionPlanner::stopMotion()
     axis_x_.setVelocity(0.0f);
     axis_y_.setVelocity(0.0f);
     axis_z_.setVelocity(0.0f);
+    axis_x_.clearCurrentVelocity();
+    axis_y_.clearCurrentVelocity();
+    axis_z_.clearCurrentVelocity();
 }
 
 MotionState MotionPlanner::motionState() const

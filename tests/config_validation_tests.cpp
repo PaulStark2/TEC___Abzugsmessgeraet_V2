@@ -368,5 +368,25 @@ int main()
         }
     }
 
+    // Manual acceleration must be strictly positive and inside the safety cap.
+    {
+        MachineConfig cfg{};
+        cfg.motion.a_manual = 0.0f;
+        if (validateMachineConfig(cfg) != ConfigValidationError::AccelerationNegative)
+        {
+            return 58;
+        }
+        cfg.motion.a_manual = SafetyLimits::kMaxAcceleration + 1.0f;
+        if (validateMachineConfig(cfg) != ConfigValidationError::AccelerationExceedsSafety)
+        {
+            return 59;
+        }
+        cfg.motion.a_manual = 500.0f;
+        if (validateMachineConfig(cfg) != ConfigValidationError::Ok)
+        {
+            return 60;
+        }
+    }
+
     return 0;
 }
