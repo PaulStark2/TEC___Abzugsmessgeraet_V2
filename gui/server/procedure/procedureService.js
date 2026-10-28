@@ -82,6 +82,12 @@ function createProcedureService(machineClient, options = {}) {
     async stop() {
       return adapter.stop();
     },
+    async applyProcedureDecision(action) {
+      if (typeof adapter.applyProcedureDecision !== 'function') {
+        return { ok: false, error: 'applyProcedureDecision not supported by adapter' };
+      }
+      return adapter.applyProcedureDecision(action);
+    },
     dispose() {
       adapter.dispose();
     },

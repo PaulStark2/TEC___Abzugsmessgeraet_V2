@@ -18,6 +18,12 @@ static bool nearEqual(float a, float b, float eps = 1e-2f)
 static void seedPlate(Machine& machine)
 {
     machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+    // Insertion geometry is checked against an immediate Fz step. The low-pass
+    // approaches a constant asymptotically and would move the contact point.
+    MachineConfig cfg = machine.machineConfig();
+    cfg.force.force_filter = 0.0f;
+    ConfigValidationError err = ConfigValidationError::Ok;
+    machine.trySetMachineConfig(cfg, err);
     homeMachine(machine);
     (void)calibrateProbeCenter(machine);
 }
@@ -34,14 +40,14 @@ static HostInputs makeInputs(float fx = 0.0f, float fy = 0.0f, float fz = 0.0f)
 static bool runUntilPhase(TestExecutor& ex, Machine& machine, ProcedurePhase phase, int max_steps,
                           float fz = 0.0f)
 {
-    machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+    machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
     for (int i = 0; i < max_steps && ex.processState() == ProcessState::Running; ++i)
     {
         if (ex.procedurePhase() == phase)
         {
             return true;
         }
-        machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+        machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
         ex.tick(0.05f);
     }
     return ex.procedurePhase() == phase;
@@ -98,16 +104,19 @@ static bool runInsertInitialAndGetInsertionZ(float probe_search_distance, float 
 
     for (int i = 0; i < 4000 && ex.processState() == ProcessState::Running; ++i)
     {
-        const float insert_end = ex.procedure().forceFreeZ() - insert_search_distance;
-        const float fz =
-            (ex.procedure().cycleLeg() >= 2 && machine.z() <= insert_end + 0.8f) ? fz_target : 0.0f;
-        machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+        // SeatToForce: apply target near the programmed dive end so search distance matters.
+        const float dive_end = z_entry - insert_search_distance;
+        const float fz = (machine.z() <= dive_end + 0.8f) ? fz_target : 0.0f;
+        machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
         ex.tick(0.05f);
-        if (ex.procedurePhase() == ProcedurePhase::OptimizeInsert ||
-            ex.procedurePhase() == ProcedurePhase::TestOrAge)
+        if (ex.procedurePhase() == ProcedurePhase::Unclamp ||
+            ex.procedurePhase() == ProcedurePhase::ForceTare)
         {
             insertion_z_out = ex.procedure().insertionZ();
-            return true;
+            if (insertion_z_out < z_entry - 0.05f)
+            {
+                return true;
+            }
         }
     }
 
@@ -149,14 +158,14 @@ int main()
         for (int i = 0; i < 400 && ex.processState() == ProcessState::Running; ++i)
         {
             const float fz = (machine.z() < -0.4f) ? 5.0f : 0.0f;
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
             if (!captured && fz >= 5.0f)
             {
                 captured_z = machine.z();
                 captured = true;
             }
             ex.tick(0.05f);
-            if (ex.procedurePhase() == ProcedurePhase::OptimizeInsert ||
+            if (ex.procedurePhase() == ProcedurePhase::Unclamp ||
                 ex.procedurePhase() == ProcedurePhase::TestOrAge)
             {
                 break;
@@ -171,16 +180,15 @@ int main()
         {
             return 5;
         }
-        const float buffer = machine.machineConfig().force.insertion_buffer;
-        // Phase 1: ExtractionPoint = force-free Z + insertion_buffer (set when leaving
-        // force-free / starting insert). When already free at approach Z, that is
-        // approach_z + buffer — not necessarily insertion_z + buffer.
-        if (!(ex.procedure().extractionZ() > ex.procedure().insertionZ() - 1.0e-3f))
+        // SeatToForce latches insertion_z at contact; extraction/kraftfrei is TestOrAge.
+        if (!(ex.procedure().insertionZ() < captured_z + 0.5f))
         {
             return 6;
         }
-        if (ex.procedure().extractionZ() + 1.0e-3f < captured_z + buffer - 0.5f &&
-            !nearEqual(ex.procedure().extractionZ(), ex.procedure().insertionZ() + buffer, 0.25f))
+        if (ex.procedurePhase() != ProcedurePhase::Unclamp &&
+            ex.procedurePhase() != ProcedurePhase::ForceTare &&
+            ex.procedurePhase() != ProcedurePhase::PreClampXyCorrect &&
+            ex.procedurePhase() != ProcedurePhase::TestOrAge)
         {
             return 6;
         }
@@ -256,7 +264,7 @@ int main()
         }
         for (int i = 0; i < 800 && ex.processState() == ProcessState::Running; ++i)
         {
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, 0.0f)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, 0.0f)));
             ex.tick(0.05f);
         }
         if (ex.processState() != ProcessState::Aborted)
@@ -296,7 +304,7 @@ int main()
         }
         for (int i = 0; i < 400 && ex.processState() == ProcessState::Running; ++i)
         {
-            HostInputs in = withPlantInputs(machine, makeInputs(0.0f, 0.0f, 0.0f));
+            HostInputs in = withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, 0.0f));
             if (ex.procedure().cycleLeg() >= 2)
             {
                 in.limitZMin = true;
@@ -318,15 +326,13 @@ int main()
         }
     }
 
-    // Phase 2: too-low force moves insertion deeper (Z-); max attempts abort.
+    // Phase-2 OptimizeInsert removed — stub until new sequence tests are rewritten.
+    if (false)
     {
         Machine machine;
         seedPlate(machine);
         MachineConfig mcfg = machine.machineConfig();
-        mcfg.phase2.max_optimization_iterations = 2u;
-        mcfg.phase2.z_correction_gain = 0.2f;
-        mcfg.phase2.z_correction_max = 1.0f;
-        mcfg.phase2.force_tolerance_N = 0.2f;
+        mcfg.force.force_tolerance_N = 0.2f;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
         {
@@ -355,7 +361,7 @@ int main()
         for (int i = 0; i < 800 && ex.processState() == ProcessState::Running; ++i)
         {
             const float fz = (ex.procedurePhase() == ProcedurePhase::InsertInitial) ? 10.0f : 0.0f;
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
         }
         if (ex.processState() != ProcessState::Aborted)
@@ -368,7 +374,8 @@ int main()
         }
     }
 
-    // Phase 2 success: force within tolerance proceeds to TestOrAge.
+    // Phase-2 OptimizeInsert removed — stub.
+    if (false)
     {
         Machine machine;
         seedPlate(machine);
@@ -394,7 +401,7 @@ int main()
         for (int i = 0; i < 4000 && ex.processState() == ProcessState::Running; ++i)
         {
             float fz = 0.0f;
-            if (ex.procedurePhase() == ProcedurePhase::OptimizeInsert)
+            if (ex.procedurePhase() == ProcedurePhase::Unclamp)
             {
                 fz = 8.0f;
             }
@@ -402,7 +409,7 @@ int main()
             {
                 fz = 8.0f;
             }
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
             if (ex.procedurePhase() == ProcedurePhase::TestOrAge)
             {
@@ -453,7 +460,7 @@ int main()
         {
             return 20;
         }
-        machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, 50.1f)));
+        machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, 50.1f)));
         ex.tick(0.05f);
         if (machine.machineState() != MachineState::Fault)
         {
@@ -559,11 +566,11 @@ int main()
                 break;
             }
             const ProcedurePhase ph = ex.procedurePhase();
-            const float fz = (ph == ProcedurePhase::InsertInitial || ph == ProcedurePhase::OptimizeInsert ||
+            const float fz = (ph == ProcedurePhase::InsertInitial || ph == ProcedurePhase::Unclamp ||
                               ph == ProcedurePhase::TestOrAge)
                                  ? 0.1f
                                  : 0.0f;
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
         }
         if (!reached && ex.procedurePhase() != ProcedurePhase::TestOrAge)
@@ -581,13 +588,14 @@ int main()
         }
     }
 
-    // Hybrid Phase 1: preload force at Clamp→InsertInitial so unload leg runs first.
+    // Hybrid Phase-1 extract-first removed — InsertInitial is SeatToForce only.
+    if (false)
     {
         Machine machine;
         seedPlate(machine);
         MachineConfig mcfg = machine.machineConfig();
         mcfg.force.insert_search_distance = 8.0f;
-        mcfg.phase2.force_tolerance_N = 0.5f;
+        mcfg.force.force_tolerance_N = 0.5f;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
         {
@@ -646,9 +654,9 @@ int main()
                     fz = 0.0f;
                 }
             }
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
-            if (ex.procedurePhase() == ProcedurePhase::OptimizeInsert ||
+            if (ex.procedurePhase() == ProcedurePhase::Unclamp ||
                 ex.procedurePhase() == ProcedurePhase::TestOrAge)
             {
                 reached_optimize = true;
@@ -690,7 +698,7 @@ int main()
         bool saw_standoff = false;
         for (int i = 0; i < 4000 && ex.processState() == ProcessState::Running; ++i)
         {
-            machine.setHostInputs(withPlantInputs(machine, makeInputs()));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs()));
             ex.tick(0.05f);
             if (ex.procedurePhase() == ProcedurePhase::PointApproach)
             {
@@ -713,19 +721,13 @@ int main()
         }
     }
 
-    // Phase 2: F too high at insertion → insertion_z moves +Z (less insert); then accept.
+    // Phase-2 OptimizeInsert removed — stub.
+    if (false)
     {
         Machine machine;
         seedPlate(machine);
         MachineConfig mcfg = machine.machineConfig();
-        mcfg.phase2.force_tolerance_N = 0.5f;
-        mcfg.phase2.z_correction_gain = 0.5f;
-        mcfg.phase2.z_correction_max = 2.0f;
-        mcfg.phase2.minimum_correction = 0.01f;
-        mcfg.phase2.max_optimization_iterations = 8u;
-        mcfg.phase2.max_sign_flips = 8u;
-        mcfg.motion.phase2_v_insert = 5.0f;
-        mcfg.motion.phase2_v_extract = 3.0f;
+        mcfg.force.force_tolerance_N = 0.5f;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
         {
@@ -774,14 +776,14 @@ int main()
                     fz = 0.0f;
                 }
             }
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
-            if (ex.procedurePhase() == ProcedurePhase::OptimizeInsert)
+            if (ex.procedurePhase() == ProcedurePhase::Unclamp)
             {
                 break;
             }
         }
-        if (ex.procedurePhase() != ProcedurePhase::OptimizeInsert)
+        if (ex.procedurePhase() != ProcedurePhase::Unclamp)
         {
             return 64;
         }
@@ -797,11 +799,11 @@ int main()
         {
             if (ex.procedurePhase() == ProcedurePhase::ForceTare)
             {
-                machine.setHostInputs(withPlantInputs(machine, makeInputs()));
+                machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs()));
                 ex.tick(0.05f);
                 continue;
             }
-            if (ex.procedurePhase() != ProcedurePhase::OptimizeInsert)
+            if (ex.procedurePhase() != ProcedurePhase::Unclamp)
             {
                 break;
             }
@@ -839,7 +841,7 @@ int main()
                 }
             }
             z_prev = machine.z();
-            machine.setHostInputs(withPlantInputs(machine, makeInputs(0.0f, 0.0f, fz)));
+            machine.setHostInputs(withProcedurePlant(ex, machine, makeInputs(0.0f, 0.0f, fz)));
             ex.tick(0.05f);
         }
 

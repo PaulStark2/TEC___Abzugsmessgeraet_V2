@@ -17,7 +17,18 @@ extern "C" void Error_Handler(void);
 static ADC_HandleTypeDef g_adc{};
 static DMA_HandleTypeDef g_dma_adc{};
 static UART_HandleTypeDef g_uart{};
-static volatile std::uint16_t g_adc_dma[3] = {2048u, 2048u, 2048u};
+
+// Continuous scan of Fx, Fy, Fz. At 22.5 MHz ADC clock a scan is about 13 µs,
+// so one millisecond holds on the order of 80 scans. The ring is long enough
+// that a single 1 ms tick cannot lap it. consumeMillisecondMean sums only the
+// scans written since the previous call.
+static constexpr std::size_t kAdcChannels = 3;
+static constexpr std::size_t kAdcScans = 256;
+static volatile std::uint16_t g_adc_dma[kAdcScans * kAdcChannels]{};
+static std::uint32_t g_adc_last_pos = 0;
+static float g_ms_mean_x = 2048.0f;
+static float g_ms_mean_y = 2048.0f;
+static float g_ms_mean_z = 2048.0f;
 
 static constexpr std::size_t kRxCap = 1024;
 static volatile std::uint8_t g_rx_buf[kRxCap]{};
@@ -222,6 +233,20 @@ static void driveSpreaderPair(bool open)
     g_spreader_pins_latched = true;
 }
 
+// Next-write index of the circular DMA buffer, aligned to an XYZ triplet.
+static std::uint32_t adcWritePosAligned()
+{
+    const std::uint32_t items = static_cast<std::uint32_t>(kAdcScans * kAdcChannels);
+    std::uint32_t remaining = g_dma_adc.Instance->NDTR;
+    if (remaining > items)
+    {
+        remaining = items;
+    }
+    std::uint32_t pos = (items - remaining) % items;
+    pos -= pos % static_cast<std::uint32_t>(kAdcChannels);
+    return pos;
+}
+
 static void Adc_Init()
 {
     __HAL_RCC_ADC1_CLK_ENABLE();
@@ -281,13 +306,19 @@ static void Adc_Init()
         Error_Handler();
     }
 
-    if (HAL_ADC_Start_DMA(&g_adc, reinterpret_cast<std::uint32_t*>(const_cast<std::uint16_t*>(g_adc_dma)), 3) !=
-        HAL_OK)
+    for (std::size_t i = 0; i < kAdcScans * kAdcChannels; ++i)
+    {
+        g_adc_dma[i] = 2048u;
+    }
+    if (HAL_ADC_Start_DMA(&g_adc, reinterpret_cast<std::uint32_t*>(const_cast<std::uint16_t*>(g_adc_dma)),
+                          static_cast<std::uint32_t>(kAdcScans * kAdcChannels)) != HAL_OK)
     {
         Error_Handler();
     }
     __HAL_DMA_DISABLE_IT(&g_dma_adc, DMA_IT_TC | DMA_IT_HT | DMA_IT_TE);
     HAL_Delay(2);
+    // The two milliseconds of startup conversions are not one control tick.
+    g_adc_last_pos = adcWritePosAligned();
 }
 
 static void Uart_Init()
@@ -335,13 +366,12 @@ HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_se
                         float force_range_N)
 {
     HostInputs inputs{};
-    std::uint16_t fx = 0;
-    std::uint16_t fy = 0;
-    std::uint16_t fz = 0;
-    latestAdc(fx, fy, fz);
-    inputs.force.fx = adc_scaler::countsToNewton(fx, force_range_N);
-    inputs.force.fy = adc_scaler::countsToNewton(fy, force_range_N);
-    inputs.force.fz = adc_scaler::countsToNewton(fz, force_range_N);
+    // The millisecond integral is consumed once, in the control tick. This
+    // provisional scale uses the previous mean and is replaced by the 100 ms
+    // window before the sample is published.
+    inputs.force.fx = adc_scaler::countsToNewton(g_ms_mean_x, force_range_N);
+    inputs.force.fy = adc_scaler::countsToNewton(g_ms_mean_y, force_range_N);
+    inputs.force.fz = adc_scaler::countsToNewton(g_ms_mean_z, force_range_N);
     inputs.forceSampleValid = true;
     inputs.forceSampleSequence = force_sequence;
     inputs.hostHeartbeatValid = true;
@@ -379,11 +409,48 @@ void applyOutputs(const Machine& machine)
                       outputs.fixtureExtend ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
-void latestAdc(std::uint16_t& fx, std::uint16_t& fy, std::uint16_t& fz)
+void consumeMillisecondMean(float& x, float& y, float& z)
 {
-    fx = g_adc_dma[0];
-    fy = g_adc_dma[1];
-    fz = g_adc_dma[2];
+    const std::uint32_t items = static_cast<std::uint32_t>(kAdcScans * kAdcChannels);
+    const std::uint32_t pos = adcWritePosAligned();
+    const std::uint32_t last = g_adc_last_pos;
+    const std::uint32_t dist = (pos + items - last) % items;
+    std::uint32_t scans = dist / static_cast<std::uint32_t>(kAdcChannels);
+    if (scans == 0)
+    {
+        x = g_ms_mean_x;
+        y = g_ms_mean_y;
+        z = g_ms_mean_z;
+        return;
+    }
+    if (scans > kAdcScans)
+    {
+        scans = static_cast<std::uint32_t>(kAdcScans);
+    }
+
+    std::uint32_t sum_x = 0;
+    std::uint32_t sum_y = 0;
+    std::uint32_t sum_z = 0;
+    std::uint32_t index = last;
+    for (std::uint32_t n = 0; n < scans; ++n)
+    {
+        sum_x += g_adc_dma[index];
+        sum_y += g_adc_dma[index + 1u];
+        sum_z += g_adc_dma[index + 2u];
+        index += static_cast<std::uint32_t>(kAdcChannels);
+        if (index >= items)
+        {
+            index = 0;
+        }
+    }
+    g_adc_last_pos = pos;
+    const float inv = 1.0f / static_cast<float>(scans);
+    g_ms_mean_x = static_cast<float>(sum_x) * inv;
+    g_ms_mean_y = static_cast<float>(sum_y) * inv;
+    g_ms_mean_z = static_cast<float>(sum_z) * inv;
+    x = g_ms_mean_x;
+    y = g_ms_mean_y;
+    z = g_ms_mean_z;
 }
 
 void serviceProtocol(FirmwareHost& host)
@@ -414,11 +481,12 @@ void serviceProtocol(FirmwareHost& host)
     {
         g_status_divider = 0;
         const bool include_adc = (++g_adc_push_div % 5u) == 0u;
-        const std::size_t need = include_adc ? 96u : 64u;
+        // Status (~49 B) + up to a few ForcePath chunks (~277 B max each) + optional ADC.
+        const std::size_t need = include_adc ? 400u : 350u;
         if (g_pending_tx_n == 0u && txFreeSpace() >= need)
         {
             std::vector<simbridge::OutboundFrame> status;
-            status.reserve(2);
+            status.reserve(10);
             host.appendStatusPush(status, include_adc);
             for (const simbridge::OutboundFrame& frame : status)
             {

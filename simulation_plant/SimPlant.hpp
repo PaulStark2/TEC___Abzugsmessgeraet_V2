@@ -81,7 +81,7 @@ public:
     bool eStop() const;
 
     // Simulation-only tensile stiffness [N/mm]. Applied by SimProtocolBridge during
-    // InsertInitial / OptimizeInsert / TestOrAge (not by sample() itself).
+    // InsertInitial / ProbeRemeasure / TestOrAge (not by sample() itself).
     void setForceStiffnessNPerMm(float k);
     float forceStiffnessNPerMm() const;
 

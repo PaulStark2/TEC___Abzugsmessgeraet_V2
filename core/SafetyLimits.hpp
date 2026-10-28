@@ -24,16 +24,18 @@ struct SafetyLimits
     // Insertion / extraction buffer along Z [machine units].
     static constexpr float kMaxInsertionBuffer = 50.0f;
 
-    // Phase-2 Z correction magnitude [machine units].
-    static constexpr float kMaxZCorrection = 20.0f;
-
     // PreClamp max XY correction from the approach target [machine units].
     static constexpr float kMaxXyCorrection = 50.0f;
 
-    // Phase-2 / phase-3 iteration cap.
+    // Coordinate / Z-envelope / tool-offset anomaly tolerances [machine units].
+    static constexpr float kMaxCoordTolerance = 50.0f;
+    static constexpr float kMaxZLimitMm = 100.0f;
+    static constexpr float kMaxToolOffsetChangeTolerance = 50.0f;
+
+    // Test / aging iteration cap (and other iteration-style bounds).
     static constexpr unsigned kMaxIterations = 10000u;
 
-    // Force-filter coefficient: 0 = passthrough, (0,1] = exponential smoothing.
+    // Force-filter time constant [s]: 0 = passthrough, (0, 1] = tau of the low-pass.
     static constexpr float kMaxForceFilter = 1.0f;
 
     // Max allowed safe_z_buffer [mm] (clearance above highest program or probe Z).
@@ -48,8 +50,15 @@ struct SafetyLimits
     static constexpr float kMaxHeartbeatTimeout_s = 2.0f;
 
     static constexpr float kMinPreClampTimeout_s = 0.05f;
-    static constexpr float kMaxPreClampTimeout_s = 30.0f;
+    // Whole PreClamp chord search including optional refine passes [s].
+    static constexpr float kMaxPreClampTimeout_s = 600.0f;
     static constexpr unsigned kMaxPreClampAttempts = 10000u;
+    // Extra full two-chord passes after the first PreClamp search.
+    static constexpr unsigned kMaxBoreRefinePasses = 5u;
+
+    // Plate bore floor search envelope [machine units].
+    static constexpr float kMaxPlateZSearch = 50.0f;
+    static constexpr float kMaxPlateZLift = 20.0f;
 
     // Probe disc / tool geometry and search envelope [machine units].
     static constexpr float kMaxProbeDiameter = 50.0f;

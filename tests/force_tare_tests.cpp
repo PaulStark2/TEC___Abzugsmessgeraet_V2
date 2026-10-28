@@ -23,6 +23,16 @@ static void feed(Machine& machine, float fx, float fy, float fz)
     machine.setHostInputs(withFreshForce(in));
 }
 
+// This file checks the tare offset, not the low-pass. tau = 0 publishes u - offset
+// on the same write.
+static void passthroughForce(Machine& machine)
+{
+    MachineConfig cfg = machine.machineConfig();
+    cfg.force.force_filter = 0.0f;
+    ConfigValidationError err = ConfigValidationError::Ok;
+    machine.trySetMachineConfig(cfg, err);
+}
+
 static bool finishConstant(ForceTare& tare, float dt, const ForceVector& sample, int ticks)
 {
     for (int i = 0; i < ticks; ++i)
@@ -117,6 +127,7 @@ int main()
     // Stop drops an unfinished capture and keeps the previous offset.
     {
         Machine machine;
+        passthroughForce(machine);
         feed(machine, 0.0f, 0.0f, 2.0f);
         if (!machine.beginForceTare())
         {
@@ -151,6 +162,7 @@ int main()
     // Context threshold is off only while capturing. The hard limit stays.
     {
         Machine machine;
+        passthroughForce(machine);
         machine.setCollisionContext(CollisionContext::Approach);
         feed(machine, 0.0f, 0.0f, 25.0f);
         if (!machine.beginForceTare())
@@ -188,6 +200,7 @@ int main()
     // PreClamp follows the fine descent directly so the XY correction still sees contact force.
     {
         Machine machine;
+        passthroughForce(machine);
         machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
         if (!homeMachine(machine) || !calibrateProbeCenter(machine))
         {
@@ -231,11 +244,11 @@ int main()
             {
                 fz = 8.0f;
             }
-            else if (ph == ProcedurePhase::OptimizeInsert || ph == ProcedurePhase::TestOrAge)
+            else if (ph == ProcedurePhase::Unclamp || ph == ProcedurePhase::TestOrAge)
             {
                 fz = 8.0f;
             }
-            machine.setHostInputs(withPlantInputs(machine, HostInputs{ForceVector{0.0f, 0.0f, fz}}));
+            machine.setHostInputs(withProcedurePlant(ex, machine, HostInputs{ForceVector{0.0f, 0.0f, fz}}));
             ex.tick(0.05f);
             const ProcedurePhase next = ex.procedurePhase();
             if (next == ProcedurePhase::PreClampXyCorrect)
@@ -248,7 +261,7 @@ int main()
                 saw_fine_after_tare = saw_fine_after_tare || next == ProcedurePhase::PointApproach;
                 tare_into_preclamp = tare_into_preclamp || next == ProcedurePhase::PreClampXyCorrect;
                 saw_insert = saw_insert || next == ProcedurePhase::InsertInitial;
-                saw_optimize = saw_optimize || next == ProcedurePhase::OptimizeInsert;
+                saw_optimize = saw_optimize || next == ProcedurePhase::Unclamp;
                 saw_test = saw_test || next == ProcedurePhase::TestOrAge;
                 saw_unclamp = saw_unclamp || next == ProcedurePhase::Unclamp;
             }
@@ -257,8 +270,10 @@ int main()
                 break;
             }
         }
-        if (!saw_fine_after_tare || tare_into_preclamp || !saw_preclamp || !saw_insert || !saw_optimize ||
-            !saw_test || !saw_unclamp)
+        // Phase-2 OptimizeInsert removed: InsertInitial → Unclamp (no TestOrAge yet).
+        (void)saw_optimize;
+        (void)saw_test;
+        if (!saw_fine_after_tare || tare_into_preclamp || !saw_preclamp || !saw_insert || !saw_unclamp)
         {
             std::fprintf(stderr,
                          "tare boundaries fine=%d into_pre=%d pre=%d insert=%d opt=%d test=%d unclamp=%d "

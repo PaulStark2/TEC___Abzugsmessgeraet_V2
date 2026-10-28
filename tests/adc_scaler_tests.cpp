@@ -34,6 +34,10 @@ int main()
     {
         return 6;
     }
+    if (!nearEqual(adc_scaler::countsToNewton(2048.5f), -30.0f + (2048.5f / 4095.0f) * 60.0f))
+    {
+        return 9;
+    }
     if (!nearEqual(adc_scaler::countsToVolt(0), 0.0f))
     {
         return 7;

@@ -34,6 +34,9 @@ enum class MessageId : uint8_t
     CmdSelectForceCurve = 0x5A,
     CmdSetCollisionGuard = 0x5B,
     CmdForceTare = 0x5C, // empty — start a 20-sample rest tare while axes are still
+    CmdStartPlateBoreSearch = 0x5D, // u8 point_id: 1=KM, 2=K1, 3=K2, 4=K3
+    CmdSetPlateYaw = 0x5E, // float32 plate_yaw_rad
+    CmdProcedureDecision = 0x5F, // operator decision for procedure anomaly (stub)
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.
@@ -47,6 +50,8 @@ enum class MessageId : uint8_t
     MsgMachineConfig = 0xA3,
     MsgRawAdc = 0xA4,
     MsgForceCalibration = 0xA5,
+    MsgBoreCenter = 0xA6,
+    MsgProcedureAnomaly = 0xA7, // procedure anomaly notify (stub)
 };
 
 } // namespace tecomm

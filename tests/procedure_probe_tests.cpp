@@ -22,7 +22,7 @@ static bool runUntil(TestExecutor& ex, Machine& machine, ProcedurePhase phase, i
         {
             return true;
         }
-        machine.setHostInputs(withPlantInputs(machine));
+        machine.setHostInputs(withProcedurePlant(ex, machine));
         ex.tick(0.05f);
     }
     return ex.procedurePhase() == phase;
@@ -56,7 +56,7 @@ int main()
         }
         for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
         {
-            machine.setHostInputs(withPlantInputs(machine));
+            machine.setHostInputs(withProcedurePlant(ex, machine));
             ex.tick(0.05f);
         }
         if (ex.processState() != ProcessState::Completed || !machine.calibrationSet().probe_center_valid)
@@ -103,7 +103,7 @@ int main()
             }
             for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
             {
-                machine.setHostInputs(withPlantInputs(machine));
+                machine.setHostInputs(withProcedurePlant(ex, machine));
                 ex.tick(0.05f);
             }
             machine.setRuntimeConfigLocked(false);
@@ -155,7 +155,7 @@ int main()
             {
                 break;
             }
-            machine.setHostInputs(withPlantInputs(machine));
+            machine.setHostInputs(withProcedurePlant(ex, machine));
             ex.tick(0.05f);
         }
         if (!saw_calib)
@@ -183,6 +183,84 @@ int main()
         }
         (void)tool_before;
         (void)saw_approach;
+    }
+
+    // ProbeApproach Formel 2: with stored tool_offset, hub XY/Z = probe_center - tool_offset.
+    {
+        Machine machine;
+        machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+        homeMachine(machine);
+
+        {
+            TestExecutor ex(machine);
+            const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
+            const float standoff = machine.machineConfig().probe.approach_distance;
+            machine.moveTo(disc.x, disc.y, disc.z + standoff);
+            for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
+            {
+                machine.setHostInputs(withFreshForce(HostInputs{}));
+                machine.tick(0.05f);
+            }
+            if (!ex.startProbeCalibration())
+            {
+                return 20;
+            }
+            for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
+            {
+                machine.setHostInputs(withProcedurePlant(ex, machine));
+                ex.tick(0.05f);
+            }
+            machine.setRuntimeConfigLocked(false);
+            machine.setCommunicationWatchdogEnabled(false);
+            if (!machine.calibrationSet().probe_center_valid)
+            {
+                return 21;
+            }
+        }
+
+        if (!homeMachine(machine))
+        {
+            return 22;
+        }
+
+        const TestPoint center = machine.calibrationSet().probe_center;
+        const TestPoint offset{2.0f, -1.5f, 0.5f};
+        machine.setToolOffset(offset);
+        const TestPoint expected{center.x - offset.x, center.y - offset.y, center.z - offset.z};
+        const float standoff = machine.machineConfig().probe.approach_distance;
+        const float expected_coarse_z = expected.z + standoff;
+
+        TestExecutor ex(machine);
+        TestProgram program;
+        program.add(TestPoint{8.0f, 0.0f, 0.0f});
+        ex.setProgram(program);
+        if (!ex.start())
+        {
+            return 23;
+        }
+
+        bool saw_formel2_hub = false;
+        for (int i = 0; i < 8000 && ex.processState() == ProcessState::Running; ++i)
+        {
+            if (ex.procedurePhase() == ProcedurePhase::ProbeCalibrate)
+            {
+                // OffsetOnly hub = Formel-2 XY at coarse Z (target.z + approach_distance).
+                if (!nearEqual(machine.x(), expected.x, 0.15f) ||
+                    !nearEqual(machine.y(), expected.y, 0.15f) ||
+                    !nearEqual(machine.z(), expected_coarse_z, 0.5f))
+                {
+                    return 24;
+                }
+                saw_formel2_hub = true;
+                break;
+            }
+            machine.setHostInputs(withProcedurePlant(ex, machine));
+            ex.tick(0.05f);
+        }
+        if (!saw_formel2_hub)
+        {
+            return 25;
+        }
     }
 
     return 0;

@@ -39,7 +39,7 @@ endif()
 message(STATUS "TEC_HOST_UART=${TEC_HOST_UART}")
 
 # Open-loop steps/mm (firmware only; Core stays in mm). Per-axis overrides optional.
-# Zielkinematik: all 200. Bench Zortrax: XY belt 20 steps/mm, Z 4 mm lead at 1/4 µstep = 200.
+# Current machine (SFU1204): all 200. Historical Zortrax bench: XY belt 20, Z 200.
 set(TEC_STEPS_PER_MM "200" CACHE STRING "Default steps/mm when axis-specific unset")
 set(TEC_STEPS_PER_MM_X "" CACHE STRING "X steps/mm (empty = TEC_STEPS_PER_MM)")
 set(TEC_STEPS_PER_MM_Y "" CACHE STRING "Y steps/mm (empty = TEC_STEPS_PER_MM)")
@@ -66,6 +66,17 @@ add_compile_definitions(
     TEC_STEPS_PER_MM_Z=${TEC_SPM_Z}
 )
 message(STATUS "TEC_STEPS_PER_MM default=${TEC_STEPS_PER_MM} → X=${TEC_SPM_X} Y=${TEC_SPM_Y} Z=${TEC_SPM_Z}")
+
+# Historical Zortrax bench only. The Y cell was mirrored against +Y, so a
+# negative Fy would otherwise be unloaded by a move in -Y. Negate Fy after the
+# curve. OFF on the current SFU1204 machine (default), with steps/mm = 200.
+option(TEC_INVERT_FY "Negate Fy on historical Zortrax bench (OFF on SFU1204)" OFF)
+if(TEC_INVERT_FY)
+    add_compile_definitions(TEC_INVERT_FY=1)
+else()
+    add_compile_definitions(TEC_INVERT_FY=0)
+endif()
+message(STATUS "TEC_INVERT_FY=${TEC_INVERT_FY}")
 
 add_link_options(
     ${TEC_MCU_FLAGS}

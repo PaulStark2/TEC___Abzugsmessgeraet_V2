@@ -8,10 +8,13 @@ add_library(core STATIC
     ProcedureController.cpp
     ProbeCalibration.cpp
     ProbeSearch.cpp
+    BoreSearch.cpp
     MachineConfig.cpp
     TestConfiguration.cpp
     ForceCalibration.cpp
     ForceTare.cpp
+    ForceFilter.cpp
+    CountWindow.cpp
 )
 
 target_include_directories(core

@@ -33,13 +33,19 @@ constexpr std::size_t kProgramSummaryPayloadWireSize = 26;
 constexpr std::size_t kLoadProgramMaxPointCount = 32;
 constexpr std::size_t kLoadProgramMaxPayloadWireSize =
     1 + kLoadProgramMaxPointCount * kMoveToPayloadWireSize; // 385
-// 288-byte layout, plus force_range_N, force_hard_limit_N, a_manual,
-// and the per-axis hard/collision limits for X and Y (Z stays in the older fields).
-constexpr std::size_t kMachineConfigPayloadWireSize = 356;
+// 395-byte layout minus Phase-2 correction/motion fields (30 bytes) plus anomaly
+// fields after plate_calib (5×f32 + 1×u8 = 21) → 386.
+constexpr std::size_t kMachineConfigPayloadWireSize = 386;
+constexpr std::size_t kProcedureDecisionPayloadWireSize = 1; // action u8
+// type u8 + point u8 + iter u16 + 5×f32 + skip u8 + confirm u8 = 26
+constexpr std::size_t kProcedureAnomalyPayloadWireSize = 26;
 constexpr std::size_t kTestConfigurationPayloadWireSize = 8; // mode u8 + force f32 + iterations u16 + index u8
 constexpr std::size_t kPlateOriginPayloadWireSize = kMoveToPayloadWireSize;
+constexpr std::size_t kPlateYawPayloadWireSize = 4; // float32
+constexpr std::size_t kPlateBorePointIdWireSize = 1; // u8
 constexpr std::size_t kForcePathChunkMaxSamples = 32;
-constexpr std::size_t kForcePathChunkHeaderWireSize = 12; // point u8 + iter u16 + seq u32 + count u8 + dropped u32
+// point u8 + iter u16 + seq u32 + count u8 + dropped u32 + leg u8
+constexpr std::size_t kForcePathChunkHeaderWireSize = 13;
 constexpr std::size_t kForcePathChunkMaxPayloadWireSize =
     kForcePathChunkHeaderWireSize + kForcePathChunkMaxSamples * 8;
 
@@ -48,6 +54,8 @@ constexpr std::size_t kForceCalibPointWireSize = 12;
 constexpr std::size_t kSetForceCalibrationHeaderWireSize = 4;
 constexpr std::size_t kSelectForceCurveWireSize = 16;
 constexpr std::size_t kRawAdcWireSize = 7;
+// 14 float32 (center xy, radius, residual, forces, four poses) + cz f32 + 4 status bytes.
+constexpr std::size_t kBoreCenterWireSize = 64;
 constexpr std::size_t kForceCalibResultHeaderWireSize = 88; // 8 bytes + 20 x float32
 constexpr std::size_t kForceCalibResultMaxWireSize =
     kForceCalibResultHeaderWireSize + kForceCalibMaxPoints * 4;

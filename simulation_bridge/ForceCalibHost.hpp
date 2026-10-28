@@ -25,6 +25,9 @@ public:
     void clear();
 
     bool active() const;
+    // Float mean, not a rounded count: rounding before the polynomial puts the
+    // quantization back that the window just removed.
+    double evaluateSensorNewton(double adc_counts) const;
     double evaluateSensorNewton(uint16_t adc_z) const;
 
 private:

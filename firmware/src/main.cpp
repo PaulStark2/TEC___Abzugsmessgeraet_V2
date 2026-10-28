@@ -178,10 +178,10 @@ int main(void)
         {
             g_ms_elapsed = 0;
             hostio::serviceProtocol(g_host);
-            std::uint16_t adc_x = 0;
-            std::uint16_t adc_y = 0;
-            std::uint16_t adc_z = 0;
-            hostio::latestAdc(adc_x, adc_y, adc_z);
+            float adc_x = 0.0f;
+            float adc_y = 0.0f;
+            float adc_z = 0.0f;
+            hostio::consumeMillisecondMean(adc_x, adc_y, adc_z);
             const HostInputs inputs = hostio::sampleInputs(
                 g_host.nextForceSequence(), g_host.heartbeatSequence(),
                 g_host.machine().machineConfig().force.range_N);

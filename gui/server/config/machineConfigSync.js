@@ -11,8 +11,6 @@ const CRITICAL_CONFIG_KEYS = Object.freeze([
   'a_homing',
   'phase1_a',
   'phase1_corner',
-  'phase2_a',
-  'phase2_corner',
   'phase3_a',
   'phase3_corner',
   'v_approach_testpoints',

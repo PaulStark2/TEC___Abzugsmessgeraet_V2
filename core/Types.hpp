@@ -114,7 +114,7 @@ enum class ProcedurePhase : uint8_t
     PreClampXyCorrect = 7,
     Clamp = 8,
     InsertInitial = 9,
-    OptimizeInsert = 10,
+    ProbeRemeasure = 10,
     TestOrAge = 11,
     Unclamp = 12,
     NextPoint = 13,
@@ -122,7 +122,9 @@ enum class ProcedurePhase : uint8_t
     Completed = 15,
     Aborted = 16,
     // Rest sample before the next process phase. Appended so older ordinals stay put.
-    ForceTare = 17
+    ForceTare = 17,
+    // Standalone plate bore search (KM / K1–K3 teach). Appended.
+    PlateBoreSearch = 18
 };
 
 // Latched reason for MachineState::Fault (M18). None when not in Fault.

@@ -17,10 +17,12 @@ public:
     void setProgram(const TestProgram& program);
     bool start();
     bool startProbeCalibration();
+    bool startPlateBoreSearch(std::uint8_t point_id);
     void tick(float dt);
     void pause();
     void resume();
     void stop();
+    void applyProcedureDecision(std::uint8_t action);
 
     ProcessState processState() const;
     ProcedurePhase procedurePhase() const;

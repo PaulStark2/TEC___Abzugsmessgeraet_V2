@@ -20,6 +20,11 @@ bool TestExecutor::startProbeCalibration()
     return controller_.startProbeCalibration();
 }
 
+bool TestExecutor::startPlateBoreSearch(std::uint8_t point_id)
+{
+    return controller_.startPlateBoreSearch(point_id);
+}
+
 void TestExecutor::tick(float dt)
 {
     controller_.tick(dt);
@@ -74,3 +79,9 @@ const ProcedureController& TestExecutor::procedure() const
 {
     return controller_;
 }
+
+void TestExecutor::applyProcedureDecision(std::uint8_t action)
+{
+    controller_.applyProcedureDecision(action);
+}
+

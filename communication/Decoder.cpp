@@ -69,10 +69,15 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdSelectForceCurve:
     case MessageId::CmdSetCollisionGuard:
     case MessageId::CmdForceTare:
+    case MessageId::CmdStartPlateBoreSearch:
+    case MessageId::CmdSetPlateYaw:
+    case MessageId::CmdProcedureDecision:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
     case MessageId::MsgRawAdc:
     case MessageId::MsgForceCalibration:
+    case MessageId::MsgBoreCenter:
+    case MessageId::MsgProcedureAnomaly:
     case MessageId::RspNack:
     case MessageId::MsgStatusReport:
     case MessageId::MsgProgramSummary:
@@ -307,6 +312,38 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
     {
         ForceCalibrationResultPayload parsed{};
         return decodeForceCalibrationResultPayload(payload, payload_length, parsed);
+    }
+
+    case MessageId::MsgBoreCenter:
+    {
+        BoreCenterPayload parsed{};
+        return decodeBoreCenterPayload(payload, payload_length, parsed);
+    }
+
+    case MessageId::CmdStartPlateBoreSearch:
+        return payload_length == kPlateBorePointIdWireSize;
+
+    case MessageId::CmdSetPlateYaw:
+        if (payload_length != kPlateYawPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            float yaw = 0.0f;
+            std::size_t offset = 0;
+            return readF32LE(payload, payload_length, offset, yaw, true) && offset == payload_length;
+        }
+
+    case MessageId::CmdProcedureDecision:
+    {
+        ProcedureDecisionPayload parsed{};
+        return decodeProcedureDecisionPayload(payload, payload_length, parsed);
+    }
+
+    case MessageId::MsgProcedureAnomaly:
+    {
+        ProcedureAnomalyPayload parsed{};
+        return decodeProcedureAnomalyPayload(payload, payload_length, parsed);
     }
 
     default:

@@ -6,6 +6,8 @@ import {
   fetchMachineStatus,
   fetchCalibration,
   setPlateOrigin,
+  startPlateBoreSearch,
+  setPlateYaw,
   defineMcs,
   persistMcs,
   rollbackFullCalibration,
@@ -14,6 +16,7 @@ import {
   fixtureOpen,
   fixtureClose,
   invalidateHoming,
+  fetchMachineConfig,
 } from '../api.js';
 import { mountJogPanel } from '../components/jogPanel.js';
 import { mountForceCalibration } from './forceWizard.js';
@@ -104,10 +107,28 @@ const STEPS = {
   HOMING: 'homing',
   PLATE_QUESTION: 'plate_question',
   PLATE_INSERT: 'plate_insert',
-  PLATE_ORIGIN: 'plate_origin',
+  PLATE_ORIGIN: 'plate_origin', // KM bore teach
+  PLATE_K1: 'plate_k1',
+  PLATE_K2: 'plate_k2',
+  PLATE_K3: 'plate_k3',
+  PLATE_ROTATION_EVAL: 'plate_rotation_eval',
   PROBE_APPROACH: 'probe_approach',
   PROBE_CALIBRATE: 'probe_calibrate',
   COMPLETE: 'complete',
+};
+
+const PLATE_POINT = {
+  KM: 1,
+  K1: 2,
+  K2: 3,
+  K3: 4,
+};
+
+const PLATE_POINT_LABEL = {
+  1: 'KM (Bauplattenmitte)',
+  2: 'K1',
+  3: 'K2',
+  4: 'K3',
 };
 
 export function renderCalibrate(container) {
@@ -125,6 +146,10 @@ export function renderCalibrate(container) {
   let liveStatus = null;
   let savedPlateOrigin = null;
   let savedProbeCenter = null;
+  let measuredK1 = null;
+  let measuredK2 = null;
+  let measuredK3 = null;
+  let pendingAlignedPose = null;
   let mcsValidInStore = false;
   /** True after persistMcs in this Full-Calibration session (commit done). */
   let mcsCommittedThisSession = false;
@@ -248,7 +273,15 @@ export function renderCalibrate(container) {
       case STEPS.PLATE_INSERT:
         return renderPlateInsert();
       case STEPS.PLATE_ORIGIN:
-        return renderPlateOriginStep();
+        return renderPlateBoreTeachStep(PLATE_POINT.KM);
+      case STEPS.PLATE_K1:
+        return renderPlateBoreTeachStep(PLATE_POINT.K1);
+      case STEPS.PLATE_K2:
+        return renderPlateBoreTeachStep(PLATE_POINT.K2);
+      case STEPS.PLATE_K3:
+        return renderPlateBoreTeachStep(PLATE_POINT.K3);
+      case STEPS.PLATE_ROTATION_EVAL:
+        return renderPlateRotationEvalStep();
       case STEPS.PROBE_APPROACH:
         return renderProbeApproach();
       case STEPS.PROBE_CALIBRATE:
@@ -421,7 +454,11 @@ export function renderCalibrate(container) {
                 : 'Home: —'
             }
           </div>
-          ${poseBlock('Bauplatte (plateOrigin)', calib.plateOrigin, calib.plateOriginValid)}
+          ${poseBlock('Bauplatte KM (plateOrigin)', calib.plateOrigin, calib.plateOriginValid)}
+          <p><strong>plateYaw</strong> = ${formatCoord(((Number(calib.plateYawRad) || 0) * 180) / Math.PI)}°</p>
+          ${poseBlock('K1', calib.k1, calib.rotationPointsValid)}
+          ${poseBlock('K2', calib.k2, calib.rotationPointsValid)}
+          ${poseBlock('K3', calib.k3, calib.rotationPointsValid)}
           ${poseBlock('Messtaster (probeCenter)', calib.probeCenter, calib.probeCenterValid)}
           ${poseBlock('Werkzeugoffset (toolOffset)', calib.toolOffset, true)}
           <div>
@@ -435,6 +472,15 @@ export function renderCalibrate(container) {
             </span>
           </div>
         </div>
+        ${
+          calib.toolOffsetAnomaly && calib.toolOffsetAnomaly.active
+            ? `<p class="command-feedback command-feedback--error" role="status" style="margin-top:12px;">
+                Werkzeugoffset-Anomalie: Δ=${formatCoord(calib.toolOffsetAnomaly.deltaMm)} mm
+                (Toleranz ${formatCoord(calib.toolOffsetAnomaly.toleranceMm)} mm) —
+                vermutlich Werkzeugwechsel. Neuer Offset ist aktiv.
+              </p>`
+            : ''
+        }
         <p id="values-feedback" class="command-feedback" aria-live="polite"></p>
       </div>
       <div class="control-actions page-actions">
@@ -665,20 +711,94 @@ export function renderCalibrate(container) {
     });
   }
 
-  function renderPlateOriginStep() {
+  async function afterKmSaved() {
+    let rotationEnabled = true;
+    try {
+      const cfg = await fetchMachineConfig();
+      rotationEnabled = Number(cfg && cfg.rotation_calib_enabled) !== 0;
+    } catch {
+      rotationEnabled = true;
+    }
+    if (rotationEnabled) {
+      setStep(STEPS.PLATE_K1);
+    } else {
+      setStep(STEPS.PROBE_APPROACH);
+    }
+  }
+
+  function nextAfterPlatePoint(pointId) {
+    if (pointId === PLATE_POINT.KM) {
+      void afterKmSaved();
+      return;
+    }
+    if (pointId === PLATE_POINT.K1) {
+      setStep(STEPS.PLATE_K2);
+      return;
+    }
+    if (pointId === PLATE_POINT.K2) {
+      setStep(STEPS.PLATE_K3);
+      return;
+    }
+    setStep(STEPS.PLATE_ROTATION_EVAL);
+  }
+
+  function waitForPlateBoreResult(pointId, timeoutMs = 120000) {
+    const started = Date.now();
+    return new Promise((resolve, reject) => {
+      const tick = async () => {
+        try {
+          const st = await fetchMachineStatus();
+          liveStatus = st;
+          const processDone =
+            st.processState === 'Completed' || st.processState === 'Idle' || st.processState === 'Aborted';
+          if (st.boreValid && Number(st.borePointId) === pointId && processDone) {
+            resolve({
+              x: st.boreCx,
+              y: st.boreCy,
+              z: st.boreCz,
+              anomaly: !!st.boreAnomaly,
+              radius: st.boreRadius,
+            });
+            return;
+          }
+          if (st.processState === 'Aborted' || st.machineState === 'Fault') {
+            reject(new Error('Bohrungssuche abgebrochen oder Fault'));
+            return;
+          }
+          if (Date.now() - started > timeoutMs) {
+            reject(new Error('Timeout bei der Bohrungssuche'));
+            return;
+          }
+          setTimeout(tick, 200);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      setTimeout(tick, 300);
+    });
+  }
+
+  function renderPlateBoreTeachStep(pointId) {
+    const label = PLATE_POINT_LABEL[pointId] || String(pointId);
+    const hint =
+      pointId === PLATE_POINT.KM
+        ? 'Fahre grob in die Kalibrierbohrung in der Bauplattenmitte (KM) und tauche ein. Anschließend Mittelpunktsuche starten.'
+        : `Fahre grob in die Bohrung ${label} ein (K2→K1 = +Y, K2→K3 = +X der Platte). Anschließend Mittelpunktsuche starten.`;
     contentEl.innerHTML = `
       <div class="success-card" style="display:flex;gap:32px;align-items:flex-start;">
         <div style="flex:1;">
-          <h3>Kalibrierpunkt Bauplatte</h3>
-          <p>Fahre die Maschine von Hand an den gewünschten Kalibrierpunkt der Bauplatte.</p>
-          <p>Dieser Punkt wird im Maschinenkoordinatensystem gespeichert.</p>
+          <h3>Kalibrierpunkt ${label}</h3>
+          <p>${hint}</p>
+          <p>Ablauf: XY-Sehnensuche (wie PreClamp), dann Bodenantastung −Z und Lift.</p>
           <div id="plate-jog-panel"></div>
-          <div id="plate-saved-info"></div>
+          <div id="plate-aligned-info"></div>
           <p id="plate-feedback" class="command-feedback" aria-live="polite"></p>
         </div>
         <div class="control-actions" style="flex-direction:column;gap:8px;">
-          <button type="button" id="btn-save-plate">Aktuelle Position als Kalibrierpunkt Bauplatte speichern</button>
-          <button type="button" id="btn-next" disabled>Bestätigen und Weiter</button>
+          <button type="button" id="btn-start-bore">Mittelpunktsuche starten</button>
+          <button type="button" id="btn-save-yes" disabled>Ja, speichern</button>
+          <button type="button" id="btn-save-no" disabled>Nein</button>
+          <button type="button" id="btn-retry" disabled>Wiederholen</button>
           <button type="button" id="btn-cancel">Abbrechen</button>
         </div>
       </div>
@@ -691,30 +811,289 @@ export function renderCalibrate(container) {
     };
 
     const feedbackEl = contentEl.querySelector('#plate-feedback');
-    const infoEl = contentEl.querySelector('#plate-saved-info');
-    const btnNext = contentEl.querySelector('#btn-next');
+    const infoEl = contentEl.querySelector('#plate-aligned-info');
+    const btnStart = contentEl.querySelector('#btn-start-bore');
+    const btnYes = contentEl.querySelector('#btn-save-yes');
+    const btnNo = contentEl.querySelector('#btn-save-no');
+    const btnRetry = contentEl.querySelector('#btn-retry');
 
-    if (savedPlateOrigin) {
-      showPlateInfo(infoEl, savedPlateOrigin);
-      btnNext.disabled = false;
+    function setDecisionEnabled(on) {
+      btnYes.disabled = !on;
+      btnNo.disabled = !on;
+      btnRetry.disabled = !on;
     }
 
-    contentEl.querySelector('#btn-save-plate').addEventListener('click', async () => {
+    function showAligned(pose) {
+      pendingAlignedPose = pose;
+      infoEl.innerHTML = `
+        <div style="margin-top:8px;padding:8px;background:var(--clr-surface,#f5f5f5);border-radius:4px;">
+          <strong>Kalibrierpunkt ausgerichtet!</strong><br/>
+          Soll der Kalibrierpunkt gespeichert werden?<br/>
+          X = ${formatCoord(pose.x)}<br/>
+          Y = ${formatCoord(pose.y)}<br/>
+          Z = ${formatCoord(pose.z)}
+        </div>`;
+      setDecisionEnabled(true);
+    }
+
+    btnStart.addEventListener('click', async () => {
       try {
-        feedbackEl.textContent = '';
+        feedbackEl.textContent = 'Bohrungssuche läuft…';
         feedbackEl.classList.remove('command-feedback--error');
-        const result = await setPlateOrigin();
-        const c = (result && result.calibration) || {};
-        savedPlateOrigin = c.plateOrigin;
-        showPlateInfo(infoEl, savedPlateOrigin);
-        feedbackEl.textContent = 'Kalibrierpunkt Bauplatte gespeichert.';
-        btnNext.disabled = false;
+        btnStart.disabled = true;
+        setDecisionEnabled(false);
+        pendingAlignedPose = null;
+        infoEl.innerHTML = '';
+        await startPlateBoreSearch(pointId);
+        const pose = await waitForPlateBoreResult(pointId);
+        showAligned(pose);
+        feedbackEl.textContent = pose.anomaly
+          ? 'Ausgerichtet (Restkraft-Hinweis). Speichern?'
+          : 'Ausgerichtet. Speichern?';
+      } catch (err) {
+        feedbackEl.textContent = err.message || String(err);
+        feedbackEl.classList.add('command-feedback--error');
+        btnStart.disabled = false;
+      }
+    });
+
+    btnYes.addEventListener('click', async () => {
+      if (!pendingAlignedPose) return;
+      try {
+        const pose = pendingAlignedPose;
+        if (pointId === PLATE_POINT.KM) {
+          const result = await setPlateOrigin(pose);
+          savedPlateOrigin = (result && result.calibration && result.calibration.plateOrigin) || pose;
+        } else if (pointId === PLATE_POINT.K1) {
+          measuredK1 = pose;
+        } else if (pointId === PLATE_POINT.K2) {
+          measuredK2 = pose;
+        } else if (pointId === PLATE_POINT.K3) {
+          measuredK3 = pose;
+        }
+        feedbackEl.textContent = `${label} gespeichert.`;
+        nextAfterPlatePoint(pointId);
       } catch (err) {
         feedbackEl.textContent = err.message || String(err);
         feedbackEl.classList.add('command-feedback--error');
       }
     });
-    contentEl.querySelector('#btn-next').addEventListener('click', () => setStep(STEPS.PROBE_APPROACH));
+
+    btnNo.addEventListener('click', () => {
+      pendingAlignedPose = null;
+      infoEl.innerHTML = '';
+      setDecisionEnabled(false);
+      btnStart.disabled = false;
+      feedbackEl.textContent = 'Nicht gespeichert. Erneut anfahren oder Suche starten.';
+    });
+
+    btnRetry.addEventListener('click', () => {
+      pendingAlignedPose = null;
+      infoEl.innerHTML = '';
+      setDecisionEnabled(false);
+      btnStart.disabled = false;
+      feedbackEl.textContent = 'Bereit zum Wiederholen.';
+    });
+
+    contentEl.querySelector('#btn-cancel').addEventListener('click', () => {
+      void abortCalibrationWizard();
+    });
+  }
+
+  function renderPlateRotationEvalStep() {
+    contentEl.innerHTML = `
+      <div class="success-card">
+        <h3>Rotationskalibrierung — Auswertung</h3>
+        <p id="rot-summary">Berechne…</p>
+        <div id="rot-thresholds"></div>
+        <p id="rot-feedback" class="command-feedback" aria-live="polite"></p>
+        <div class="control-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          <button type="button" id="btn-apply">Übernehmen</button>
+          <button type="button" id="btn-recalc">Toleranzen anwenden</button>
+          <button type="button" id="btn-retry-all">K1–K3 wiederholen</button>
+          <button type="button" id="btn-reject">Ablehnen (nur KM)</button>
+          <button type="button" id="btn-cancel">Abbrechen</button>
+        </div>
+      </div>
+    `;
+    const summaryEl = contentEl.querySelector('#rot-summary');
+    const threshEl = contentEl.querySelector('#rot-thresholds');
+    const feedbackEl = contentEl.querySelector('#rot-feedback');
+    const btnApply = contentEl.querySelector('#btn-apply');
+    let lastDecision = null;
+    let lastEval = null;
+    let thresholds = {};
+
+    function radToDeg(r) {
+      return (r * 180) / Math.PI;
+    }
+
+    function evalLocal(k1, k2, k3) {
+      const v12x = k1.x - k2.x;
+      const v12y = k1.y - k2.y;
+      const v23x = k3.x - k2.x;
+      const v23y = k3.y - k2.y;
+      const L12 = Math.hypot(v12x, v12y);
+      const L23 = Math.hypot(v23x, v23y);
+      const theta_y = Math.atan2(-v12x, v12y);
+      const theta_x = Math.atan2(v23y, v23x);
+      const yaw = 0.5 * (theta_x + theta_y);
+      const wrap = (a) => {
+        let x = a;
+        while (x > Math.PI) x -= 2 * Math.PI;
+        while (x < -Math.PI) x += 2 * Math.PI;
+        return x;
+      };
+      const yaw_split = Math.abs(wrap(theta_x - theta_y));
+      const ang = Math.atan2(v12x * v23y - v12y * v23x, v12x * v23x + v12y * v23y);
+      const ortho = Math.abs(Math.abs(ang) - Math.PI / 2);
+      return { L12, L23, yaw, yaw_split, ortho, theta_x, theta_y };
+    }
+
+    function decide(e, t) {
+      const dLen = Math.max(Math.abs(e.L12 - t.nom_edge_mm), Math.abs(e.L23 - t.nom_edge_mm));
+      const deg = Math.PI / 180;
+      let may_apply = true;
+      let length = 'ok';
+      if (dLen >= t.tol_length_reject_mm) {
+        length = 'reject';
+        may_apply = false;
+      } else if (dLen >= t.tol_length_warn_mm) length = 'warn';
+      let ortho = 'ok';
+      if (e.ortho >= t.tol_ortho_reject_deg * deg) {
+        ortho = 'reject';
+        may_apply = false;
+      } else if (e.ortho >= t.tol_ortho_warn_deg * deg) ortho = 'warn';
+      let parallel = e.yaw_split >= t.tol_parallel_warn_deg * deg ? 'warn' : 'ok';
+      const absYaw = Math.abs(e.yaw);
+      let recommended = 0;
+      let yaw = 'ok';
+      if (absYaw < t.tol_yaw_ignore_deg * deg) recommended = 0;
+      else {
+        recommended = e.yaw;
+        if (absYaw >= t.tol_yaw_apply_deg * deg) yaw = 'warn';
+      }
+      return { length, ortho, parallel, yaw, recommended_yaw_rad: recommended, may_apply };
+    }
+
+    function renderSummary() {
+      if (!measuredK1 || !measuredK2 || !measuredK3) {
+        summaryEl.textContent = 'K1–K3 unvollständig.';
+        btnApply.disabled = true;
+        return;
+      }
+      lastEval = evalLocal(measuredK1, measuredK2, measuredK3);
+      lastDecision = decide(lastEval, thresholds);
+      summaryEl.innerHTML = `
+        <div style="font-family:monospace;line-height:1.5;">
+          K1 = (${formatCoord(measuredK1.x)}, ${formatCoord(measuredK1.y)}, ${formatCoord(measuredK1.z)})<br/>
+          K2 = (${formatCoord(measuredK2.x)}, ${formatCoord(measuredK2.y)}, ${formatCoord(measuredK2.z)})<br/>
+          K3 = (${formatCoord(measuredK3.x)}, ${formatCoord(measuredK3.y)}, ${formatCoord(measuredK3.z)})<br/>
+          |K1K2| = ${formatCoord(lastEval.L12)} mm, |K2K3| = ${formatCoord(lastEval.L23)} mm (Soll ${thresholds.nom_edge_mm})<br/>
+          Yaw = ${formatCoord(radToDeg(lastEval.yaw))}°, Split = ${formatCoord(radToDeg(lastEval.yaw_split))}°<br/>
+          Ortho-Fehler = ${formatCoord(radToDeg(lastEval.ortho))}°<br/>
+          Länge: ${lastDecision.length}, Ortho: ${lastDecision.ortho}, Parallel: ${lastDecision.parallel}, Yaw: ${lastDecision.yaw}<br/>
+          Empfohlener plateYaw = ${formatCoord(radToDeg(lastDecision.recommended_yaw_rad))}°
+        </div>`;
+      btnApply.disabled = !lastDecision.may_apply;
+    }
+
+    function renderThresholdInputs() {
+      const keys = [
+        ['nom_edge_mm', 'Soll-Kante'],
+        ['tol_length_warn_mm', 'Länge Warn'],
+        ['tol_length_reject_mm', 'Länge Reject'],
+        ['tol_yaw_ignore_deg', 'Yaw Ignore °'],
+        ['tol_yaw_apply_deg', 'Yaw Apply °'],
+        ['tol_ortho_warn_deg', 'Ortho Warn °'],
+        ['tol_ortho_reject_deg', 'Ortho Reject °'],
+        ['tol_parallel_warn_deg', 'Parallel Warn °'],
+      ];
+      threshEl.innerHTML = keys
+        .map(
+          ([k, lab]) =>
+            `<label style="display:inline-block;margin:4px 12px 4px 0;">${lab}
+              <input type="number" step="any" data-tol="${k}" value="${thresholds[k]}" style="width:5rem;"/></label>`
+        )
+        .join('');
+    }
+
+    void (async () => {
+      try {
+        const cfg = await fetchMachineConfig();
+        thresholds = {
+          nom_edge_mm: Number(cfg.nom_edge_mm) || 55,
+          tol_length_warn_mm: Number(cfg.tol_length_warn_mm) || 0.3,
+          tol_length_reject_mm: Number(cfg.tol_length_reject_mm) || 1,
+          tol_yaw_ignore_deg: Number(cfg.tol_yaw_ignore_deg) || 0.05,
+          tol_yaw_apply_deg: Number(cfg.tol_yaw_apply_deg) || 0.2,
+          tol_ortho_warn_deg: Number(cfg.tol_ortho_warn_deg) || 0.2,
+          tol_ortho_reject_deg: Number(cfg.tol_ortho_reject_deg) || 1,
+          tol_parallel_warn_deg: Number(cfg.tol_parallel_warn_deg) || 0.2,
+        };
+      } catch {
+        thresholds = {
+          nom_edge_mm: 55,
+          tol_length_warn_mm: 0.3,
+          tol_length_reject_mm: 1,
+          tol_yaw_ignore_deg: 0.05,
+          tol_yaw_apply_deg: 0.2,
+          tol_ortho_warn_deg: 0.2,
+          tol_ortho_reject_deg: 1,
+          tol_parallel_warn_deg: 0.2,
+        };
+      }
+      renderThresholdInputs();
+      renderSummary();
+    })();
+
+    contentEl.querySelector('#btn-recalc').addEventListener('click', () => {
+      threshEl.querySelectorAll('input[data-tol]').forEach((input) => {
+        const k = input.getAttribute('data-tol');
+        const v = Number(input.value);
+        if (Number.isFinite(v)) thresholds[k] = v;
+      });
+      renderSummary();
+      feedbackEl.textContent = 'Toleranzen neu bewertet.';
+    });
+
+    btnApply.addEventListener('click', async () => {
+      if (!lastDecision || !lastDecision.may_apply) return;
+      try {
+        await setPlateYaw({
+          yawRad: lastDecision.recommended_yaw_rad,
+          k1: measuredK1,
+          k2: measuredK2,
+          k3: measuredK3,
+        });
+        feedbackEl.textContent = 'Rotationskalibrierung übernommen.';
+        setStep(STEPS.PROBE_APPROACH);
+      } catch (err) {
+        feedbackEl.textContent = err.message || String(err);
+        feedbackEl.classList.add('command-feedback--error');
+      }
+    });
+
+    contentEl.querySelector('#btn-retry-all').addEventListener('click', () => {
+      measuredK1 = null;
+      measuredK2 = null;
+      measuredK3 = null;
+      setStep(STEPS.PLATE_K1);
+    });
+
+    contentEl.querySelector('#btn-reject').addEventListener('click', async () => {
+      try {
+        await setPlateYaw({ yawRad: 0, clearRotation: true });
+        measuredK1 = null;
+        measuredK2 = null;
+        measuredK3 = null;
+        setStep(STEPS.PROBE_APPROACH);
+      } catch (err) {
+        feedbackEl.textContent = err.message || String(err);
+        feedbackEl.classList.add('command-feedback--error');
+      }
+    });
+
     contentEl.querySelector('#btn-cancel').addEventListener('click', () => {
       void abortCalibrationWizard();
     });
@@ -727,7 +1106,7 @@ export function renderCalibrate(container) {
     }
     el.innerHTML = `
       <div style="margin-top:8px;padding:8px;background:var(--clr-surface,#f5f5f5);border-radius:4px;">
-        <strong>Kalibrierpunkt Bauplatte</strong><br/>
+        <strong>Kalibrierpunkt Bauplatte (KM)</strong><br/>
         X = ${formatCoord(pose.x)}<br/>
         Y = ${formatCoord(pose.y)}<br/>
         Z = ${formatCoord(pose.z)}

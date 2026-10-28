@@ -97,8 +97,8 @@
 #define PIN_DEBUG_LED_PORT GPIOC
 #define PIN_DEBUG_LED_PIN GPIO_PIN_7
 
-// Open-loop mm↔step per axis. Default = Zielkinematik (57HS56, 1/4 µstep, SFU1204 → 200).
-// Bench Zortrax: XY belt = 20. Z screw = 200 (4 mm lead, 1/4 µstep, measured 2026-10-15).
+// Open-loop mm↔step per axis. Default = SFU1204 machine (57HS56, 1/4 µstep → 200).
+// Historical Zortrax bench: XY belt = 20; Z screw = 200 (measured 2026-10-15).
 #ifndef TEC_STEPS_PER_MM
 #define TEC_STEPS_PER_MM 200
 #endif

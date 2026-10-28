@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandDispatcher.hpp"
+#include "CountWindow.hpp"
 #include "ForceCalibHost.hpp"
 #include "FrameStreamBuffer.hpp"
 
@@ -50,6 +51,8 @@ private:
     TestExecutor executor_;
     simplant::SimPlant plant_;
     ForceCalibHost force_calib_;
+    CountWindow counts_;
+    float host_dt_ = 0.05f;
     CommandDispatcher dispatcher_;
     float process_z_test_ = 0.0f;
     bool process_force_latched_ = false;

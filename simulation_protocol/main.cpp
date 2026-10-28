@@ -264,7 +264,6 @@ int main(int argc, char** argv)
         const auto now = clock::now();
         if (now >= next_tick)
         {
-            bridge.applyHostInputs();
             bridge.tick(kDt);
 
             if (client != kInvalidSocket)

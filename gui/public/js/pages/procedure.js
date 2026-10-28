@@ -10,6 +10,7 @@ import {
   pauseProcedure,
   resumeProcedure,
   stopProcedure,
+  sendProcedureDecision,
   sendCommand,
 } from '../api.js';
 import { runWithHomingGate } from '../homingGate.js';
@@ -114,6 +115,118 @@ export function renderProcedure(container) {
   function fmtNum(v, digits = 2) {
     const n = Number(v);
     return Number.isFinite(n) ? n.toFixed(digits) : '—';
+  }
+
+
+  function anomalyTypeLabel(type) {
+    switch (Number(type)) {
+      case 0:
+        return 'Koordinaten-Drift';
+      case 1:
+        return 'Lateralkraft';
+      case 2:
+        return 'Z-Weglimit';
+      case 3:
+        return 'TCP-Hänger (Offset)';
+      default:
+        return `Anomalie ${type}`;
+    }
+  }
+
+  function renderProcedureAnomaly(machine) {
+    const a = machine && machine.procedureAnomaly;
+    if (!a) {
+      return '';
+    }
+    if (a.skipApplied === true || machine.procedureAnomalySkipApplied === true) {
+      return `
+      <div class="progress-card progress-card--error" role="status" aria-label="Prozedur-Anomalie">
+        <h3>Anomalie — Punkt übersprungen</h3>
+        <p class="placeholder-note">
+          ${escapeHtml(anomalyTypeLabel(a.type))}: gemessen
+          <b>${escapeHtml(fmtNum(a.measured, 3))}</b>, Limit
+          <b>${escapeHtml(fmtNum(a.limit, 3))}</b>
+          (Punkt ${escapeHtml(String(a.pointIndex ?? '—'))}, Iter
+          ${escapeHtml(String(a.iteration ?? '—'))}).
+          anomalySkip ist aktiv — nächster Punkt wird angefahren.
+        </p>
+      </div>`;
+    }
+    if (a.confirmPending !== true && machine.procedureAnomalyConfirmPending !== true) {
+      return '';
+    }
+    return `
+      <div class="progress-card progress-card--error" role="dialog" aria-label="Prozedur-Anomalie">
+        <h3>Prozedur-Anomalie</h3>
+        <p class="placeholder-note">
+          ${escapeHtml(anomalyTypeLabel(a.type))}<br/>
+          Gemessen <b>${escapeHtml(fmtNum(a.measured, 3))}</b>
+          · Limit <b>${escapeHtml(fmtNum(a.limit, 3))}</b><br/>
+          Z=<b>${escapeHtml(fmtNum(a.z, 3))}</b>
+          · Fx=<b>${escapeHtml(fmtNum(a.fx, 3))}</b>
+          · Fy=<b>${escapeHtml(fmtNum(a.fy, 3))}</b> N<br/>
+          Punkt ${escapeHtml(String(a.pointIndex ?? '—'))}
+          · Iteration ${escapeHtml(String(a.iteration ?? '—'))}
+        </p>
+        <div class="control-actions">
+          <button type="button" id="btn-anom-stop">Stopp</button>
+          <button type="button" id="btn-anom-continue">Weiter</button>
+          <button type="button" id="btn-anom-next">Nächster Punkt</button>
+          <button type="button" id="btn-anom-repeat">Punkt wiederholen</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderBoreConfirm(machine) {
+    if (!machine || machine.boreConfirmPending !== true) {
+      return '';
+    }
+    return `
+      <div class="progress-card progress-card--error" role="dialog" aria-label="Bohrungsmitte">
+        <h3>Bohrungsmitte prüfen</h3>
+        <p class="placeholder-note">
+          Am Sehnenmittelpunkt liegt noch Kraft über der Schwelle.
+          Weiter fährt mit Clamp fort. Stopp bricht die Prozedur ab.<br/>
+          Mitte X=<b>${escapeHtml(fmtNum(machine.boreCx, 3))}</b>
+          Y=<b>${escapeHtml(fmtNum(machine.boreCy, 3))}</b>
+          · Radius <b>${escapeHtml(fmtNum(machine.boreRadius, 3))}</b> mm<br/>
+          Fx=<b>${escapeHtml(fmtNum(machine.boreFx, 3))}</b> N
+          · Fy=<b>${escapeHtml(fmtNum(machine.boreFy, 3))}</b> N
+        </p>
+        <div class="control-actions">
+          <button type="button" id="btn-bore-continue">Weiter</button>
+          <button type="button" id="btn-bore-stop">Stopp</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderToolOffsetAnomaly(status) {
+    const a = status && status.toolOffsetAnomaly;
+    if (!a || a.active !== true) {
+      return '';
+    }
+    const prev = a.previous || {};
+    const cur = a.current || {};
+    return `
+      <div class="progress-card progress-card--error" role="status" aria-label="Werkzeugoffset-Anomalie">
+        <h3>Werkzeugoffset-Anomalie</h3>
+        <p class="placeholder-note">
+          Der toolOffset hat sich beim Einmessen um
+          <b>${escapeHtml(fmtNum(a.deltaMm, 3))}</b> mm geändert
+          (Toleranz <b>${escapeHtml(fmtNum(a.toleranceMm, 3))}</b> mm).
+          Vermutlich wurde das Werkzeug gewechselt oder neu montiert.
+          Der neue Offset wurde übernommen; die Prozedur läuft weiter.<br/>
+          Vorher: X=${escapeHtml(fmtNum(prev.x, 3))}
+          Y=${escapeHtml(fmtNum(prev.y, 3))}
+          Z=${escapeHtml(fmtNum(prev.z, 3))} mm<br/>
+          Neu: X=${escapeHtml(fmtNum(cur.x, 3))}
+          Y=${escapeHtml(fmtNum(cur.y, 3))}
+          Z=${escapeHtml(fmtNum(cur.z, 3))} mm
+        </p>
+      </div>
+    `;
   }
 
   function renderProgress(status, machine) {
@@ -271,6 +384,8 @@ export function renderProcedure(container) {
       </form>
 
       ${renderProgress(status, machine)}
+      ${renderToolOffsetAnomaly(status)}
+      ${renderProcedureAnomaly(machine)}${renderBoreConfirm(machine)}
 
       <div class="control-actions page-actions">
         <button type="button" id="btn-proc-start" ${startDisabled ? 'disabled' : ''} title="${
@@ -367,6 +482,68 @@ export function renderProcedure(container) {
         setFeedback(err.message || String(err), true);
       }
     });
+
+    const boreContinue = contentEl.querySelector('#btn-bore-continue');
+    if (boreContinue) {
+      boreContinue.addEventListener('click', async () => {
+        try {
+          await resumeProcedure();
+          setFeedback('Bohrungsmitte bestätigt — Prozedur fortgesetzt.', false);
+          await refresh();
+          ensurePolling();
+        } catch (err) {
+          setFeedback(err.message || String(err), true);
+        }
+      });
+    }
+    const boreStop = contentEl.querySelector('#btn-bore-stop');
+    if (boreStop) {
+      boreStop.addEventListener('click', async () => {
+        try {
+          await stopProcedure();
+          setFeedback('Prozedur gestoppt.', false);
+          await refresh();
+        } catch (err) {
+          setFeedback(err.message || String(err), true);
+        }
+      });
+    }
+
+    const anomStop = contentEl.querySelector('#btn-anom-stop');
+    if (anomStop) {
+      anomStop.addEventListener('click', async () => {
+        try {
+          await stopProcedure();
+          setFeedback('Prozedur gestoppt.', false);
+          await refresh();
+        } catch (err) {
+          setFeedback(err.message || String(err), true);
+        }
+      });
+    }
+    async function decideAnomaly(action, label) {
+      try {
+        await sendProcedureDecision(action);
+        setFeedback(label, false);
+        await refresh();
+        ensurePolling();
+      } catch (err) {
+        setFeedback(err.message || String(err), true);
+      }
+    }
+    const anomContinue = contentEl.querySelector('#btn-anom-continue');
+    if (anomContinue) {
+      anomContinue.addEventListener('click', () => decideAnomaly(0, 'Anomalie: Weiter'));
+    }
+    const anomNext = contentEl.querySelector('#btn-anom-next');
+    if (anomNext) {
+      anomNext.addEventListener('click', () => decideAnomaly(1, 'Anomalie: Nächster Punkt'));
+    }
+    const anomRepeat = contentEl.querySelector('#btn-anom-repeat');
+    if (anomRepeat) {
+      anomRepeat.addEventListener('click', () => decideAnomaly(2, 'Anomalie: Punkt wiederholen'));
+    }
+
 
     contentEl.querySelector('#btn-proc-resume').addEventListener('click', async () => {
       try {

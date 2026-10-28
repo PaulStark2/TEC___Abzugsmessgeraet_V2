@@ -4,6 +4,8 @@
 #include "ProtocolSpec.hpp"
 #include "WireUtil.hpp"
 
+#include <cmath>
+
 namespace tecomm
 {
 
@@ -64,6 +66,10 @@ std::size_t encodedPayloadSize(uint8_t message_id, const LoadProgramPayload* loa
         return kPlateOriginPayloadWireSize;
     case MessageId::CmdRestoreMcs:
         return kPlateOriginPayloadWireSize;
+    case MessageId::CmdSetPlateYaw:
+        return kPlateYawPayloadWireSize;
+    case MessageId::CmdStartPlateBoreSearch:
+        return kPlateBorePointIdWireSize;
     default:
         return 0;
     }
@@ -398,6 +404,10 @@ EncodeResult encodeMessage(uint8_t message_id, const NackPayload& payload, uint8
 
 bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* out, std::size_t capacity)
 {
+    if (payload.preclamp_confirm > 1 || payload.anomaly_skip > 1)
+    {
+        return false;
+    }
     std::size_t offset = 0;
     const bool ok =
         writeF32LE(out, capacity, offset, payload.v_approach_testpoints) &&
@@ -421,10 +431,6 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.spreader_extend_time_s) &&
         writeF32LE(out, capacity, offset, payload.spreader_retract_time_s) &&
         writeF32LE(out, capacity, offset, payload.force_tolerance_N) &&
-        writeF32LE(out, capacity, offset, payload.z_correction_gain) &&
-        writeF32LE(out, capacity, offset, payload.z_correction_max) &&
-        writeF32LE(out, capacity, offset, payload.minimum_correction) &&
-        writeU16LE(out, capacity, offset, payload.max_optimization_iterations) &&
         writeF32LE(out, capacity, offset, payload.v_search) &&
         writeF32LE(out, capacity, offset, payload.probe_search_distance) &&
         writeF32LE(out, capacity, offset, payload.probe_backoff) &&
@@ -456,10 +462,6 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.phase1_v_insert) &&
         writeF32LE(out, capacity, offset, payload.phase1_a) &&
         writeF32LE(out, capacity, offset, payload.phase1_corner) &&
-        writeF32LE(out, capacity, offset, payload.phase2_v_extract) &&
-        writeF32LE(out, capacity, offset, payload.phase2_v_insert) &&
-        writeF32LE(out, capacity, offset, payload.phase2_a) &&
-        writeF32LE(out, capacity, offset, payload.phase2_corner) &&
         writeF32LE(out, capacity, offset, payload.phase3_v_extract) &&
         writeF32LE(out, capacity, offset, payload.phase3_v_insert) &&
         writeF32LE(out, capacity, offset, payload.phase3_a) &&
@@ -489,8 +491,26 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.collision_contact_x_N) &&
         writeF32LE(out, capacity, offset, payload.collision_contact_y_N) &&
         writeF32LE(out, capacity, offset, payload.collision_measure_x_N) &&
-        writeF32LE(out, capacity, offset, payload.collision_measure_y_N);
-    return ok && offset == kMachineConfigPayloadWireSize;
+        writeF32LE(out, capacity, offset, payload.collision_measure_y_N) &&
+        writeF32LE(out, capacity, offset, payload.xy_search_limit) &&
+        writeU8(out, capacity, offset, payload.preclamp_confirm) &&
+        writeF32LE(out, capacity, offset, payload.v_bore_search) &&
+        writeU8(out, capacity, offset, payload.bore_refine_passes) &&
+        writeF32LE(out, capacity, offset, payload.v_plate_bore_search) &&
+        writeF32LE(out, capacity, offset, payload.plate_wall_force_N) &&
+        writeF32LE(out, capacity, offset, payload.plate_floor_force_N) &&
+        writeF32LE(out, capacity, offset, payload.plate_xy_search_limit) &&
+        writeF32LE(out, capacity, offset, payload.plate_z_search_limit) &&
+        writeF32LE(out, capacity, offset, payload.plate_z_lift_mm) &&
+        writeF32LE(out, capacity, offset, payload.plate_bore_timeout_s) &&
+        writeU8(out, capacity, offset, payload.plate_bore_refine_passes) &&
+        writeF32LE(out, capacity, offset, payload.coord_tolerance_mm) &&
+        writeF32LE(out, capacity, offset, payload.test_lateral_force_N) &&
+        writeF32LE(out, capacity, offset, payload.z_limit_pos_mm) &&
+        writeF32LE(out, capacity, offset, payload.z_limit_neg_mm) &&
+        writeU8(out, capacity, offset, payload.anomaly_skip) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_change_tolerance_mm);
+    return ok && offset == kMachineConfigPayloadWireSize && payload.anomaly_skip <= 1;
 }
 
 bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, MachineConfigPayload& out)
@@ -518,10 +538,6 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.spreader_extend_time_s, true) &&
         readF32LE(data, length, offset, out.spreader_retract_time_s, true) &&
         readF32LE(data, length, offset, out.force_tolerance_N, true) &&
-        readF32LE(data, length, offset, out.z_correction_gain, true) &&
-        readF32LE(data, length, offset, out.z_correction_max, true) &&
-        readF32LE(data, length, offset, out.minimum_correction, true) &&
-        readU16LE(data, length, offset, out.max_optimization_iterations) &&
         readF32LE(data, length, offset, out.v_search, true) &&
         readF32LE(data, length, offset, out.probe_search_distance, true) &&
         readF32LE(data, length, offset, out.probe_backoff, true) &&
@@ -553,10 +569,6 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.phase1_v_insert, true) &&
         readF32LE(data, length, offset, out.phase1_a, true) &&
         readF32LE(data, length, offset, out.phase1_corner, true) &&
-        readF32LE(data, length, offset, out.phase2_v_extract, true) &&
-        readF32LE(data, length, offset, out.phase2_v_insert, true) &&
-        readF32LE(data, length, offset, out.phase2_a, true) &&
-        readF32LE(data, length, offset, out.phase2_corner, true) &&
         readF32LE(data, length, offset, out.phase3_v_extract, true) &&
         readF32LE(data, length, offset, out.phase3_v_insert, true) &&
         readF32LE(data, length, offset, out.phase3_a, true) &&
@@ -586,8 +598,27 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.collision_contact_x_N, true) &&
         readF32LE(data, length, offset, out.collision_contact_y_N, true) &&
         readF32LE(data, length, offset, out.collision_measure_x_N, true) &&
-        readF32LE(data, length, offset, out.collision_measure_y_N, true);
-    return ok && offset == length && length == kMachineConfigPayloadWireSize;
+        readF32LE(data, length, offset, out.collision_measure_y_N, true) &&
+        readF32LE(data, length, offset, out.xy_search_limit, true) &&
+        readU8(data, length, offset, out.preclamp_confirm) &&
+        readF32LE(data, length, offset, out.v_bore_search, true) &&
+        readU8(data, length, offset, out.bore_refine_passes) &&
+        readF32LE(data, length, offset, out.v_plate_bore_search, true) &&
+        readF32LE(data, length, offset, out.plate_wall_force_N, true) &&
+        readF32LE(data, length, offset, out.plate_floor_force_N, true) &&
+        readF32LE(data, length, offset, out.plate_xy_search_limit, true) &&
+        readF32LE(data, length, offset, out.plate_z_search_limit, true) &&
+        readF32LE(data, length, offset, out.plate_z_lift_mm, true) &&
+        readF32LE(data, length, offset, out.plate_bore_timeout_s, true) &&
+        readU8(data, length, offset, out.plate_bore_refine_passes) &&
+        readF32LE(data, length, offset, out.coord_tolerance_mm, true) &&
+        readF32LE(data, length, offset, out.test_lateral_force_N, true) &&
+        readF32LE(data, length, offset, out.z_limit_pos_mm, true) &&
+        readF32LE(data, length, offset, out.z_limit_neg_mm, true) &&
+        readU8(data, length, offset, out.anomaly_skip) &&
+        readF32LE(data, length, offset, out.tool_offset_change_tolerance_mm, true);
+    return ok && offset == length && length == kMachineConfigPayloadWireSize &&
+           out.preclamp_confirm <= 1 && out.anomaly_skip <= 1;
 }
 
 bool encodeTestConfigurationPayload(const TestConfigurationPayload& payload, uint8_t* out,
@@ -654,12 +685,17 @@ bool encodeForcePathChunkPayload(const ForcePathChunkPayload& payload, uint8_t* 
     {
         return false;
     }
+    if (payload.leg > 1)
+    {
+        return false;
+    }
     std::size_t offset = 0;
     if (!writeU8(out, capacity, offset, payload.point_index) ||
         !writeU16LE(out, capacity, offset, payload.iteration) ||
         !writeU32LE(out, capacity, offset, payload.sequence) ||
         !writeU8(out, capacity, offset, payload.sample_count) ||
-        !writeU32LE(out, capacity, offset, payload.dropped))
+        !writeU32LE(out, capacity, offset, payload.dropped) ||
+        !writeU8(out, capacity, offset, payload.leg))
     {
         return false;
     }
@@ -681,11 +717,11 @@ bool decodeForcePathChunkPayload(const uint8_t* data, std::size_t length, ForceP
     std::size_t offset = 0;
     if (!readU8(data, length, offset, out.point_index) || !readU16LE(data, length, offset, out.iteration) ||
         !readU32LE(data, length, offset, out.sequence) || !readU8(data, length, offset, out.sample_count) ||
-        !readU32LE(data, length, offset, out.dropped))
+        !readU32LE(data, length, offset, out.dropped) || !readU8(data, length, offset, out.leg))
     {
         return false;
     }
-    if (out.sample_count > kForcePathChunkMaxSamples)
+    if (out.sample_count > kForcePathChunkMaxSamples || out.leg > 1)
     {
         return false;
     }
@@ -828,6 +864,134 @@ bool encodeRawAdcPayload(const RawAdcPayload& payload, uint8_t* out, std::size_t
     return writeU16LE(out, capacity, offset, payload.x) && writeU16LE(out, capacity, offset, payload.y) &&
            writeU16LE(out, capacity, offset, payload.z) && writeU8(out, capacity, offset, payload.valid) &&
            offset == kRawAdcWireSize;
+}
+
+bool encodeBoreCenterPayload(const BoreCenterPayload& payload, uint8_t* out, std::size_t capacity)
+{
+    if (payload.anomaly > 1 || payload.confirm_pending > 1 || payload.valid > 1)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    bool ok = writeF32LE(out, capacity, offset, payload.cx) && writeF32LE(out, capacity, offset, payload.cy) &&
+              writeF32LE(out, capacity, offset, payload.radius) &&
+              writeF32LE(out, capacity, offset, payload.residual) &&
+              writeF32LE(out, capacity, offset, payload.fx) && writeF32LE(out, capacity, offset, payload.fy);
+    for (int i = 0; i < 4 && ok; ++i)
+    {
+        ok = writeF32LE(out, capacity, offset, payload.x[i]) && writeF32LE(out, capacity, offset, payload.y[i]);
+    }
+    return ok && writeU8(out, capacity, offset, payload.anomaly) &&
+           writeU8(out, capacity, offset, payload.confirm_pending) &&
+           writeU8(out, capacity, offset, payload.valid) && writeF32LE(out, capacity, offset, payload.cz) &&
+           writeU8(out, capacity, offset, payload.point_id) && offset == kBoreCenterWireSize;
+}
+
+bool encodeProcedureDecisionPayload(const ProcedureDecisionPayload& payload, uint8_t* out,
+                                    std::size_t capacity)
+{
+    if (payload.action > 2)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    return writeU8(out, capacity, offset, payload.action) &&
+           offset == kProcedureDecisionPayloadWireSize;
+}
+
+bool decodeProcedureDecisionPayload(const uint8_t* data, std::size_t length,
+                                    ProcedureDecisionPayload& out)
+{
+    if (length != kProcedureDecisionPayloadWireSize)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    if (!readU8(data, length, offset, out.action) || offset != length || out.action > 2)
+    {
+        return false;
+    }
+    return true;
+}
+
+bool encodeProcedureAnomalyPayload(const ProcedureAnomalyPayload& payload, uint8_t* out,
+                                   std::size_t capacity)
+{
+    if (payload.type > 3 || payload.skip_applied > 1 || payload.confirm_pending > 1)
+    {
+        return false;
+    }
+    if (!std::isfinite(payload.measured) || !std::isfinite(payload.limit) || !std::isfinite(payload.z) ||
+        !std::isfinite(payload.fx) || !std::isfinite(payload.fy))
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    return writeU8(out, capacity, offset, payload.type) &&
+           writeU8(out, capacity, offset, payload.point_index) &&
+           writeU16LE(out, capacity, offset, payload.iteration) &&
+           writeF32LE(out, capacity, offset, payload.measured) &&
+           writeF32LE(out, capacity, offset, payload.limit) &&
+           writeF32LE(out, capacity, offset, payload.z) &&
+           writeF32LE(out, capacity, offset, payload.fx) &&
+           writeF32LE(out, capacity, offset, payload.fy) &&
+           writeU8(out, capacity, offset, payload.skip_applied) &&
+           writeU8(out, capacity, offset, payload.confirm_pending) &&
+           offset == kProcedureAnomalyPayloadWireSize;
+}
+
+bool decodeProcedureAnomalyPayload(const uint8_t* data, std::size_t length,
+                                   ProcedureAnomalyPayload& out)
+{
+    if (length != kProcedureAnomalyPayloadWireSize)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    if (!readU8(data, length, offset, out.type) || !readU8(data, length, offset, out.point_index) ||
+        !readU16LE(data, length, offset, out.iteration) ||
+        !readF32LE(data, length, offset, out.measured, true) ||
+        !readF32LE(data, length, offset, out.limit, true) ||
+        !readF32LE(data, length, offset, out.z, true) ||
+        !readF32LE(data, length, offset, out.fx, true) ||
+        !readF32LE(data, length, offset, out.fy, true) ||
+        !readU8(data, length, offset, out.skip_applied) ||
+        !readU8(data, length, offset, out.confirm_pending) || offset != length)
+    {
+        return false;
+    }
+    if (out.type > 3 || out.skip_applied > 1 || out.confirm_pending > 1)
+    {
+        return false;
+    }
+    return true;
+}
+
+bool decodeBoreCenterPayload(const uint8_t* data, std::size_t length, BoreCenterPayload& out)
+{
+    if (length != kBoreCenterWireSize)
+    {
+        return false;
+    }
+    std::size_t offset = 0;
+    if (!readF32LE(data, length, offset, out.cx, true) || !readF32LE(data, length, offset, out.cy, true) ||
+        !readF32LE(data, length, offset, out.radius, true) ||
+        !readF32LE(data, length, offset, out.residual, true) || !readF32LE(data, length, offset, out.fx, true) ||
+        !readF32LE(data, length, offset, out.fy, true))
+    {
+        return false;
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!readF32LE(data, length, offset, out.x[i], true) || !readF32LE(data, length, offset, out.y[i], true))
+        {
+            return false;
+        }
+    }
+    return readU8(data, length, offset, out.anomaly) && readU8(data, length, offset, out.confirm_pending) &&
+           readU8(data, length, offset, out.valid) && readF32LE(data, length, offset, out.cz, true) &&
+           readU8(data, length, offset, out.point_id) && out.anomaly <= 1 && out.confirm_pending <= 1 &&
+           out.valid <= 1 && offset == length;
 }
 
 bool decodeRawAdcPayload(const uint8_t* data, std::size_t length, RawAdcPayload& out)
@@ -988,6 +1152,48 @@ EncodeResult encodeMessage(uint8_t message_id, const SelectForceCurvePayload& pa
         return result;
     }
     return encodePayloadBuffer(message_id, buffer, kSelectForceCurveWireSize, out, out_capacity);
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const BoreCenterPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kBoreCenterWireSize];
+    if (!encodeBoreCenterPayload(payload, buffer, sizeof(buffer)))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, kBoreCenterWireSize, out, out_capacity);
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const ProcedureDecisionPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kProcedureDecisionPayloadWireSize];
+    if (!encodeProcedureDecisionPayload(payload, buffer, sizeof(buffer)))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, kProcedureDecisionPayloadWireSize, out, out_capacity);
+}
+
+EncodeResult encodeMessage(uint8_t message_id, const ProcedureAnomalyPayload& payload, uint8_t* out,
+                           std::size_t out_capacity)
+{
+    uint8_t buffer[kProcedureAnomalyPayloadWireSize];
+    if (!encodeProcedureAnomalyPayload(payload, buffer, sizeof(buffer)))
+    {
+        EncodeResult result{};
+        result.ok = false;
+        result.error = EncodeError::InvalidPayload;
+        return result;
+    }
+    return encodePayloadBuffer(message_id, buffer, kProcedureAnomalyPayloadWireSize, out, out_capacity);
 }
 
 EncodeResult encodeMessage(uint8_t message_id, const RawAdcPayload& payload, uint8_t* out, std::size_t out_capacity)

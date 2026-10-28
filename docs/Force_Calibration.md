@@ -33,7 +33,7 @@ Zug ist negativ, Druck ist positiv. Das gilt für die Kennlinie und für `HostIn
 | `nominal_g` | Sollstufe des Schritts | Nur die ±100-g-Prüfung, nicht die Regression |
 | Richtung | Schritt, nicht die Eingabe | Vorzeichen der Referenzkraft |
 
-Jede Aufnahme liest 20 Z-Rohwerte im Abstand von 100 ms. Gespeichert wird der gerundete Mittelwert der gültigen Werte. Fehlen einzelne Werte, bleibt der Punkt gültig. Die kraftfreie Messung speichert diesen Mittelwert als Nullpunkt. Jeder Lastpunkt zieht vorher das Adaptergewicht ab: Mittelwert minus `adc_adapter − adc_free`.
+Jede Aufnahme liest 20 Werte von `MsgRawAdc` im Abstand von 100 ms. Jeder dieser Werte ist bereits der 100-ms-Mittelwert der Zählwerte (Abschnitt 2.1 in `docs/XY_Kraftregelung.md`), gerundet auf einen Zählwert. Gespeichert wird der gerundete Mittelwert der gültigen Werte. Fehlen einzelne Werte, bleibt der Punkt gültig. Die kraftfreie Messung speichert diesen Mittelwert als Nullpunkt. Jeder Lastpunkt zieht vorher das Adaptergewicht ab: Mittelwert minus `adc_adapter − adc_free`.
 
 Die Regression sieht diese Nettozählwerte. Sie sieht nicht die beiden Rohmessungen einzeln und nicht die Grammzahl der Sollstufe.
 
@@ -196,15 +196,19 @@ Nachrichten, ohne die 41-Byte-Statusmeldung zu verändern:
 | `0xA4` | `MsgRawAdc` | 7 Byte: drei uint16 und ein Gültigkeitsflag |
 | `0xA5` | `MsgForceCalibration` | 88 Byte Kopf mit beiden Modellen, danach die Referenzkräfte |
 
-`CmdSetMachineConfig` ist 356 Byte. Vor `a_manual` (Handbeschleunigung, Default 500 mm/s²) stehen `force_range_N` und `force_hard_limit_N`. `force_hard_limit_N` ist die harte Grenze für Z. Direkt nach `a_manual` folgen die harten Grenzen für X und Y und danach die Kollisionsgrenzen für X und Y jeder Phase. Die älteren Kollisionsfelder ohne Achsenzusatz sind die Z-Grenze. Default bleibt 30 N für die harte Grenze und die bisherigen Phasenwerte für die Kollision, auf allen drei Achsen gleich. Die Notbremse im Core ist 500 N. StatusReport bleibt 41 Byte. Anzahl und Schrittweite der Kalibrierung gehen nicht in diesen Frame.
+`CmdSetMachineConfig` ist 366 Byte. Am Ende stehen `xy_search_limit` (float32, Default 5 mm), `preclamp_confirm` (uint8, Default 1), `v_bore_search` (float32, Default 1 mm/s, nur die Wand-zu-Wand-Fahrt) und `bore_refine_passes` (uint8, Default 0, höchstens 5). Vor `a_manual` (Handbeschleunigung, Default 500 mm/s²) stehen `force_range_N` und `force_hard_limit_N`. `force_hard_limit_N` ist die harte Grenze für Z. Direkt nach `a_manual` folgen die harten Grenzen für X und Y und danach die Kollisionsgrenzen für X und Y jeder Phase. Die älteren Kollisionsfelder ohne Achsenzusatz sind die Z-Grenze. Default bleibt 30 N für die harte Grenze und die bisherigen Phasenwerte für die Kollision, auf allen drei Achsen gleich. Die Notbremse im Core ist 500 N. StatusReport bleibt 41 Byte. Anzahl und Schrittweite der Kalibrierung gehen nicht in diesen Frame.
 
 Jede Achse geht für sich in den Fault, wenn ihr Betrag die eigene Grenze überschreitet. Die harte Grenze gilt immer. Die Phasengrenze gilt nur, solange die Kollisionsprüfung an ist. Eine höhere Z-Grenze hebt die Grenze von X oder Y nicht mit an.
 
-Die Firmware soll `MsgRawAdc` ausgeben, `0x59`, `0x5A`, `0x5B` und `0x5C` mit demselben Core rechnen und die gespeicherte Kurve auf alle drei Kanäle anwenden: `F = β0 + β1·adc + β2·adc²`, danach `HostInputs.fx/fy/fz = F` ohne Vorzeichenwechsel. Bis Phase 7 gilt auf dem STM32 die provisorische Gerade 0…4095 → ±`force_range_N` (Default ±30 N). Die Simulation bildet für X, Y und Z dieselbe synthetische Kennlinie aus den Stützpunkten (−25 N, 0,3 V), (0 N, 1,5 V) und (+25 N, 2,6 V) und wertet die gespeicherte Regression darauf aus. Senkt ein neuer Messbereich die gespeicherte Kennlinie unter ihren äußersten Punkt, verwirft der Host die Kurve. Anheben des Messbereichs lässt sie stehen.
+Die Firmware gibt `MsgRawAdc` aus und rechnet `0x59`, `0x5A`, `0x5B` und `0x5C` mit demselben Core. Die gespeicherte Kurve gilt auf allen drei Kanälen: `F = β0 + β1·ā + β2·ā²`. `ā` ist der ungerundete 100-ms-Mittelwert der Zählwerte, nicht eine einzelne Wandlung und nicht der gerundete Telemetriewert. Danach läuft dieser Newtonwert in den Core-Tiefpass (`force_filter`, Abschnitt 2.1 in `docs/XY_Kraftregelung.md`). `HostInputs` ist der tiefpassgefilterte, tarierte Wert. Der Watchdog bleibt auf dem tarierten Wert vor dem Tiefpass. Bis eine Kennlinie aktiv ist, gilt auf dem STM32 die provisorische Gerade 0…4095 → ±`force_range_N` (Default ±30 N), angewendet auf dasselbe `ā`.
+
+`MsgRawAdc` trägt `round(ā)` je Kanal. Das Fenster ist fest 100 ms und hängt nicht an `force_filter`. Für `β2 ≠ 0` ist die Kraft des Mittelwerts nicht der Mittelwert der Kräfte; die Differenz liegt bei kleiner Streuung `σ²` bei etwa `β2·σ²` und wird kleiner, weil `σ²` vor der Parabel fällt. Der Wizard kalibriert auf diesen Mittelwerten. Die Referenzmasse `y` bleibt die aufgelegte Masse.
+
+Die Simulation bildet für X, Y und Z dieselbe synthetische Kennlinie aus den Stützpunkten (−25 N, 0,3 V), (0 N, 1,5 V) und (+25 N, 2,6 V) und wertet die gespeicherte Regression darauf aus. Senkt ein neuer Messbereich die gespeicherte Kennlinie unter ihren äußersten Punkt, verwirft der Host die Kurve. Anheben des Messbereichs lässt sie stehen.
 
 ## Ruheprobe im Betrieb
 
-Die Kalibrierkurve bleibt unverändert. Die Ruheprobe zieht danach einen Offset von den drei Prozesskräften ab. `Fx`, `Fy` und `Fz` sind die Newtonwerte der Kennlinie minus den Mittelwert der letzten abgeschlossenen Ruheprobe. Bis zur ersten Ruheprobe ist der Offset 0.
+Die Kalibrierkurve bleibt unverändert. Danach glättet der Core den Newtonwert mit `force_filter` (Default `tau = 0,05 s`). Die Ruheprobe zieht einen Offset von diesem gefilterten Wert ab. Gezählt werden dafür 20 ungefilterte Rohwerte. `Fx`, `Fy` und `Fz` in `HostInputs` sind also Tiefpass(Kennlinie) minus den Mittelwert der letzten abgeschlossenen Ruheprobe. Bis zur ersten Ruheprobe ist der Offset 0. Der Watchdog benutzt Tiefpass nicht: er vergleicht Kennlinie minus Offset.
 
 Eine Ruheprobe nimmt 20 Werte im Abstand von 100 ms auf. Der erste Wert liegt im Startaugenblick, der letzte nach 1,9 s. Gezählt wird die Zeit, nicht die Anzahl der Ticks, damit die Simulation (50 ms) und der STM32 (1 ms) dieselben 20 Werte bilden. Jeder Wert ist die Kraft vor Abzug des bisherigen Offsets. Erst der zwanzigste Wert ersetzt den Offset. STOP, Fault und Prozedurabbruch verwerfen eine laufende Aufnahme. Ein bereits gesetzter Offset bleibt.
 
@@ -213,9 +217,9 @@ Während der 1,9 s stehen die Achsen. Die harte Kraftgrenze bleibt aktiv. Die ni
 In der Prüfprozedur gibt es an jedem Stillstand genau eine Ruheprobe, nicht zwei hintereinander:
 
 1. nach der groben Anfahrt, vor der feinen Z-Abfahrt (`PointApproach`). Nicht vor `PreClampXyCorrect`: die XY-Korrektur muss die Kraft der feinen Anfahrt sehen.
-2. nach dem Öffnen des Spreizers, vor Phase 1 (`InsertInitial`)
-3. zwischen Phase 1 und Phase 2 (`OptimizeInsert`)
-4. zwischen Phase 2 und Phase 3 (`TestOrAge`)
-5. nach Phase 3, vor dem Öffnen (`Unclamp`)
+2. nach dem ersten Clamp, vor SeatToForce (`InsertInitial`)
+3. nach SeatToForce, vor Unclamp AfterSeat
+4. nach dem zweiten Clamp, vor der Prüfphase (`TestOrAge`)
+5. nach der Prüfphase, vor Unclamp AfterTest
 
-Die Phase heißt `ForceTare` und hat die Ordnungszahl 17. Die bisherigen Phasennummern bleiben. Im Handmodus startet der Knopf „Ruheprobe“ dasselbe über `CmdForceTare`. Der Befehl wird abgelehnt, solange eine Prozedur läuft, eine Achse fährt, referenziert wird oder bereits eine Ruheprobe läuft.
+Die Phase heißt `ForceTare` und hat die Ordnungszahl 17. Im Handmodus startet der Knopf „Ruheprobe“ dasselbe über `CmdForceTare`. Der Befehl wird abgelehnt, solange eine Prozedur läuft, eine Achse fährt, referenziert wird oder bereits eine Ruheprobe läuft.

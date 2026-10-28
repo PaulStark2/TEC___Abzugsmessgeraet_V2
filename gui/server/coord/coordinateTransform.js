@@ -2,7 +2,8 @@
 
 /**
  * Plate-frame → machine-frame (mirrors core/CoordinateTransform.hpp).
- * machine = plateOrigin + platePoint + toolOffset
+ * machine.xy = plateOrigin.xy + Rz(plateYaw) * platePoint.xy + toolOffset.xy
+ * machine.z  = plateOrigin.z + platePoint.z + toolOffset.z
  */
 
 function toMachinePoint(calibration, platePoint) {
@@ -11,15 +12,20 @@ function toMachinePoint(calibration, platePoint) {
   }
   const o = calibration.plateOrigin;
   const t = calibration.toolOffset || { x: 0, y: 0, z: 0 };
+  const yaw = Number(calibration.plateYawRad) || 0;
   const px = Number(platePoint.x);
   const py = Number(platePoint.y);
   const pz = Number(platePoint.z);
-  if (![o.x, o.y, o.z, t.x, t.y, t.z, px, py, pz].every(Number.isFinite)) {
+  if (![o.x, o.y, o.z, t.x, t.y, t.z, px, py, pz, yaw].every(Number.isFinite)) {
     return null;
   }
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  const rx = c * px - s * py;
+  const ry = s * px + c * py;
   return {
-    x: o.x + px + t.x,
-    y: o.y + py + t.y,
+    x: o.x + rx + t.x,
+    y: o.y + ry + t.y,
     z: o.z + pz + t.z,
   };
 }

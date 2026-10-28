@@ -110,10 +110,6 @@ struct MachineConfigPayload
     float spreader_extend_time_s;
     float spreader_retract_time_s;
     float force_tolerance_N;
-    float z_correction_gain;
-    float z_correction_max;
-    float minimum_correction;
-    uint16_t max_optimization_iterations;
     float v_search;
     float probe_search_distance;
     float probe_backoff;
@@ -147,10 +143,6 @@ struct MachineConfigPayload
     float phase1_v_insert;
     float phase1_a;
     float phase1_corner;
-    float phase2_v_extract;
-    float phase2_v_insert;
-    float phase2_a;
-    float phase2_corner;
     float phase3_v_extract;
     float phase3_v_insert;
     float phase3_a;
@@ -185,6 +177,29 @@ struct MachineConfigPayload
     float collision_contact_y_N = 30.0f;
     float collision_measure_x_N = 30.0f;
     float collision_measure_y_N = 30.0f;
+    // Appended. Older fields stay put.
+    float xy_search_limit = 5.0f;
+    uint8_t preclamp_confirm = 1;
+    // Wall-to-wall speed. Appended so the earlier fields stay put.
+    float v_bore_search = 1.0f;
+    // Extra two-chord refine passes. Appended.
+    uint8_t bore_refine_passes = 0;
+    // Plate bore teach (independent of PreClamp). Appended.
+    float v_plate_bore_search = 1.0f;
+    float plate_wall_force_N = 0.5f;
+    float plate_floor_force_N = 0.5f;
+    float plate_xy_search_limit = 5.0f;
+    float plate_z_search_limit = 10.0f;
+    float plate_z_lift_mm = 2.0f;
+    float plate_bore_timeout_s = 60.0f;
+    uint8_t plate_bore_refine_passes = 0;
+    // Appended: anomaly / test envelope (after plate_calib).
+    float coord_tolerance_mm = 0.5f;
+    float test_lateral_force_N = 5.0f;
+    float z_limit_pos_mm = 10.0f;
+    float z_limit_neg_mm = 15.0f;
+    uint8_t anomaly_skip = 0;
+    float tool_offset_change_tolerance_mm = 0.5f;
 };
 
 struct TestConfigurationPayload
@@ -231,6 +246,34 @@ struct RawAdcPayload
     uint8_t valid = 0;
 };
 
+struct BoreCenterPayload
+{
+    float cx = 0.0f;
+    float cy = 0.0f;
+    float radius = 0.0f;
+    float residual = 0.0f;
+    float fx = 0.0f;
+    float fy = 0.0f;
+    float x[4] = {};
+    float y[4] = {};
+    uint8_t anomaly = 0;
+    uint8_t confirm_pending = 0;
+    uint8_t valid = 0;
+    // Appended: Z after floor lift; point_id 0=PreClamp, 1=KM, 2=K1, 3=K2, 4=K3.
+    float cz = 0.0f;
+    uint8_t point_id = 0;
+};
+
+struct PlateYawPayload
+{
+    float yaw_rad = 0.0f;
+};
+
+struct PlateBorePointPayload
+{
+    uint8_t point_id = 0;
+};
+
 struct ForceCalibrationResultPayload
 {
     uint8_t requested_source = 0;
@@ -271,8 +314,30 @@ struct ForcePathChunkPayload
     uint32_t sequence;
     uint8_t sample_count;
     uint32_t dropped;
+    uint8_t leg = 0; // 0 = Insert (Eingliedern), 1 = Extract (Ausgliedern)
     float z[kForcePathChunkMaxSamples];
     float fz[kForcePathChunkMaxSamples];
+};
+
+// Operator decision for a procedure anomaly confirm dialog.
+struct ProcedureDecisionPayload
+{
+    uint8_t action = 0; // 0=Continue, 1=NextPoint, 2=RepeatPoint
+};
+
+// Procedure anomaly notify (CoordDrift / LateralForce / ZTravelLimit / TcpHang).
+struct ProcedureAnomalyPayload
+{
+    uint8_t type = 0; // 0=CoordDrift, 1=LateralForce, 2=ZTravelLimit, 3=TcpHang
+    uint8_t point_index = 0;
+    uint16_t iteration = 0;
+    float measured = 0.0f;
+    float limit = 0.0f;
+    float z = 0.0f;
+    float fx = 0.0f;
+    float fy = 0.0f;
+    uint8_t skip_applied = 0;
+    uint8_t confirm_pending = 0;
 };
 
 } // namespace tecomm

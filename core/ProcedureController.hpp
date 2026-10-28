@@ -1,5 +1,7 @@
 #pragma once
 
+#include "BorePoint.hpp"
+#include "BoreSearch.hpp"
 #include "CoordinateTransform.hpp"
 #include "ForcePathRecorder.hpp"
 #include "Machine.hpp"
@@ -40,7 +42,65 @@ public:
 
     ProbeCalibration& probeCalibration();
 
+    // Last two-chord center. fresh until the bridge has copied it into MsgBoreCenter.
+    struct BoreReport
+    {
+        bool fresh = false;
+        bool anomaly = false;
+        bool confirm_pending = false;
+        float cx = 0.0f;
+        float cy = 0.0f;
+        float cz = 0.0f;
+        float radius = 0.0f;
+        float residual = 0.0f;
+        float fx = 0.0f;
+        float fy = 0.0f;
+        float x[4] = {};
+        float y[4] = {};
+        std::uint8_t point_id = 0; // 0=PreClamp, 1=KM, 2=K1, 3=K2, 4=K3
+    };
+
+    const BoreReport& boreReport() const;
+    void consumeBoreReport();
+
+    // Standalone plate bore teach (XY chords + floor + lift). point_id: 1=KM … 4=K3.
+    bool startPlateBoreSearch(std::uint8_t point_id);
+
+    // Procedure anomaly (CoordDrift / LateralForce / ZTravelLimit / TcpHang).
+    struct AnomalyReport
+    {
+        bool fresh = false;
+        bool confirm_pending = false;
+        bool skip_applied = false;
+        uint8_t type = 0; // 0=CoordDrift, 1=LateralForce, 2=ZTravelLimit, 3=TcpHang
+        uint8_t point_index = 0;
+        uint16_t iteration = 0;
+        float measured = 0.0f;
+        float limit = 0.0f;
+        float z = 0.0f;
+        float fx = 0.0f;
+        float fy = 0.0f;
+    };
+
+    const AnomalyReport& anomalyReport() const;
+    void consumeAnomalyReport();
+    // action: 0=Continue, 1=NextPoint, 2=RepeatPoint
+    void applyProcedureDecision(uint8_t action);
+
 private:
+    enum class UnclampMode : uint8_t
+    {
+        AfterSeat = 0,
+        AfterTest = 1
+    };
+
+    enum class AnomalyExitAction : uint8_t
+    {
+        None = 0,
+        NextPoint = 1,
+        RepeatPoint = 2
+    };
+
     bool motionSettled() const;
     bool zMinBlocked() const;
     bool atSafeZ() const;
@@ -56,11 +116,13 @@ private:
     void handleMoveSafePose();
     void handleProbeApproach();
     void handleProbeCalibrate(float dt);
+    void handleProbeRemeasure(float dt);
     void handlePointApproach();
     void handlePreClamp(float dt);
+    void handlePlateBoreSearch(float dt);
+    void publishBoreReport(const BoreSearch::Result& result, bool confirm_pending);
     void handleClamp();
     void handleInsertInitial();
-    void handleOptimizeInsert();
     void handleTestOrAge();
     void handleUnclamp();
     void handleNextPoint();
@@ -69,6 +131,12 @@ private:
     void startForceTareBeforeFineApproach();
     void commandFineApproach();
     void handleForceTare();
+
+    void raiseAnomaly(uint8_t type, float measured, float limit);
+    bool checkTestOrAgeAnomalies();
+    void beginAnomalyExit(AnomalyExitAction action);
+    void tickAnomalyExit();
+    void finishAnomalyExit();
 
     Machine& machine_;
     TestProgram program_;
@@ -84,19 +152,51 @@ private:
     float point_y_;
     unsigned optimize_attempts_;
     unsigned cycle_iteration_;
-    uint8_t cycle_leg_; // phase-specific leg (InsertInitial unload/insert; Optimize/Test; Unclamp)
-    uint8_t approach_leg_; // PointApproach: 0 raise, 1 XY, 2 coarse Z, 3 fine Z; MoveSafeEnd: 0 raise, 2 homing
+    uint8_t cycle_leg_; // phase-specific leg (InsertInitial; Test; Unclamp)
+    uint8_t approach_leg_; // PointApproach / ProbeApproach / ProbeRemeasure / MoveSafeEnd
     TestPoint target_machine_;
     float end_x_;
     float end_y_;
-    float preclamp_elapsed_s_;
-    int8_t phase2_last_error_sign_;
-    unsigned phase2_sign_flips_;
-    float phase2_measured_fz_; // Fz latched at insertion_z after insert leg
-    float phase2_motion_fz_; // last Fz observed while inserting
     bool probe_calib_standalone_;
     ProcedurePhase tare_next_;
     // Coarse Z has stopped. After ForceTare, resume PointApproach leg 3
     // instead of enterPhase(tare_next_), which would restart the approach.
     bool fine_approach_after_tare_;
+
+    BoreSearch bore_search_{};
+    bool preclamp_await_confirm_ = false;
+    bool plate_bore_standalone_ = false;
+    std::uint8_t plate_bore_point_id_ = 0;
+    BoreReport bore_report_{};
+
+    // 0=before seat (Clamp→Seat), 1=after seat (Clamp→Test), 2=after test
+    uint8_t point_stage_ = 0;
+    UnclampMode unclamp_mode_ = UnclampMode::AfterSeat;
+
+    float ref_insert_x_ = 0.0f;
+    float ref_insert_y_ = 0.0f;
+    float ref_insert_z_ = 0.0f;
+    float ref_extract_x_ = 0.0f;
+    float ref_extract_y_ = 0.0f;
+    float ref_extract_z_ = 0.0f;
+    float last_insert_x_ = 0.0f;
+    float last_insert_y_ = 0.0f;
+    float last_insert_z_ = 0.0f;
+    float last_extract_x_ = 0.0f;
+    float last_extract_y_ = 0.0f;
+    float last_extract_z_ = 0.0f;
+    bool ref_insert_valid_ = false;
+    bool ref_extract_valid_ = false;
+
+    TestPoint tool_offset_before_remeasure_{};
+    bool probe_remeasure_calib_active_ = false;
+
+    AnomalyReport anomaly_report_{};
+    bool anomaly_exit_pending_ = false;
+    uint8_t anomaly_exit_leg_ = 0;
+    AnomalyExitAction anomaly_exit_action_ = AnomalyExitAction::None;
+
+    // Kraft-Weg distance gate (TestOrAge). Reset on leg/iteration change.
+    bool force_path_have_z_ = false;
+    float force_path_last_z_ = 0.0f;
 };

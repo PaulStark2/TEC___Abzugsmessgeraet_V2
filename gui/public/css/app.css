@@ -1053,3 +1053,121 @@ button:disabled {
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+/* Prüfergebnisse / Kraft-Weg-Auswertung */
+.results-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.results-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.results-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.stat-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  background: var(--panel, #fff);
+}
+
+.stat-card h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.stat-value {
+  margin: 0;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value--secondary {
+  margin-top: 0.5rem;
+  font-size: 1.1rem;
+}
+
+.stat-sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.curve-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.curve-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.curve-toggle .swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.force-chart-svg {
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.force-chart-svg .axis-label,
+.force-chart-svg .axis-tick {
+  fill: var(--muted, #666);
+  font-size: 11px;
+}
+
+.leg-toggle {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.leg-toggle button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--bg, #f5f5f5);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.leg-toggle button.is-active {
+  background: var(--text, #222);
+  color: #fff;
+  border-color: transparent;
+}
+
+.results-sample-table tr {
+  cursor: pointer;
+}
+
+.results-sample-table tr.is-highlighted,
+.results-sample-table tr:hover {
+  background: rgba(91, 159, 212, 0.18);
+}

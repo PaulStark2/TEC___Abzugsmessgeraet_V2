@@ -16,7 +16,7 @@ Writable parameters:
 
 | Type | File | Role |
 |------|------|------|
-| `MachineConfig` | `core/MachineConfig.hpp` | Motion, force, collision contexts, spreader times, phase-2, probe placeholders, home/tool offset |
+| `MachineConfig` | `core/MachineConfig.hpp` | Motion, force (incl. anomaly params), collision, spreader, probe, plate_calib, home/tool offset |
 | `TestConfiguration` | `core/TestConfiguration.hpp` | `Test` / `Aging`, `targetForce`, `iterations`, `activePointIndex` |
 | `CalibrationSet` | `core/CalibrationSet.hpp` | Taught `plateOrigin`, `probeCenter`, `toolOffset`, `homeOffset` |
 
@@ -76,23 +76,25 @@ and are owned by **one** sequencer: `ProcedureController`. `TestExecutor` is a f
 
 `CmdStart` runs the full cycle (not simple point-to-point hopping).
 
-PAUSE is rejected (`InvalidState`) during Clamp / InsertInitial / OptimizeInsert /
-TestOrAge / Unclamp. STOP always aborts to `Aborted`.
+PAUSE is rejected (`InvalidState`) during Clamp / InsertInitial / TestOrAge /
+Unclamp / ProbeRemeasure / ForceTare. STOP always aborts to `Aborted`.
+Anomaly waits use internal `pauseHolding` plus `CmdProcedureDecision`.
 
-## M17.7–M17.9 — Insert, optimize, test/aging
+## M17.7–M17.9 — Seat, test/aging, unclamp
 
-- PreClamp: Fx/Fy hysteresis only (`Machine::setPreClampXyEnabled`).
-- Phase 1 (`InsertInitial`):
-  1. If `|Fz| > force_tolerance_N`, first extract (Z+) until force-free
-     (`|Fz| <= phase2.force_tolerance_N`), using `insert_search_distance` as search
-     stroke.
-  2. Then constant-velocity Z− until `Fz >= targetForce` (or search end / Z-min).
-  3. `ExtractionPoint = InsertionPoint + insertionBuffer` (Z+, computed).
-- Phase 2: discrete `ΔZ = gain * (Fz - target)` between attempts. No PID. Abort after
-  `maxOptimizationIterations`.
-- Phase 3 Aging: extract ↔ insert, `iterations` times, no force control.
-- Phase 3 Test: same motion; `ForcePathRecorder` ring (256) of `(z, fz)`. Overflow drops
-  oldest and increments `dropped`. Never blocks `tick()`.
+Per point (after initial OffsetOnly at run start):
+
+```text
+PointApproach → PreClamp → Clamp → SeatToForce → Unclamp AfterSeat
+  → PreClamp → Clamp → TestOrAge → Unclamp AfterTest → ProbeRemeasure → NextPoint
+```
+
+- PreClamp: bore-center search via `BoreSearch` (two chords). Twice per point.
+- SeatToForce (`InsertInitial`): constant-velocity Z− until `Fz >= targetForce`, then Unclamp AfterSeat (open at seat, standoff, redescend).
+- TestOrAge: first to kraftfrei (`|Fz| <= force.force_tolerance_N`), then `iterations` of force-threshold insert/extract; Test mode records force-path; anomalies for coord drift, lateral force, Z travel limits.
+- Unclamp AfterTest: re-seat to target force, open, fine then coarse to Safe-Z.
+- ProbeRemeasure: OffsetOnly hang check vs `tool_offset_change_tolerance_mm`.
+- Phase 2 (`OptimizeInsert`) removed.
 
 Coarse approach stand-off for ProbeApproach and PointApproach uses
 `probe.approach_distance` (default 15 mm) above the target Z; fine PointApproach uses
@@ -102,7 +104,7 @@ Coarse approach stand-off for ProbeApproach and PointApproach uses
 | ID | Name | Payload |
 |----|------|---------|
 | `0x54` | `CmdStartProbeCalib` | empty |
-| `0xA2` | `MsgForcePathChunk` | header 12 B + `sampleCount * 8` B; max 32 samples |
+| `0xA2` | `MsgForcePathChunk` | header 13 B (incl. `leg`) + `sampleCount * 8` B; max 32 samples; see [`Measurement_Evaluation.md`](Measurement_Evaluation.md) |
 
 Chunk fields: `pointIndex u8`, `iteration u16`, `sequence u32`, `sampleCount u8`,
 `dropped u32`, then `(z f32, fz f32) * sampleCount`.
@@ -122,7 +124,7 @@ be dropped; the realtime loop does not wait.
 - Beim Protocol-Connect wird die gespeicherte Config per `CmdSetMachineConfig` übertragen.
 - TestConfiguration und PlateOrigin werden vor `CmdStart` gesendet.
 - Messtaster-Button sendet `CmdStartProbeCalib` (manuelle Einmessung, M19.0).
-- Kraft-Weg-Kurven aus `MsgForcePathChunk` in den Ergebnissen.
+- Kraft-Weg-Auswertung aus `MsgForcePathChunk` in den Ergebnissen (Ein-/Ausgliedern, Spitzenstatistik, CSV/PDF): [`Measurement_Evaluation.md`](Measurement_Evaluation.md).
 
 Kein EEPROM/Flash auf dem STM32 in M17. Keine STM32-HAL, kein ADC-Treiber.
 

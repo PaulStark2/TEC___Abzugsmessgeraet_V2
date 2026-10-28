@@ -159,7 +159,7 @@ int main()
         // M9: pose -> deterministic 3D force stub; Machine stores only (no evaluation).
         HostInputs inputs{};
         const ProcedurePhase phase = executor.procedurePhase();
-        if (phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::OptimizeInsert ||
+        if (phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::ProbeRemeasure ||
             phase == ProcedurePhase::TestOrAge)
         {
             inputs.force.fz = machine.testConfiguration().target_force_N;

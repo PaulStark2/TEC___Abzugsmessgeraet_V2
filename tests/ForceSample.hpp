@@ -6,6 +6,7 @@
 #include "ProbeGeometry.hpp"
 #include "TestExecutor.hpp"
 
+#include <cmath>
 #include <cstdint>
 
 // Stamp a new force conversion so Machine freshness tracking resets.
@@ -75,19 +76,72 @@ inline void tickWithForce(Machine& machine, float dt, HostInputs in = HostInputs
 
 inline bool phaseNeedsProcessForce(ProcedurePhase phase)
 {
-    return phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::OptimizeInsert ||
-           phase == ProcedurePhase::TestOrAge;
+    // Unclamp AfterTest re-seats to target force before opening.
+    return phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::ProbeRemeasure ||
+           phase == ProcedurePhase::TestOrAge || phase == ProcedurePhase::Unclamp;
 }
 
-// Tensile-positive Fz at the configured target during insert/optimize/measure so complete-run
-// tests do not treat AtTarget as Phase-1 success.
-inline HostInputs withProcessForce(const TestExecutor& ex, const Machine& machine, HostInputs in = HostInputs{})
+// Radial bore around the pose where PreClamp is first seen. Only while that phase
+// runs, and only when the caller left Fx and Fy at zero. Approach and insert stay
+// on the caller's force. A +X wall reads +Fx, so the search moves −X.
+inline HostInputs withProcedurePlant(const TestExecutor& ex, const Machine& machine, HostInputs in = HostInputs{})
 {
-    if (phaseNeedsProcessForce(ex.procedurePhase()))
+    struct Latch
     {
-        in.force.fz = machine.testConfiguration().target_force_N;
+        const Machine* machine = nullptr;
+        float cx = 0.0f;
+        float cy = 0.0f;
+    };
+    static Latch latch;
+    const bool preclamp = ex.procedurePhase() == ProcedurePhase::PreClampXyCorrect;
+    if (!preclamp)
+    {
+        if (latch.machine == &machine)
+        {
+            latch.machine = nullptr;
+        }
+    }
+    else if (in.force.fx == 0.0f && in.force.fy == 0.0f)
+    {
+        if (latch.machine != &machine)
+        {
+            latch.machine = &machine;
+            latch.cx = machine.x();
+            latch.cy = machine.y();
+        }
+        constexpr float kRadiusMm = 0.4f;
+        constexpr float kStiffness = 80.0f;
+        const float dx = machine.x() - latch.cx;
+        const float dy = machine.y() - latch.cy;
+        const float radius = std::hypot(dx, dy);
+        if (radius > kRadiusMm)
+        {
+            const float penetration = radius - kRadiusMm;
+            in.force.fx = kStiffness * penetration * dx / radius;
+            in.force.fy = kStiffness * penetration * dy / radius;
+        }
     }
     return withPlantInputs(machine, in);
+}
+
+inline HostInputs withProcessForce(const TestExecutor& ex, const Machine& machine, HostInputs in = HostInputs{})
+{
+    const ProcedurePhase ph = ex.procedurePhase();
+    const float target = machine.testConfiguration().target_force_N + 0.05f;
+    if (ph == ProcedurePhase::InsertInitial || ph == ProcedurePhase::Unclamp)
+    {
+        in.force.fz = target;
+    }
+    else if (ph == ProcedurePhase::TestOrAge)
+    {
+        // Legs 0/2 extract → kraftfrei (0). Leg 1 insert → seat force.
+        in.force.fz = (ex.procedure().cycleLeg() == 1) ? target : 0.0f;
+    }
+    else if (ph == ProcedurePhase::ProbeRemeasure)
+    {
+        in.force.fz = 0.0f;
+    }
+    return withProcedurePlant(ex, machine, in);
 }
 
 // Drive Z+ → X+ → Y+ to Homed. First call on a fresh machine defines MCS;

@@ -205,7 +205,7 @@ async function main() {
       );
       lastPhase = phase;
     }
-    if (zBucket !== lastZBucket && (phase === 'InsertInitial' || phase === 'OptimizeInsert' || phase === 'TestOrAge')) {
+    if (zBucket !== lastZBucket && (phase === 'InsertInitial' || phase === 'ProbeRemeasure' || phase === 'TestOrAge')) {
       zTrace.push({
         phase,
         z: status.z,
@@ -232,7 +232,7 @@ async function main() {
   const interesting = (stderr + stdout)
     .split(/\r?\n/)
     .filter((l) =>
-      /InsertInitial|OptimizeInsert|TestOrAge|enterPhase|SIM_BUILD|force-free|start OUT|start IN|cycle_leg|contact ok|target_force|CmdSetTestConfiguration/.test(
+      /InsertInitial|ProbeRemeasure|TestOrAge|enterPhase|SIM_BUILD|force-free|start OUT|start IN|cycle_leg|contact ok|target_force|CmdSetTestConfiguration/.test(
         l
       )
     );

@@ -31,7 +31,7 @@ int main()
 
     for (int i = 0; i < 2500 && ex.procedurePhase() != ProcedurePhase::Clamp; ++i)
     {
-        machine.setHostInputs(withPlantInputs(machine));
+        machine.setHostInputs(withProcedurePlant(ex, machine));
         ex.tick(0.05f);
     }
     if (ex.procedurePhase() != ProcedurePhase::Clamp)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CalibrationSet.hpp"
+#include "ForceFilter.hpp"
 #include "ForceTare.hpp"
 #include "ForceWatchdog.hpp"
 #include "HostInputs.hpp" // host input container
@@ -124,6 +125,9 @@ public:
 
     // Pause motion if Active, resume only from Paused. // pause
     void pause(); // command
+    // Same as pause, and also from Idle. Used when PreClamp waits for a confirm
+    // after the center move has already settled.
+    void pauseHolding();
     void resume(); // command
 
     // Stop motion from any non-terminal state. // stop
@@ -165,6 +169,9 @@ public:
     void setPlateOrigin(const TestPoint& machine_pose);
     void setProbeCenter(const TestPoint& machine_pose);
     void setToolOffset(const TestPoint& offset);
+    void setPlateYaw(float yaw_rad);
+    void setRotationPoints(const TestPoint& k1, const TestPoint& k2, const TestPoint& k3);
+    void clearRotationPoints();
     const CalibrationSet& calibrationSet() const;
 
     void setActiveVelocity(float velocity);
@@ -289,8 +296,9 @@ private:
     std::uint32_t last_probe_trigger_sequence_;
 
     // Host I/O containers (no evaluation). // placeholders
-    HostInputs host_inputs_; // last inputs, force already tared
+    HostInputs host_inputs_; // last inputs; force is tared and, when tau > 0, low-pass filtered
     ForceVector raw_force_{0.0f, 0.0f, 0.0f};
+    ForceFilter force_filter_;
     ForceTare force_tare_;
     HostOutputs host_outputs_; // produced outputs
 
@@ -336,4 +344,7 @@ private:
     float homing_creep_back_traveled_;
 
     void tickActiveMotion(float dt);
+    // One low-pass step on raw_force_, then publish tare(filtered).
+    void advanceForceFilter(float dt);
+    void publishFilteredForce();
 };

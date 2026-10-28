@@ -21,16 +21,20 @@ const NACK_PAYLOAD_WIRE_SIZE = 3;
 const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 41;
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
-const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 356;
+const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 386;
 const TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE = 8;
 const PLATE_ORIGIN_PAYLOAD_WIRE_SIZE = 12;
 const FORCE_PATH_CHUNK_MAX_SAMPLES = 32;
-const FORCE_PATH_CHUNK_HEADER_WIRE_SIZE = 12;
+// point u8 + iter u16 + seq u32 + count u8 + dropped u32 + leg u8
+const FORCE_PATH_CHUNK_HEADER_WIRE_SIZE = 13;
 const FORCE_CALIB_MAX_POINTS = 33;
 const FORCE_CALIB_POINT_WIRE_SIZE = 12;
 const SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE = 4;
 const SELECT_FORCE_CURVE_WIRE_SIZE = 16;
 const RAW_ADC_WIRE_SIZE = 7;
+const BORE_CENTER_WIRE_SIZE = 64;
+const PROCEDURE_DECISION_WIRE_SIZE = 1;
+const PROCEDURE_ANOMALY_WIRE_SIZE = 26;
 const FORCE_CALIB_RESULT_HEADER_WIRE_SIZE = 88;
 
 const NO_CURRENT_POINT_INDEX = 0xff;
@@ -53,6 +57,9 @@ const MessageId = Object.freeze({
   CmdSetTestConfiguration: 0x52,
   CmdSetPlateOrigin: 0x53,
   CmdStartProbeCalib: 0x54,
+  CmdStartPlateBoreSearch: 0x5d,
+  CmdSetPlateYaw: 0x5e,
+  CmdProcedureDecision: 0x5f,
   CmdSetProbeCenter: 0x55,
   CmdDefineMcs: 0x56,
   CmdRestoreMcs: 0x57,
@@ -70,6 +77,8 @@ const MessageId = Object.freeze({
   MsgMachineConfig: 0xa3,
   MsgRawAdc: 0xa4,
   MsgForceCalibration: 0xa5,
+  MsgBoreCenter: 0xa6,
+  MsgProcedureAnomaly: 0xa7,
 });
 
 const MachineState = Object.freeze({
@@ -129,7 +138,7 @@ const PROCEDURE_PHASE_NAMES = Object.freeze([
   'PreClampXyCorrect',
   'Clamp',
   'InsertInitial',
-  'OptimizeInsert',
+  'ProbeRemeasure',
   'TestOrAge',
   'Unclamp',
   'NextPoint',
@@ -255,6 +264,9 @@ module.exports = {
   SET_FORCE_CALIBRATION_HEADER_WIRE_SIZE,
   SELECT_FORCE_CURVE_WIRE_SIZE,
   RAW_ADC_WIRE_SIZE,
+  BORE_CENTER_WIRE_SIZE,
+  PROCEDURE_DECISION_WIRE_SIZE,
+  PROCEDURE_ANOMALY_WIRE_SIZE,
   FORCE_CALIB_RESULT_HEADER_WIRE_SIZE,
   NO_CURRENT_POINT_INDEX,
   MessageId,

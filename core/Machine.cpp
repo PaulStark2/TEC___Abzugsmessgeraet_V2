@@ -5,11 +5,11 @@
 namespace
 {
 
-// One XY correction step per simulation control cycle. simulation_protocol ticks
-// at 50 ms; the STM32 host ticks at 1 ms. The step size in MachineConfig is
-// defined for that 50 ms cycle, not for every tick.
-// Fifty additions of 0.001f land a few ULPs under 0.05f, so the compare has a
-// slack well below one millisecond.
+// One XY correction decision per 50 ms while PreClamp is enabled. The clock
+// runs whether or not the hysteresis is on; a noisy sample must not wipe the
+// elapsed time. simulation_protocol ticks at 50 ms; the STM32 host ticks at
+// 1 ms. Fifty additions of 0.001f land a few ULPs under 0.05f, so the compare
+// has a slack well below one millisecond.
 constexpr float kXyCorrectionPeriodS = 0.05f;
 constexpr float kXyCorrectionPeriodSlackS = 1.0e-4f;
 
@@ -168,11 +168,37 @@ bool Machine::limitWarningActive() const
     return blocked_directions_ != 0 || activeLimitSwitchMask() != 0;
 }
 
+void Machine::publishFilteredForce()
+{
+    host_inputs_.force = force_tare_.apply(force_filter_.value());
+}
+
+void Machine::advanceForceFilter(float dt)
+{
+    const float tau = machine_config_.force.force_filter;
+    if (!(tau > 0.0f) || !(dt > 0.0f))
+    {
+        force_filter_.reset(raw_force_);
+    }
+    else
+    {
+        force_filter_.update(raw_force_, dt, tau);
+    }
+    publishFilteredForce();
+}
+
 void Machine::setHostInputs(const HostInputs& inputs)
 {
     raw_force_ = inputs.force;
     host_inputs_ = inputs;
-    host_inputs_.force = force_tare_.apply(raw_force_);
+    // First sample, and tau = 0, publish the raw value. A later tick is what
+    // advances the low-pass, so several writes between ticks do not each take
+    // a filter step.
+    if (!force_filter_.hasSample() || !(machine_config_.force.force_filter > 0.0f))
+    {
+        force_filter_.reset(raw_force_);
+    }
+    publishFilteredForce();
     if (inputs.forceSampleValid &&
         (!have_force_sample_ || inputs.forceSampleSequence != last_force_sample_sequence_))
     {
@@ -735,6 +761,7 @@ void Machine::finishHomingSuccess()
         calibration_set_.probe_center_valid = false;
         calibration_set_.tool_offset = TestPoint{0.0f, 0.0f, 0.0f};
         machine_config_.calibration.tool_offset = calibration_set_.tool_offset;
+        ::clearRotationPoints(calibration_set_);
     }
     // Reference mode: home_offset / plate / probe / tool_offset unchanged.
 
@@ -971,7 +998,9 @@ void Machine::evaluateHostSafety(float dt)
         return;
     }
 
-    last_force_watchdog_trip_ = evaluateForceWatchdog(host_inputs_.force, machine_config_, collision_context_,
+    // Watchdog stays on the tared raw sample. The low-pass must not delay a hard limit.
+    const ForceVector watched = force_tare_.apply(raw_force_);
+    last_force_watchdog_trip_ = evaluateForceWatchdog(watched, machine_config_, collision_context_,
                                                      collision_phase_enabled_ && !force_tare_.active());
     if (last_force_watchdog_trip_ == ForceWatchdogTrip::NonFinite)
     {
@@ -991,7 +1020,8 @@ void Machine::evaluateHostSafety(float dt)
 
     if (force_tare_.tick(dt, raw_force_))
     {
-        host_inputs_.force = force_tare_.apply(raw_force_);
+        // Offset changed. The filter state is still on the raw signal.
+        publishFilteredForce();
     }
 
     if (force_sample_fresh_)
@@ -1034,6 +1064,9 @@ void Machine::advanceKinematics(float dt)
     {
         return;
     }
+
+    // Pose(t) uses the force sample advanced by this same dt.
+    advanceForceFilter(dt);
 
     spreader_timer_.tick(dt);
     host_outputs_.spreaderExtend = spreader_timer_.command();
@@ -1078,8 +1111,9 @@ void Machine::tick(float dt)
 
 void Machine::tickActiveMotion(float dt)
 {
-    const float fz = host_inputs_.force.fz;
-    if (std::fabs(fz) >= force_params_.fz_safety_threshold_N)
+    // Same raw sample as the watchdog. The published force may already be filtered.
+    const float fz_raw = force_tare_.apply(raw_force_).fz;
+    if (std::fabs(fz_raw) >= force_params_.fz_safety_threshold_N)
     {
         enterSafetyFault(FaultReason::ForceHardLimit);
         return;
@@ -1088,41 +1122,17 @@ void Machine::tickActiveMotion(float dt)
     const bool apply_xy = pre_clamp_xy_enabled_;
     force_phase_ = apply_xy ? ForceControlPhase::SlowZApproach : ForceControlPhase::NormalZApproach;
 
-    if (force_phase_ != ForceControlPhase::SlowZApproach)
+    if (!apply_xy)
     {
         x_force_correction_active_ = false;
         y_force_correction_active_ = false;
         xy_correction_accum_s_ = 0.0f;
     }
-
-    if (force_phase_ == ForceControlPhase::SlowZApproach)
+    else
     {
-        const float fx = host_inputs_.force.fx;
-        const float absFx = std::fabs(fx);
-        if (!x_force_correction_active_ && absFx >= force_params_.fx_threshold_on_N)
-        {
-            x_force_correction_active_ = true;
-        }
-        if (x_force_correction_active_ && absFx <= force_params_.fx_threshold_off_N)
-        {
-            x_force_correction_active_ = false;
-        }
-
-        const float fy = host_inputs_.force.fy;
-        const float absFy = std::fabs(fy);
-        if (!y_force_correction_active_ && absFy >= force_params_.fy_threshold_on_N)
-        {
-            y_force_correction_active_ = true;
-        }
-        if (y_force_correction_active_ && absFy <= force_params_.fy_threshold_off_N)
-        {
-            y_force_correction_active_ = false;
-        }
-    }
-
-    bool xy_step_due = false;
-    if (x_force_correction_active_ || y_force_correction_active_)
-    {
+        // Free-running 50 ms clock. Hysteresis is sampled only when a decision
+        // is due, on the filtered force, so a dip between decisions cannot
+        // cancel the period.
         xy_correction_accum_s_ += dt;
         if (xy_correction_accum_s_ + kXyCorrectionPeriodSlackS >= kXyCorrectionPeriodS)
         {
@@ -1131,61 +1141,76 @@ void Machine::tickActiveMotion(float dt)
             {
                 xy_correction_accum_s_ = 0.0f;
             }
-            xy_step_due = true;
-        }
-    }
-    else
-    {
-        xy_correction_accum_s_ = 0.0f;
-    }
 
-    if (xy_step_due && x_force_correction_active_)
-    {
-        const float fx = host_inputs_.force.fx;
-        ++xy_correction_steps_;
-        if (fx > 0.0f)
-        {
-            stored_target_x_ -= force_params_.dx_step_units;
-        }
-        else if (fx < 0.0f)
-        {
-            stored_target_x_ += force_params_.dx_step_units;
-        }
+            const float fx = host_inputs_.force.fx;
+            const float absFx = std::fabs(fx);
+            if (!x_force_correction_active_ && absFx >= force_params_.fx_threshold_on_N)
+            {
+                x_force_correction_active_ = true;
+            }
+            if (x_force_correction_active_ && absFx <= force_params_.fx_threshold_off_N)
+            {
+                x_force_correction_active_ = false;
+            }
 
-        const float min_x = commanded_target_x_ - force_params_.max_x_correction_units;
-        const float max_x = commanded_target_x_ + force_params_.max_x_correction_units;
-        if (stored_target_x_ < min_x)
-        {
-            stored_target_x_ = min_x;
-        }
-        if (stored_target_x_ > max_x)
-        {
-            stored_target_x_ = max_x;
-        }
-    }
+            const float fy = host_inputs_.force.fy;
+            const float absFy = std::fabs(fy);
+            if (!y_force_correction_active_ && absFy >= force_params_.fy_threshold_on_N)
+            {
+                y_force_correction_active_ = true;
+            }
+            if (y_force_correction_active_ && absFy <= force_params_.fy_threshold_off_N)
+            {
+                y_force_correction_active_ = false;
+            }
 
-    if (xy_step_due && y_force_correction_active_)
-    {
-        const float fy = host_inputs_.force.fy;
-        ++xy_correction_steps_;
-        if (fy > 0.0f)
-        {
-            stored_target_y_ -= force_params_.dy_step_units;
-        }
-        else if (fy < 0.0f)
-        {
-            stored_target_y_ += force_params_.dy_step_units;
-        }
+            if (x_force_correction_active_)
+            {
+                ++xy_correction_steps_;
+                if (fx > 0.0f)
+                {
+                    stored_target_x_ -= force_params_.dx_step_units;
+                }
+                else if (fx < 0.0f)
+                {
+                    stored_target_x_ += force_params_.dx_step_units;
+                }
 
-        const float min_y = commanded_target_y_ - force_params_.max_y_correction_units;
-        const float max_y = commanded_target_y_ + force_params_.max_y_correction_units;
-        if (stored_target_y_ < min_y)
-        {
-            stored_target_y_ = min_y;
-        }
-        if (stored_target_y_ > max_y)
-        {
-            stored_target_y_ = max_y;
+                const float min_x = commanded_target_x_ - force_params_.max_x_correction_units;
+                const float max_x = commanded_target_x_ + force_params_.max_x_correction_units;
+                if (stored_target_x_ < min_x)
+                {
+                    stored_target_x_ = min_x;
+                }
+                if (stored_target_x_ > max_x)
+                {
+                    stored_target_x_ = max_x;
+                }
+            }
+
+            if (y_force_correction_active_)
+            {
+                ++xy_correction_steps_;
+                if (fy > 0.0f)
+                {
+                    stored_target_y_ -= force_params_.dy_step_units;
+                }
+                else if (fy < 0.0f)
+                {
+                    stored_target_y_ += force_params_.dy_step_units;
+                }
+
+                const float min_y = commanded_target_y_ - force_params_.max_y_correction_units;
+                const float max_y = commanded_target_y_ + force_params_.max_y_correction_units;
+                if (stored_target_y_ < min_y)
+                {
+                    stored_target_y_ = min_y;
+                }
+                if (stored_target_y_ > max_y)
+                {
+                    stored_target_y_ = max_y;
+                }
+            }
         }
     }
 
@@ -1201,6 +1226,17 @@ void Machine::tickActiveMotion(float dt)
 void Machine::pause()
 {
     if (machine_state_ != MachineState::Active)
+    {
+        return;
+    }
+
+    motion_planner_.stopMotion();
+    machine_state_ = MachineState::Paused;
+}
+
+void Machine::pauseHolding()
+{
+    if (machine_state_ != MachineState::Active && machine_state_ != MachineState::Idle)
     {
         return;
     }
@@ -1407,6 +1443,33 @@ void Machine::setToolOffset(const TestPoint& offset)
 {
     calibration_set_.tool_offset = offset;
     machine_config_.calibration.tool_offset = offset;
+}
+
+void Machine::setPlateYaw(float yaw_rad)
+{
+    if (runtime_config_locked_)
+    {
+        return;
+    }
+    ::setPlateYaw(calibration_set_, yaw_rad);
+}
+
+void Machine::setRotationPoints(const TestPoint& k1, const TestPoint& k2, const TestPoint& k3)
+{
+    if (runtime_config_locked_)
+    {
+        return;
+    }
+    ::setRotationPoints(calibration_set_, k1, k2, k3);
+}
+
+void Machine::clearRotationPoints()
+{
+    if (runtime_config_locked_)
+    {
+        return;
+    }
+    ::clearRotationPoints(calibration_set_);
 }
 
 const CalibrationSet& Machine::calibrationSet() const

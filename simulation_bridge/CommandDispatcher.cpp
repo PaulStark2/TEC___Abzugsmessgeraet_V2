@@ -600,6 +600,55 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdStartPlateBoreSearch:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.homingState() != HomingState::Homed)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (frame.payload_length != tecomm::kPlateBorePointIdWireSize || frame.payload == nullptr)
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        const uint8_t point_id = frame.payload[0];
+        if (executor_.startPlateBoreSearch(point_id))
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
+        break;
+    }
+
+    case tecomm::MessageId::CmdSetPlateYaw:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        float yaw = 0.0f;
+        std::size_t offset = 0;
+        if (!tecomm::readF32LE(frame.payload, frame.payload_length, offset, yaw, true) ||
+            offset != frame.payload_length)
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        machine_.setPlateYaw(yaw);
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+    }
+
     case tecomm::MessageId::CmdSetForceCalibration:
     {
         if (force_calib_ == nullptr)
@@ -637,6 +686,24 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         const tecomm::ForceCalibrationResultPayload result = force_calib_->applySelect(command, span_N);
         appendForceCalibration(result, out);
         appendAck(message_id, result.committed ? tecomm::AckResultCode::Ok : tecomm::AckResultCode::Rejected, out);
+        break;
+    }
+
+    case tecomm::MessageId::CmdProcedureDecision:
+    {
+        tecomm::ProcedureDecisionPayload decision{};
+        if (!tecomm::decodeProcedureDecisionPayload(frame.payload, frame.payload_length, decision))
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        if (executor_.processState() != ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        executor_.applyProcedureDecision(decision.action);
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
     }
 

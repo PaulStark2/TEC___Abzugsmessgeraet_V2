@@ -26,14 +26,45 @@ function emptyForceZ() {
   };
 }
 
+function emptyToolOffsetAnomaly() {
+  return null;
+}
+
+function normalizeToolOffsetAnomaly(raw) {
+  if (!raw || typeof raw !== 'object' || raw.active !== true) {
+    return emptyToolOffsetAnomaly();
+  }
+  const previous = finitePose(raw.previous);
+  const current = finitePose(raw.current);
+  const deltaMm = Number(raw.deltaMm);
+  const toleranceMm = Number(raw.toleranceMm);
+  if (!previous || !current || !Number.isFinite(deltaMm) || !Number.isFinite(toleranceMm)) {
+    return emptyToolOffsetAnomaly();
+  }
+  return {
+    active: true,
+    previous,
+    current,
+    deltaMm,
+    toleranceMm,
+    at: typeof raw.at === 'string' ? raw.at : null,
+  };
+}
+
 function empty() {
   return {
     machineCoordinateSystem: emptyMcs(),
     plateOrigin: null,
     plateOriginValid: false,
+    plateYawRad: 0,
+    k1: null,
+    k2: null,
+    k3: null,
+    rotationPointsValid: false,
     probeCenter: null,
     probeCenterValid: false,
     toolOffset: null,
+    toolOffsetAnomaly: emptyToolOffsetAnomaly(),
     forceZ: emptyForceZ(),
   };
 }
@@ -102,18 +133,31 @@ function normalize(parsed) {
   const plate = finitePose(parsed.plateOrigin);
   const probe = finitePose(parsed.probeCenter);
   const tool = finitePose(parsed.toolOffset);
+  const k1 = finitePose(parsed.k1);
+  const k2 = finitePose(parsed.k2);
+  const k3 = finitePose(parsed.k3);
+  const yawRaw = Number(parsed.plateYawRad);
+  const plateYawRad = Number.isFinite(yawRaw) ? yawRaw : 0;
 
   // Geometry is only valid when MCS is valid and flags/poses are present.
   const plateOriginValid = mcs.valid === true && parsed.plateOriginValid === true && plate !== null;
   const probeCenterValid = mcs.valid === true && parsed.probeCenterValid === true && probe !== null;
+  const rotationPointsValid =
+    mcs.valid === true && parsed.rotationPointsValid === true && k1 !== null && k2 !== null && k3 !== null;
 
   return {
     machineCoordinateSystem: mcs,
     plateOrigin: plate,
     plateOriginValid,
+    plateYawRad: plateOriginValid ? plateYawRad : 0,
+    k1: rotationPointsValid ? k1 : null,
+    k2: rotationPointsValid ? k2 : null,
+    k3: rotationPointsValid ? k3 : null,
+    rotationPointsValid,
     probeCenter: probe,
     probeCenterValid,
     toolOffset: tool,
+    toolOffsetAnomaly: normalizeToolOffsetAnomaly(parsed.toolOffsetAnomaly),
     forceZ: normalizeForceZ(parsed.forceZ),
   };
 }
@@ -191,9 +235,15 @@ function setMachineCoordinateSystem(homePosition) {
     },
     plateOrigin: null,
     plateOriginValid: false,
+    plateYawRad: 0,
+    k1: null,
+    k2: null,
+    k3: null,
+    rotationPointsValid: false,
     probeCenter: null,
     probeCenterValid: false,
     toolOffset: null,
+    toolOffsetAnomaly: emptyToolOffsetAnomaly(),
     forceZ: current.forceZ,
   });
 }
@@ -204,9 +254,49 @@ function clearGeometry() {
     ...current,
     plateOrigin: null,
     plateOriginValid: false,
+    plateYawRad: 0,
+    k1: null,
+    k2: null,
+    k3: null,
+    rotationPointsValid: false,
     probeCenter: null,
     probeCenterValid: false,
     toolOffset: null,
+    toolOffsetAnomaly: emptyToolOffsetAnomaly(),
+  });
+}
+
+function clearToolOffsetAnomaly() {
+  const current = load();
+  return save({
+    ...current,
+    toolOffsetAnomaly: emptyToolOffsetAnomaly(),
+  });
+}
+
+/**
+ * Record a tool-offset jump above tolerance (OffsetOnly). Non-blocking GUI hint.
+ * @param {{ previous: object, current: object, deltaMm: number, toleranceMm: number }} detail
+ */
+function setToolOffsetAnomaly(detail) {
+  const current = load();
+  const previous = finitePose(detail && detail.previous);
+  const nextTool = finitePose(detail && detail.current);
+  const deltaMm = Number(detail && detail.deltaMm);
+  const toleranceMm = Number(detail && detail.toleranceMm);
+  if (!previous || !nextTool || !Number.isFinite(deltaMm) || !Number.isFinite(toleranceMm)) {
+    return current;
+  }
+  return save({
+    ...current,
+    toolOffsetAnomaly: {
+      active: true,
+      previous,
+      current: nextTool,
+      deltaMm,
+      toleranceMm,
+      at: new Date().toISOString(),
+    },
   });
 }
 
@@ -225,6 +315,52 @@ function setPlateOrigin(pose) {
     ...current,
     plateOrigin: { x: pose.x, y: pose.y, z: pose.z },
     plateOriginValid: true,
+  });
+}
+
+function setPlateYaw(yawRad) {
+  const current = load();
+  const yaw = Number(yawRad);
+  if (!Number.isFinite(yaw)) {
+    throw new Error('plateYawRad must be finite');
+  }
+  return save({
+    ...current,
+    plateYawRad: yaw,
+  });
+}
+
+function setRotationPoints(k1, k2, k3, yawRad) {
+  const p1 = finitePose(k1);
+  const p2 = finitePose(k2);
+  const p3 = finitePose(k3);
+  if (!p1 || !p2 || !p3) {
+    throw new Error('k1/k2/k3 poses must be finite');
+  }
+  const yaw = Number(yawRad);
+  if (!Number.isFinite(yaw)) {
+    throw new Error('plateYawRad must be finite');
+  }
+  const current = load();
+  return save({
+    ...current,
+    k1: p1,
+    k2: p2,
+    k3: p3,
+    rotationPointsValid: true,
+    plateYawRad: yaw,
+  });
+}
+
+function clearRotationCalibration() {
+  const current = load();
+  return save({
+    ...current,
+    k1: null,
+    k2: null,
+    k3: null,
+    rotationPointsValid: false,
+    plateYawRad: 0,
   });
 }
 
@@ -273,9 +409,14 @@ module.exports = {
   clearGeometry,
   invalidateForDefineMcs,
   setPlateOrigin,
+  setPlateYaw,
+  setRotationPoints,
+  clearRotationCalibration,
   setProbeCenter,
   setForceZ,
   invalidateForceZBeyondRange,
   isLegacyToolOffsetSemantics,
+  clearToolOffsetAnomaly,
+  setToolOffsetAnomaly,
   FILE_PATH,
 };

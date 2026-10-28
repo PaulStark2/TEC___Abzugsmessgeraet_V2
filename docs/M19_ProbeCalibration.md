@@ -25,14 +25,23 @@ OffsetOnly (Procedure after ProbeApproach):
 Equivalently for motion:
 
 ```text
-machine = plateOrigin + platePoint + toolOffset
+machine.xy = plateOrigin.xy + Rz(plateYaw) * platePoint.xy + toolOffset.xy
+machine.z  = plateOrigin.z  + platePoint.z + toolOffset.z
 ```
+
+`plateYaw` defaults to 0 (axes parallel). Plate teach uses bore search (KM / optional K1–K3); see [Calibration.md](Calibration.md).
 
 `probe_offset_reference` is **legacy** and must not drive Install/OffsetOnly math.
 
 The offset is **replaced** on OffsetOnly runs. It is never accumulated.
 Failed, aborted or STOPped runs leave the previous valid `probe_center` and
 `tool_offset` unchanged.
+
+On successful OffsetOnly the GUI compares `|new − old|` (3D) to
+`tool_offset_change_tolerance_mm` (default 0.5 mm, Parametermenü, GUI-only).
+If the delta exceeds the tolerance, a non-blocking **Werkzeugoffset-Anomalie**
+is shown (likely tool change). The new offset is still applied. Install clears
+the anomaly flag.
 
 ## Geometry
 
@@ -258,7 +267,7 @@ FullCalib works without a stored `probe_center`. On Complete the process ends
 ### Automatic — `CmdStart` (0x13)
 
 ```text
-ProbeApproach (Safe-Z → XY to probe_center → approach Z = hub P)
+ProbeApproach (Safe-Z → XY to probe_center−tool_offset → approach Z = hub P)
   → ProbeCalibration (hub = current TCP; probe_center not used as search target)
   → MoveSafePose
   → normal test/aging cycle
@@ -266,10 +275,16 @@ ProbeApproach (Safe-Z → XY to probe_center → approach Z = hub P)
 
 Safe-Z from M18 is mandatory for XY traverse. No 3D point-to-point.
 
-**ProbeApproach coarse Z** is open-loop to `probe_center.z + approach_distance`
+**ProbeApproach target (Formel 2):** `target = probe_center − tool_offset`
+(= last OffsetOnly `measured` / tip-on-disc TCP pose). This is **not** the
+plate-target sign (`toMachinePoint` still uses `+ tool_offset`). After Install
+`tool_offset` is zero, so the first automatic approach is still the raw
+`probe_center`. Later runs approach the previous successful tip-on-disc pose.
+
+**ProbeApproach coarse Z** is open-loop to `target.z + approach_distance`
 at `v_approach_probe`. During that descent the Core **monitors the Messtaster
 latch**. Early contact → hard brake, `FaultReason::ProbeApproachContact`, process
-**Aborted** (typical cause: stored `probe_center.z` too low vs. the real disc).
+**Aborted** (typical cause: stored hub Z too low vs. the real disc).
 Stale triggers are consumed before the descent starts. Manual Install skips
 ProbeApproach entirely (operator jogs the hub).
 
@@ -363,8 +378,8 @@ Also check status-bar **Fault**:
 | other / None + Aborted | Usually circle-fit / geometry reject at the end |
 
 Checklist: start hub **above disc center**; real disc/tool diameters in
-MachineConfig; XY `steps/mm` correct (Zortrax bench ≠ 200); open-loop lag can
-shrink the measured radius vs. expected.
+MachineConfig; firmware `steps/mm` = **200** on all axes (SFU1204; historical
+Zortrax XY was 20); open-loop lag can shrink the measured radius vs. expected.
 
 ## Known limits / later STM32
 

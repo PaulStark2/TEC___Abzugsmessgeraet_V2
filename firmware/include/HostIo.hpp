@@ -20,6 +20,8 @@ void applyOutputs(const Machine& machine);
 // Drain RX → FixedFrameBuffer → CommandDispatcher; enqueue TX; 50 Hz status.
 void serviceProtocol(FirmwareHost& host);
 
-void latestAdc(std::uint16_t& fx, std::uint16_t& fy, std::uint16_t& fz);
+// Mean of every completed XYZ scan since the previous call. Repeats the last
+// mean when the DMA has not finished a new scan.
+void consumeMillisecondMean(float& x, float& y, float& z);
 
 } // namespace hostio

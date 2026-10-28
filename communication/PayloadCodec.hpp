@@ -58,6 +58,19 @@ bool decodeSelectForceCurvePayload(const uint8_t* data, std::size_t length, Sele
 bool encodeRawAdcPayload(const RawAdcPayload& payload, uint8_t* out, std::size_t capacity);
 bool decodeRawAdcPayload(const uint8_t* data, std::size_t length, RawAdcPayload& out);
 
+bool encodeBoreCenterPayload(const BoreCenterPayload& payload, uint8_t* out, std::size_t capacity);
+bool decodeBoreCenterPayload(const uint8_t* data, std::size_t length, BoreCenterPayload& out);
+
+bool encodeProcedureDecisionPayload(const ProcedureDecisionPayload& payload, uint8_t* out,
+                                    std::size_t capacity);
+bool decodeProcedureDecisionPayload(const uint8_t* data, std::size_t length,
+                                    ProcedureDecisionPayload& out);
+
+bool encodeProcedureAnomalyPayload(const ProcedureAnomalyPayload& payload, uint8_t* out,
+                                   std::size_t capacity);
+bool decodeProcedureAnomalyPayload(const uint8_t* data, std::size_t length,
+                                   ProcedureAnomalyPayload& out);
+
 bool encodeForceCalibrationResultPayload(const ForceCalibrationResultPayload& payload, uint8_t* out,
                                          std::size_t capacity, std::size_t& bytes_written);
 bool decodeForceCalibrationResultPayload(const uint8_t* data, std::size_t length, ForceCalibrationResultPayload& out);
@@ -88,6 +101,12 @@ EncodeResult encodeMessage(uint8_t message_id, const SetForceCalibrationPayload&
 EncodeResult encodeMessage(uint8_t message_id, const SelectForceCurvePayload& payload, uint8_t* out,
                            std::size_t out_capacity);
 EncodeResult encodeMessage(uint8_t message_id, const RawAdcPayload& payload, uint8_t* out,
+                           std::size_t out_capacity);
+EncodeResult encodeMessage(uint8_t message_id, const BoreCenterPayload& payload, uint8_t* out,
+                           std::size_t out_capacity);
+EncodeResult encodeMessage(uint8_t message_id, const ProcedureDecisionPayload& payload, uint8_t* out,
+                           std::size_t out_capacity);
+EncodeResult encodeMessage(uint8_t message_id, const ProcedureAnomalyPayload& payload, uint8_t* out,
                            std::size_t out_capacity);
 EncodeResult encodeMessage(uint8_t message_id, const ForceCalibrationResultPayload& payload, uint8_t* out,
                            std::size_t out_capacity);

@@ -568,10 +568,6 @@ int main()
         cfg.spreader_extend_time_s = 0.5f;
         cfg.spreader_retract_time_s = 0.5f;
         cfg.force_tolerance_N = 0.5f;
-        cfg.z_correction_gain = 0.1f;
-        cfg.z_correction_max = 1.0f;
-        cfg.minimum_correction = 0.01f;
-        cfg.max_optimization_iterations = 10;
         cfg.v_search = 2.0f;
         cfg.probe_search_distance = 10.0f;
         cfg.probe_backoff = 1.0f;
@@ -603,10 +599,6 @@ int main()
         cfg.phase1_v_insert = 1.0f;
         cfg.phase1_a = 0.0f;
         cfg.phase1_corner = 0.0f;
-        cfg.phase2_v_extract = 2.0f;
-        cfg.phase2_v_insert = 3.0f;
-        cfg.phase2_a = 0.0f;
-        cfg.phase2_corner = 0.0f;
         cfg.phase3_v_extract = 2.0f;
         cfg.phase3_v_insert = 2.0f;
         cfg.phase3_a = 0.0f;
@@ -630,15 +622,17 @@ int main()
         }
         if (parsed.tool_offset_z != cfg.tool_offset_z || parsed.safe_z_buffer != cfg.safe_z_buffer ||
             parsed.heartbeat_timeout_s != cfg.heartbeat_timeout_s ||
-            parsed.max_optimization_iterations != 10 || parsed.v_homing != cfg.v_homing ||
+            parsed.force_tolerance_N != cfg.force_tolerance_N || parsed.v_homing != cfg.v_homing ||
             parsed.measuring_head_diameter != cfg.measuring_head_diameter ||
             parsed.num_fine_searches != 3 || parsed.probe_offset_reference_z != cfg.probe_offset_reference_z ||
             parsed.tool_cylindrical_height != cfg.tool_cylindrical_height ||
             parsed.probe_xy_search_margin != cfg.probe_xy_search_margin ||
             parsed.insert_search_distance != cfg.insert_search_distance ||
-            parsed.phase2_v_insert != cfg.phase2_v_insert ||
+            parsed.phase3_v_insert != cfg.phase3_v_insert ||
             parsed.v_approach_probe != cfg.v_approach_probe ||
-            parsed.a_probe_brake != cfg.a_probe_brake)
+            parsed.a_probe_brake != cfg.a_probe_brake ||
+            parsed.coord_tolerance_mm != 0.5f ||
+            parsed.test_lateral_force_N != 5.0f)
         {
             return 92;
         }
@@ -743,6 +737,7 @@ int main()
         chunk.sequence = 9;
         chunk.sample_count = 2;
         chunk.dropped = 4;
+        chunk.leg = 1;
         chunk.z[0] = 1.25f;
         chunk.fz[0] = 8.5f;
         chunk.z[1] = 1.50f;
@@ -758,7 +753,8 @@ int main()
         tecomm::ForcePathChunkPayload parsed{};
         if (!tecomm::decodeForcePathChunkPayload(wire, bytes_written, parsed) ||
             parsed.point_index != 2 || parsed.iteration != 3 || parsed.dropped != 4 ||
-            parsed.sample_count != 2 || parsed.z[1] != chunk.z[1] || parsed.fz[0] != chunk.fz[0])
+            parsed.leg != 1 || parsed.sample_count != 2 || parsed.z[1] != chunk.z[1] ||
+            parsed.fz[0] != chunk.fz[0])
         {
             return 112;
         }

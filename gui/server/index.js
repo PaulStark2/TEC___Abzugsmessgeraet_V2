@@ -353,7 +353,16 @@ if (typeof machineClient.onForcePathChunk === 'function') {
 
 if (typeof machineClient.onSessionReady === 'function') {
   machineClient.onSessionReady(async () => {
+    // Prefer calibration.json toolOffset when present so reconnect restores the
+    // last OffsetOnly / Install result even if machine-config.json drifted.
     const cfg = machineConfigStore.load();
+    const calib = calibrationStore.load();
+    if (calib.toolOffset) {
+      cfg.tool_offset_x = calib.toolOffset.x;
+      cfg.tool_offset_y = calib.toolOffset.y;
+      cfg.tool_offset_z = calib.toolOffset.z;
+      machineConfigStore.save(cfg);
+    }
     if (typeof machineClient.setMachineConfig === 'function') {
       const pushed = await machineClient.setMachineConfig(cfg);
       if (!pushed.ok) {
@@ -624,6 +633,24 @@ const server = http.createServer(async (req, res) => {
     const result = await procedureService.resume();
     broadcastStatus();
     sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+
+  if (req.method === 'POST' && urlPath === '/api/procedure/decision') {
+    try {
+      const body = await readJsonBody(req);
+      const action = Number(body.action);
+      if (![0, 1, 2].includes(action)) {
+        sendJson(res, 400, { ok: false, error: 'action must be 0, 1, or 2' });
+        return;
+      }
+      const result = await procedureService.applyProcedureDecision(action);
+      broadcastStatus();
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: err.message || String(err) });
+    }
     return;
   }
 
@@ -898,6 +925,64 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && urlPath === '/api/calibration/plate-bore-start') {
+    try {
+      const body = await readJsonBody(req);
+      const pointId = Number(body.pointId);
+      if (!Number.isInteger(pointId) || pointId < 1 || pointId > 4) {
+        sendJson(res, 400, { ok: false, error: 'pointId must be 1 (KM), 2 (K1), 3 (K2) or 4 (K3)' });
+        return;
+      }
+      if (typeof machineClient.startPlateBoreSearch !== 'function') {
+        sendJson(res, 400, { ok: false, error: 'Plate-Bohrungssuche ist auf diesem Backend nicht verfügbar' });
+        return;
+      }
+      const result = await machineClient.startPlateBoreSearch(pointId);
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/calibration/plate-yaw') {
+    try {
+      const body = await readJsonBody(req);
+      const status = machineClient.getStatus();
+      if (body.clearRotation === true) {
+        if (typeof machineClient.setPlateYaw === 'function' && status.connected) {
+          const result = await machineClient.setPlateYaw(0);
+          if (!result.ok) {
+            sendJson(res, 400, { ok: false, error: result.error || 'CmdSetPlateYaw failed' });
+            return;
+          }
+        }
+        sendJson(res, 200, { ok: true, calibration: calibrationStore.clearRotationCalibration() });
+        return;
+      }
+      const yawRad = Number(body.yawRad);
+      if (!Number.isFinite(yawRad)) {
+        sendJson(res, 400, { ok: false, error: 'yawRad must be finite' });
+        return;
+      }
+      if (typeof machineClient.setPlateYaw === 'function' && status.connected) {
+        const result = await machineClient.setPlateYaw(yawRad);
+        if (!result.ok) {
+          sendJson(res, 400, { ok: false, error: result.error || 'CmdSetPlateYaw failed' });
+          return;
+        }
+      }
+      let calibration = calibrationStore.setPlateYaw(yawRad);
+      if (body.k1 && body.k2 && body.k3) {
+        calibration = calibrationStore.setRotationPoints(body.k1, body.k2, body.k3, yawRad);
+      }
+      sendJson(res, 200, { ok: true, calibration });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: err.message || 'Invalid JSON body' });
+    }
+    return;
+  }
+
   if (req.method === 'POST' && urlPath === '/api/calibration/probe-start') {
     if (typeof machineClient.startProbeCalibration !== 'function') {
       sendJson(res, 400, { ok: false, error: 'Probe-Kalibrierung ist auf diesem Backend nicht verfügbar' });
@@ -1007,44 +1092,27 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const header = [
-      'sequenceNumber',
-      'name',
-      'iteration',
-      'x',
-      'y',
-      'z',
-      'fx',
-      'fy',
-      'fz',
-      'pass',
-      'source',
-    ];
-    const lines = [header.join(',')];
-    for (const row of current.rows || []) {
-      lines.push(
-        [
-          row.sequenceNumber,
-          JSON.stringify(row.name ?? ''),
-          row.iteration ?? '',
-          row.x ?? '',
-          row.y ?? '',
-          row.z ?? '',
-          row.fx ?? '',
-          row.fy ?? '',
-          row.fz ?? '',
-          row.pass === null || row.pass === undefined ? '' : row.pass,
-          row.source ?? '',
-        ].join(',')
-      );
+    const { analyzeForcePaths } = require('./results/forcePathAnalysis');
+    const { buildExportZip } = require('./results/resultsExport');
+    const analysis =
+      current.analysis ||
+      analyzeForcePaths(current.curves || [], { programName: current.programName });
+    let zipBuffer;
+    try {
+      zipBuffer = await buildExportZip(analysis);
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: err.message || String(err) });
+      return;
     }
-    const csv = `${lines.join('\n')}\n`;
+    const safeName = String(current.programName || 'ergebnisse')
+      .replace(/[^\w\-]+/g, '_')
+      .slice(0, 40);
     res.writeHead(200, {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="results-stub.csv"',
-      'Content-Length': Buffer.byteLength(csv),
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${safeName}_messauswertung.zip"`,
+      'Content-Length': zipBuffer.length,
     });
-    res.end(csv);
+    res.end(zipBuffer);
     return;
   }
 

@@ -18,6 +18,7 @@ const selectionStore = require('../program/selectionStore');
 const programStore = require('../program/programStore');
 const resultsStore = require('../results/resultsStore');
 const forcePathStore = require('../results/forcePathStore');
+const { analyzeForcePaths } = require('../results/forcePathAnalysis');
 const procedureStore = require('./procedureStore');
 const calibrationStore = require('../config/calibrationStore');
 const machineConfigStore = require('../config/machineConfigStore');
@@ -161,20 +162,31 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
 
   function buildResultsFromObserved(finalProcessState) {
     const program = programStore.getProgram();
+    const rawCurves = forcePathStore.getCurves();
+    const pointNames = {};
+    const points = program && Array.isArray(program.testPoints) ? program.testPoints : [];
+    for (let i = 0; i < points.length; ++i) {
+      pointNames[i] = points[i].name || `Punkt ${i + 1}`;
+    }
+    const analysis = analyzeForcePaths(rawCurves, {
+      programName: program ? program.programName : null,
+      pointNames,
+    });
     return {
       programName: program ? program.programName : null,
       mode: params ? params.mode : null,
       completedAt: new Date().toISOString(),
       backend: 'protocol',
       params: params ? { ...params } : null,
-      dataCompleteness: forcePathStore.getCurves().length > 0 ? 'complete' : 'partial',
+      dataCompleteness: rawCurves.length > 0 ? 'complete' : 'partial',
       notes: [
-        'Protocol-Ergebnisse vom Core-ProcedureController. Kraft-Weg-Kurven nur im Prüfmodus und nur soweit MsgForcePathChunk empfangen wurde.',
+        'Protocol-Ergebnisse vom Core-ProcedureController. Kraft-Weg-Kurven nur im Prüfmodus (Test) und nur soweit MsgForcePathChunk empfangen wurde. Spitzenkraft = max |Fz| je Kurve; Mittelwert und Stichproben-Standardabweichung über Iterationen je Ein-/Ausgliedern.',
         ...notesForParams(params),
       ],
       processState: finalProcessState,
       procedurePhase: machineClient.getStatus().procedurePhase || null,
-      curves: forcePathStore.getCurves(),
+      analysis,
+      curves: analysis.curves,
       rows: observedRows.map((row) => ({ ...row })),
     };
   }
@@ -226,6 +238,18 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
               '[Procedure] OffsetOnly tool-offset sync failed:',
               (result && result.error) || 'unknown'
             );
+            return;
+          }
+          if (result.toolOffsetChangeAnomaly) {
+            console.warn(
+              `[Procedure] toolOffset change anomaly: delta=${Number(result.toolOffsetDeltaMm).toFixed(3)} mm ` +
+                `(tol=${Number(result.toolOffsetChangeToleranceMm).toFixed(3)} mm)`
+            );
+            procedureStore.patch({
+              toolOffsetAnomaly: (result.calibration && result.calibration.toolOffsetAnomaly) || null,
+            });
+          } else {
+            procedureStore.patch({ toolOffsetAnomaly: null });
           }
         })
         .catch((err) => {
@@ -284,6 +308,11 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     });
 
     let nextState = mapGuiState(processState, connected);
+
+    // Controller hold at the bore center: process stays Running, machine is Paused.
+    if (connected && processState === 'Running' && machineStatus.machineState === 'Paused') {
+      nextState = 'paused';
+    }
 
     // Preserve paused UI state while Core process stays Running and Machine is Paused.
     if (prev.state === 'paused' && connected && processState === 'Running') {
@@ -678,6 +707,22 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     return { ok: true, status: procedureStore.getStatus() };
   }
 
+
+  async function applyProcedureDecision(action) {
+    if (!isLive()) {
+      return { ok: false, error: 'Machine connection unavailable' };
+    }
+    if (typeof machineClient.sendProcedureDecision !== 'function') {
+      return { ok: false, error: 'sendProcedureDecision not supported' };
+    }
+    const result = await machineClient.sendProcedureDecision(action);
+    if (!result || !result.ok) {
+      return { ok: false, error: (result && result.error) || 'procedure decision failed' };
+    }
+    observeStatus();
+    return { ok: true, status: procedureStore.getStatus() };
+  }
+
   async function stop() {
     const current = procedureStore.getStatus();
     if (current.state !== 'running' && current.state !== 'paused' && current.state !== 'unavailable') {
@@ -702,9 +747,11 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
 
   function getStatus() {
     // Protocol adapter always exposes Core TestConfiguration capabilities.
+    const calib = calibrationStore.load();
     procedureStore.patch({
       backend: 'protocol',
       capabilities: capabilities(),
+      toolOffsetAnomaly: calib.toolOffsetAnomaly || null,
     });
     // Refresh live connection flag on every poll from UI.
     if (params || procedureStore.getStatus().backend === 'protocol') {
@@ -727,6 +774,7 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     pause,
     resume,
     stop,
+    applyProcedureDecision,
     getStatus,
     dispose,
   };

@@ -77,7 +77,7 @@ int main()
                         ex.processState() == ProcessState::Running;
              ++i)
         {
-            machine.setHostInputs(withPlantInputs(machine));
+            machine.setHostInputs(withProcedurePlant(ex, machine));
             ex.tick(0.05f);
         }
         if (ex.procedurePhase() != ProcedurePhase::PreClampXyCorrect)
@@ -88,7 +88,7 @@ int main()
         {
             HostInputs in{};
             in.force.fx = 8.0f;
-            machine.setHostInputs(withPlantInputs(machine, in));
+            machine.setHostInputs(withProcedurePlant(ex, machine, in));
             ex.tick(0.05f);
         }
         if (ex.processState() != ProcessState::Aborted)
@@ -117,7 +117,7 @@ int main()
                         ex.processState() == ProcessState::Running;
              ++i)
         {
-            machine.setHostInputs(withPlantInputs(machine));
+            machine.setHostInputs(withProcedurePlant(ex, machine));
             ex.tick(0.05f);
         }
         if (ex.procedurePhase() != ProcedurePhase::InsertInitial)

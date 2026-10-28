@@ -6,7 +6,7 @@ the firmware uses `arm-none-eabi` and a different toolchain.
 ## Scope
 
 - 180 MHz, IWDG, SysTick 1 kHz → Core `Machine` / `TestExecutor`
-- ADC DMA Fx/Fy/Fz, limits, probe, E-Stop, spreader pair, fixture
+- ADC DMA Fx/Fy/Fz (every scan of the millisecond, then a 100 ms count window), limits, probe, E-Stop, spreader pair, fixture
 - XYZ step GPIO (PB6/PB4/PB8), DIR PC1/PC3/PC5, 200 steps/mm
 - **M12 binary protocol** on host UART (replaces ASCII Phase-2–4 bench)
 - **ForceCalibHost**: `MsgRawAdc` at 50 Hz; after GUI commit, polynomial on Fx/Fy/Fz (same Z curve)
@@ -48,10 +48,15 @@ GUI already sends Nop at 10 Hz while the UART session is live.
 
 ### Steps/mm (open-loop)
 
-Per-axis `TEC_STEPS_PER_MM_*` — see Build below. Bench Zortrax XY is **20** steps/mm
-(belt, measured 2026-10-15 after the one-pulse fix: soft 10 mm → 5 mm at 10 steps/mm). Bench Z is **200** steps/mm (4 mm lead, 1/4 µstep): 800 pulses = one
-revolution. Each software step is one rising edge (one-pulse PWM). Reset every
-axis to **200** before the SFU1204 target mechanics.
+**Current machine (SFU1204 on all axes):** **200 steps/mm** everywhere
+(57HS56, 1/4 µstep, 4 mm lead). `TEC_INVERT_FY=OFF` so +Fy aligns with +Y.
+Each software step is one rising edge (one-pulse PWM). Per-axis
+`TEC_STEPS_PER_MM_*` overrides stay empty unless a temporary bench needs them.
+
+**Historical — Zortrax M300 bench only:** XY belt **20** steps/mm (measured
+2026-10-15 after the one-pulse fix), Z **200** (4 mm lead), and
+`TEC_INVERT_FY=ON` (Y cell mirrored against +Y). Do not use that recipe on the
+SFU machine.
 
 ## Host UART (`TEC_HOST_UART`)
 
@@ -60,7 +65,7 @@ axis to **200** before the SFU1204 target mechanics.
 | **`USART2`** (default) | PA2/PA3 | Laptop ST-Link VCP → GUI `PROTOCOL_TRANSPORT=uart` |
 | `USART3` | PC10/PC11 | Pi `/dev/serial0` (Phase 5b) |
 
-115200 8N1. StatusReport **50 Hz**, `MsgRawAdc` **10 Hz**. GUI sends **CmdNop 10 Hz** when the session is live.
+115200 8N1. StatusReport **50 Hz**, `MsgRawAdc` **10 Hz**. During TestOrAge (test mode) the same status push also drains `MsgForcePathChunk` (`0xA2`, Kraft-Weg samples; see `docs/Measurement_Evaluation.md`). GUI sends **CmdNop 10 Hz** when the session is live.
 
 ### UART stalls / sticky jog / hung calibration (important)
 
@@ -81,33 +86,41 @@ If it still happens: raise `PROTOCOL_ACK_TIMEOUT_MS` (default UART 5000), avoid 
 ## Build / flash
 
 ```powershell
+# SFU1204 (current) — clear any cached Zortrax axis overrides
 cmake -S firmware -B build-firmware -G Ninja `
   --toolchain "$PWD\firmware\cmake\arm-none-eabi-stm32f446.cmake" `
   -DTEC_HOST_UART=USART2 `
-  -DTEC_STEPS_PER_MM=200
+  -DTEC_STEPS_PER_MM=200 `
+  -DTEC_STEPS_PER_MM_X= `
+  -DTEC_STEPS_PER_MM_Y= `
+  -DTEC_STEPS_PER_MM_Z= `
+  -DTEC_INVERT_FY=OFF
 cmake --build build-firmware
 ```
 
-Per-axis overrides (empty = `TEC_STEPS_PER_MM`):
+Configure log must show `→ X=200 Y=200 Z=200` and `TEC_INVERT_FY=OFF`.
+
+Per-axis overrides (empty = `TEC_STEPS_PER_MM`), historical Zortrax only:
 
 ```powershell
-# Zortrax M300 bench — XY belt 20; Z 4 mm lead, 1/4 µstep → 200
+# Historical Zortrax M300 bench — XY belt 20; Z 4 mm lead → 200; Fy mirrored
 cmake -S firmware -B build-firmware -G Ninja `
   --toolchain "$PWD\firmware\cmake\arm-none-eabi-stm32f446.cmake" `
   -DTEC_HOST_UART=USART2 `
   -DTEC_STEPS_PER_MM=200 `
   -DTEC_STEPS_PER_MM_X=20 `
   -DTEC_STEPS_PER_MM_Y=20 `
-  -DTEC_STEPS_PER_MM_Z=200
+  -DTEC_STEPS_PER_MM_Z=200 `
+  -DTEC_INVERT_FY=ON
 ```
 
 
 | Value | Use |
 |-------|-----|
-| **200** all | Zielkinematik SFU1204 |
-| **XY 20 / Z 200** | Zortrax bench. Z: `(200 × 4) / 4 mm`. XY: `10 × (10/5)` |
+| **200** all + invert OFF | **Current** SFU1204 machine |
+| **XY 20 / Z 200** + invert ON | Historical Zortrax bench only |
 
-Wrong value scales **speed and distance**. Recalibrate: `spm_new = spm_old × (mm_commanded / mm_measured)`. Theoretical: screw `(200 × µstep) / lead_mm`; belt `(200 × µstep) / (teeth × pitch_mm)`.
+Wrong value scales **speed and distance**. If the DIP µstep or lead differs from the assumption: `spm = (200 × µstep) / lead_mm` (screw) or `(200 × µstep) / (teeth × pitch_mm)` (belt). Empirical check only when the mechanics are unknown: `spm_new = spm_old × (mm_commanded / mm_measured)`.
 
 Also keep `v_homing` modest in the GUI (default 5 mm/s; for first seeks try 1–2). Homing hits the switch at constant speed (`a_homing = 0`).
 
@@ -131,7 +144,7 @@ Expect: status online after first `MsgStatusReport`; jog/`moveTo` via M12. Der H
 1. Flash current hex; GUI as above (close Serial Monitor / other COM users).
 2. Live status should include **ADC counts** (`MsgRawAdc`); force wizard can sample Z.
 3. On connect, GUI push of a committed curve should **ACK** (no longer `Unsupported`).
-4. After commit: StatusReport force = polynomial on ADC (all three channels share the Z curve).
+4. After commit: StatusReport force = low-pass of the polynomial on the 100 ms count mean (all three channels share the Z curve). The polynomial sees the unrounded mean. The watchdog still sees the tared sample before that low-pass. `force_filter` is the time constant in seconds, default 0.05, and does not disable the count window. `MsgRawAdc` is the rounded 100 ms mean, not a single conversion.
 5. Without a committed curve: provisional linear map `0…4095 → ±force_range_N` remains.
 
 Bench: real weights / wizard points when the sensor is ready; software path can be checked with a stored curve from a prior sim session.
@@ -159,7 +172,7 @@ While `ProcessState::Running`, Core enables the communication watchdog — GUI `
 Realistic with current firmware if:
 
 - DM542: STEP←PB6/PB4/PB8, DIR←PC1/PC3/PC5, common GND; **ENA** tied/enabled on the driver (no MCU ENA pin yet)
-- DIP µstep matches **200 steps/mm** (57HS56 1/4 + SFU1204 assumption)
+- DIP µstep matches **200 steps/mm** (57HS56 1/4 + SFU1204, current machine)
 - 5 V level shifting if the drivers need it; motor supply + E-Stop hardware cut
 - Soft-start: single-axis jog at low speed; confirm DIR polarity before multi-axis
 - +Max limits for Homing (or temporary button-sim as before)

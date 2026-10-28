@@ -13,7 +13,7 @@ namespace
 
 bool phaseNeedsProcessForce(ProcedurePhase phase)
 {
-    return phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::OptimizeInsert ||
+    return phase == ProcedurePhase::InsertInitial || phase == ProcedurePhase::ProbeRemeasure ||
            phase == ProcedurePhase::TestOrAge;
 }
 
@@ -97,34 +97,104 @@ void SimProtocolBridge::appendStatusPush(std::vector<OutboundFrame>& out)
         adc_frame.length = adc_encoded.bytes_written;
         out.push_back(adc_frame);
     }
+
+    ProcedureController& procedure = executor_.procedure();
+    const ProcedureController::BoreReport& bore = procedure.boreReport();
+    if (bore.fresh)
+    {
+        tecomm::BoreCenterPayload payload{};
+        payload.cx = bore.cx;
+        payload.cy = bore.cy;
+        payload.cz = bore.cz;
+        payload.radius = bore.radius;
+        payload.residual = bore.residual;
+        payload.fx = bore.fx;
+        payload.fy = bore.fy;
+        payload.anomaly = bore.anomaly ? 1 : 0;
+        payload.confirm_pending = bore.confirm_pending ? 1 : 0;
+        payload.valid = 1;
+        payload.point_id = bore.point_id;
+        for (int i = 0; i < 4; ++i)
+        {
+            payload.x[i] = bore.x[i];
+            payload.y[i] = bore.y[i];
+        }
+        OutboundFrame bore_frame{};
+        const tecomm::EncodeResult bore_encoded = tecomm::encodeMessage(
+            static_cast<uint8_t>(tecomm::MessageId::MsgBoreCenter), payload, bore_frame.data,
+            sizeof(bore_frame.data));
+        if (bore_encoded.ok)
+        {
+            bore_frame.length = bore_encoded.bytes_written;
+            out.push_back(bore_frame);
+            procedure.consumeBoreReport();
+        }
+    }
+
+    const ProcedureController::AnomalyReport& anomaly = procedure.anomalyReport();
+    if (anomaly.fresh)
+    {
+        tecomm::ProcedureAnomalyPayload payload{};
+        payload.type = anomaly.type;
+        payload.point_index = anomaly.point_index;
+        payload.iteration = anomaly.iteration;
+        payload.measured = anomaly.measured;
+        payload.limit = anomaly.limit;
+        payload.z = anomaly.z;
+        payload.fx = anomaly.fx;
+        payload.fy = anomaly.fy;
+        payload.skip_applied = anomaly.skip_applied ? 1 : 0;
+        payload.confirm_pending = anomaly.confirm_pending ? 1 : 0;
+        OutboundFrame anomaly_frame{};
+        const tecomm::EncodeResult anomaly_encoded = tecomm::encodeMessage(
+            static_cast<uint8_t>(tecomm::MessageId::MsgProcedureAnomaly), payload, anomaly_frame.data,
+            sizeof(anomaly_frame.data));
+        if (anomaly_encoded.ok)
+        {
+            anomaly_frame.length = anomaly_encoded.bytes_written;
+            out.push_back(anomaly_frame);
+            procedure.consumeAnomalyReport();
+        }
+    }
+
 }
 
 void SimProtocolBridge::appendForcePathChunks(std::vector<OutboundFrame>& out)
 {
+    // Drain until empty or a soft frame budget so a slow host cannot stall the tick
+    // while a full ring (256) would otherwise need eight 32-sample chunks.
+    constexpr std::size_t kMaxChunksPerPush = 8;
     ForcePathRecorder& recorder = executor_.procedure().forcePath();
-    tecomm::ForcePathChunkPayload chunk{};
-    ForcePathRecorder::Sample samples[tecomm::kForcePathChunkMaxSamples];
-    const std::size_t n = recorder.popSameIteration(samples, tecomm::kForcePathChunkMaxSamples);
-    if (n == 0)
+    for (std::size_t chunk_i = 0; chunk_i < kMaxChunksPerPush; ++chunk_i)
     {
-        return;
-    }
-    chunk.point_index = static_cast<uint8_t>(executor_.currentIndex());
-    chunk.iteration = samples[0].iteration;
-    chunk.sequence = recorder.sequence();
-    chunk.sample_count = static_cast<uint8_t>(n);
-    chunk.dropped = recorder.dropped();
-    for (std::size_t i = 0; i < n; ++i)
-    {
-        chunk.z[i] = samples[i].z;
-        chunk.fz[i] = samples[i].fz;
-    }
+        tecomm::ForcePathChunkPayload chunk{};
+        ForcePathRecorder::Sample samples[tecomm::kForcePathChunkMaxSamples];
+        const std::size_t n =
+            recorder.popSameIterationAndLeg(samples, tecomm::kForcePathChunkMaxSamples);
+        if (n == 0)
+        {
+            return;
+        }
+        chunk.point_index = static_cast<uint8_t>(executor_.currentIndex());
+        chunk.iteration = samples[0].iteration;
+        chunk.sequence = recorder.sequence();
+        chunk.sample_count = static_cast<uint8_t>(n);
+        chunk.dropped = recorder.dropped();
+        chunk.leg = samples[0].leg;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            chunk.z[i] = samples[i].z;
+            chunk.fz[i] = samples[i].fz;
+        }
 
-    OutboundFrame frame{};
-    const tecomm::EncodeResult encoded = tecomm::encodeMessage(
-        static_cast<uint8_t>(tecomm::MessageId::MsgForcePathChunk), chunk, frame.data, sizeof(frame.data));
-    if (encoded.ok)
-    {
+        OutboundFrame frame{};
+        const tecomm::EncodeResult encoded = tecomm::encodeMessage(
+            static_cast<uint8_t>(tecomm::MessageId::MsgForcePathChunk), chunk, frame.data,
+            sizeof(frame.data));
+        if (!encoded.ok)
+        {
+            return;
+        }
         frame.length = encoded.bytes_written;
         out.push_back(frame);
     }
@@ -169,7 +239,7 @@ void SimProtocolBridge::applyHostInputs()
         inputs.force.fz +=
             simplant::processFzZ(machine_.z(), process_z_test_, target, k, true, process_force_unloaded_);
 
-        const float tol = machine_.machineConfig().phase2.force_tolerance_N;
+        const float tol = machine_.machineConfig().force.force_tolerance_N;
         if (!process_force_unloaded_ &&
             simplant::processForceShouldMarkUnloaded(machine_.z(), process_z_test_, target, k, tol))
         {
@@ -187,15 +257,20 @@ void SimProtocolBridge::applyHostInputs()
     }
 
     // One dose and one sign for every axis. The stored Z curve is applied to the
-    // raw counts of X, Y and Z. Tension stays negative; there is no second flip.
-    force_calib_.observeRaw(simplant::syntheticFzCounts(inputs.force.fx),
-                            simplant::syntheticFzCounts(inputs.force.fy),
-                            simplant::syntheticFzCounts(inputs.force.fz), true);
+    // window mean of X, Y and Z. Tension stays negative; there is no second flip.
+    // Uncalibrated plant Newton is left as-is: the simulation has no ADC noise,
+    // and procedure tests expect that force in the same tick.
+    const float dt = host_dt_ > 0.0f ? host_dt_ : 0.05f;
+    const CountWindow::Mean mean = counts_.push(
+        static_cast<float>(simplant::syntheticFzCounts(inputs.force.fx)),
+        static_cast<float>(simplant::syntheticFzCounts(inputs.force.fy)),
+        static_cast<float>(simplant::syntheticFzCounts(inputs.force.fz)), dt);
+    force_calib_.observeRaw(roundAdcCount(mean.x), roundAdcCount(mean.y), roundAdcCount(mean.z), true);
     if (force_calib_.active())
     {
-        inputs.force.fx = static_cast<float>(force_calib_.evaluateSensorNewton(force_calib_.raw().x));
-        inputs.force.fy = static_cast<float>(force_calib_.evaluateSensorNewton(force_calib_.raw().y));
-        inputs.force.fz = static_cast<float>(force_calib_.evaluateSensorNewton(force_calib_.raw().z));
+        inputs.force.fx = static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(mean.x)));
+        inputs.force.fy = static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(mean.y)));
+        inputs.force.fz = static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(mean.z)));
     }
 
     machine_.setHostInputs(inputs);
@@ -203,6 +278,7 @@ void SimProtocolBridge::applyHostInputs()
 
 void SimProtocolBridge::tick(float dt)
 {
+    host_dt_ = dt > 0.0f ? dt : 0.05f;
     if (executor_.processState() == ProcessState::Running)
     {
         executor_.tick(dt);

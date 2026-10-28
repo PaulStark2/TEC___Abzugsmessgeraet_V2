@@ -249,6 +249,25 @@ export async function resumeProcedure() {
   return result;
 }
 
+
+export async function sendProcedureDecision(action) {
+  const response = await fetch('/api/procedure/decision', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
 export async function stopProcedure() {
   const response = await fetch('/api/procedure/stop', { method: 'POST' });
   let result;
@@ -390,6 +409,32 @@ export async function setPlateOrigin(pose) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(pose || {}),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function startPlateBoreSearch(pointId) {
+  const response = await fetch('/api/calibration/plate-bore-start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pointId }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function setPlateYaw(body) {
+  const response = await fetch('/api/calibration/plate-yaw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
   });
   const result = await response.json();
   if (!response.ok || !result.ok) {

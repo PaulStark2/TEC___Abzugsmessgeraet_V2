@@ -82,9 +82,14 @@ bool ForceCalibHost::active() const
     return active_ && model_.valid;
 }
 
+double ForceCalibHost::evaluateSensorNewton(double adc_counts) const
+{
+    return evaluateForceCalibration(model_, adc_counts);
+}
+
 double ForceCalibHost::evaluateSensorNewton(uint16_t adc_z) const
 {
-    return evaluateForceCalibration(model_, static_cast<double>(adc_z));
+    return evaluateSensorNewton(static_cast<double>(adc_z));
 }
 
 tecomm::ForceCalibrationResultPayload ForceCalibHost::publish(const ForceCalibReport& report, bool store_points,

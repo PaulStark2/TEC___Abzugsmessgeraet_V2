@@ -113,3 +113,12 @@ Probe calibration on the 3-axis Core is **M19.0**
 latch machine-frame probe pose + sequence into `HostInputs` on the contact edge
 (`FirmwareHost`); GPIO level alone is not consumed by Core. See also
 [`firmware/README.md`](../firmware/README.md).
+
+## Kraft-Weg-Messauswertung
+
+During TestOrAge (test mode only) the Core records gated `(z, Fz)` samples into
+`ForcePathRecorder` and tags them with iteration and insert/extract leg. Hosts
+stream `MsgForcePathChunk` (`0xA2`) opportunistically. Peak statistics, overlay
+charts, and CSV/PDF export run on the GUI server after the procedure finishes —
+not inside the control tick. See
+[`docs/Measurement_Evaluation.md`](Measurement_Evaluation.md).

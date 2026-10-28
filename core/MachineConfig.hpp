@@ -20,7 +20,8 @@ struct MachineConfig
     {
         // Test-point / Safe-Z traverse (not used by M19).
         float v_approach_testpoints = 10.0f;
-        float v_fine_testpoints = 2.0f; // fine Z approach + PreClamp XY
+        float v_fine_testpoints = 2.0f; // fine Z approach only
+        float v_bore_search = 1.0f; // PreClamp wall-to-wall and move to chord midpoints
         float v_unclamp = 1.0f;
         float a_testpoints = 0.0f; // 0 = constant velocity
         float corner_testpoints = 0.0f; // 0 = full stop between axes
@@ -39,10 +40,6 @@ struct MachineConfig
         float phase1_v_insert = 1.0f;
         float phase1_a = 0.0f;
         float phase1_corner = 0.0f;
-        float phase2_v_extract = 2.0f;
-        float phase2_v_insert = 3.0f;
-        float phase2_a = 0.0f;
-        float phase2_corner = 0.0f;
         float phase3_v_extract = 2.0f;
         float phase3_v_insert = 2.0f;
         float phase3_a = 0.0f;
@@ -51,15 +48,17 @@ struct MachineConfig
 
     struct Force
     {
-        float force_filter = 0.0f; // 0 = no filter, else (0,1]
+        // Low-pass time constant [s] on Fx/Fy/Fz before the published sample.
+        // 0 = passthrough. (0, 1] is tau in dy/dt = (u - y) / tau, not a per-sample alpha.
+        float force_filter = 0.05f;
         float xy_tolerance_N = 0.5f; // PreClamp |Fx|/|Fy| deadband [N]
         float xy_correction_step = 0.05f; // PreClamp XY step [units]
-        float xy_max_correction = 2.0f; // max XY deviation from approach target [units]
+        float xy_max_correction = 2.0f; // unused by the bore search; kept so the config frame order stays
         float insertion_buffer = 1.0f; // ExtractionPoint = InsertionPoint + buffer in +Z
         float insert_search_distance = 10.0f; // Phase-1 Z dive; independent of probe.search_distance
         float sample_timeout_s = 0.5f; // stale HostInputs.force → Fault [s]
-        float xy_correct_timeout_s = 2.0f; // PreClamp abort if Fx/Fy not settled
-        unsigned xy_max_attempts = 80u; // PreClamp abort after this many XY steps
+        float xy_correct_timeout_s = 30.0f; // whole four-wall bore search [s]
+        unsigned xy_max_attempts = 80u; // unused by the bore search; kept in the config frame
         // Measuring range magnitude for every axis [N]. Calibration points and
         // target_force_N must stay inside it. Collision thresholds may rise up to it.
         float range_N = 30.0f;
@@ -68,6 +67,24 @@ struct MachineConfig
         float hard_limit_N = 30.0f;
         float hard_limit_x_N = 30.0f;
         float hard_limit_y_N = 30.0f;
+        // How far a wall search may leave the programmed point [mm].
+        float xy_search_limit = 5.0f;
+        // Pause for an operator confirm when the second-chord center is still loaded.
+        // Off continues into Clamp.
+        bool preclamp_confirm = true;
+        // Extra full two-chord passes from the found center. 0 = one search only.
+        uint8_t bore_refine_passes = 0;
+        float force_tolerance_N = 0.5f; // |Fz - target| / force-free deadband
+        float coord_tolerance_mm = 0.5f;
+        float test_lateral_force_N = 5.0f;
+        float z_limit_pos_mm = 10.0f;
+        float z_limit_neg_mm = 15.0f;
+        bool anomaly_skip = false;
+        float tool_offset_change_tolerance_mm = 0.5f;
+        // Minimum |Δz| between stored Kraft-Weg samples [mm]. 0 = every tick.
+        // Default 0.1 mm matches the force correlation length at phase3_v ≈ 2 mm/s
+        // (see docs/Measurement_Evaluation.md). Not yet on the M12 MachineConfig wire.
+        float force_path_dz_mm = 0.1f;
     };
 
     struct Collision
@@ -97,16 +114,6 @@ struct MachineConfig
     {
         float extend_time_s = 0.5f;
         float retract_time_s = 0.5f;
-    };
-
-    struct Phase2
-    {
-        float force_tolerance_N = 0.5f; // |Fz - target| deadband
-        float z_correction_gain = 0.1f; // dZ = gain * dF  [units/N]
-        float z_correction_max = 1.0f; // |dZ| cap per attempt
-        float minimum_correction = 0.01f; // ignore tinier steps
-        unsigned max_optimization_iterations = 10u;
-        unsigned max_sign_flips = 8u; // oscillation guard
     };
 
     struct Probe
@@ -150,14 +157,27 @@ struct MachineConfig
         TestPoint tool_offset{0.0f, 0.0f, 0.0f}; // TCP correction in machine coordinates
     };
 
+    // Plate bore teach (KM / K1–K3). Independent of PreClamp force.* search params.
+    struct PlateCalib
+    {
+        float v_plate_bore_search = 1.0f;
+        float wall_force_N = 0.5f;
+        float floor_force_N = 0.5f;
+        float xy_search_limit = 5.0f;
+        float z_search_limit = 10.0f;
+        float z_lift_mm = 2.0f;
+        float timeout_s = 60.0f;
+        uint8_t refine_passes = 0;
+    };
+
     Motion motion{};
     Force force{};
     Collision collision{};
     Spreader spreader{};
-    Phase2 phase2{};
     Probe probe{};
     Calibration calibration{};
     Communication communication{};
+    PlateCalib plate_calib{};
 
     // Z threshold for a collision context (raw, no clamp).
     float collisionThreshold(CollisionContext context) const;

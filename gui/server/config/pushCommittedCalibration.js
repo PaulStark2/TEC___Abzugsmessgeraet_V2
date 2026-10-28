@@ -111,6 +111,18 @@ async function pushCommittedCalibration(machineClient, calibOverride) {
     }
   }
 
+  if (calib.plateOriginValid && typeof machineClient.setPlateYaw === 'function') {
+    const yaw = Number(calib.plateYawRad) || 0;
+    const yawResult = await machineClient.setPlateYaw(yaw);
+    if (!yawResult || !yawResult.ok) {
+      return {
+        ok: false,
+        error: (yawResult && yawResult.error) || 'CmdSetPlateYaw failed',
+        calibration: calib,
+      };
+    }
+  }
+
   if (
     calib.probeCenterValid &&
     calib.probeCenter &&

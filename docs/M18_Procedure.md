@@ -39,11 +39,10 @@ wait, no heap-per-sample in the control path.
 Logical process after M18:
 
 ```text
-Homing → Safe-Z → XY to point → Z coarse → Ruheprobe → Z fine → PreClamp XY → Clamp
-  → Ruheprobe → Phase 1 (constant-speed insert until Fz) → InsertionPoint / ExtractionPoint
-  → Ruheprobe → Phase 2 (discrete Z correction)
-  → Ruheprobe → Phase 3 (Test or Aging)
-  → Ruheprobe → Unclamp → Safe-Z → next point → Safe-End
+PointApproach → PreClamp → Clamp → SeatToForce (InsertInitial)
+  → Unclamp AfterSeat (open → standoff → redescend) → PreClamp → Clamp
+  → TestOrAge (force-controlled) → Unclamp AfterTest (re-seat → open → fine → Safe-Z)
+  → ProbeRemeasure (OffsetOnly) → NextPoint → … → MoveSafeEnd
 ```
 
 Jede Ruheprobe ist eine Aufnahme, nicht zwei an derselben Stelle. Details: `docs/Force_Calibration.md`.
@@ -85,9 +84,9 @@ Pause remains forbidden during the actual test phases (M17 rule retained).
 | S7 | Host heartbeat watchdog while automatic process runs. Timeout → Fault + stop + spreader safe. |
 | S8 | MachineConfig, TestConfiguration, PlateOrigin, Safe-Z, speeds, force params, manual spreader: NACK `InvalidState` while `ProcessState::Running`. |
 | S9 | Phase 1 succeeds only if `Fz >= targetForce`. Search end / AtTarget / zMinBlocked is abort, not InsertionPoint. |
-| S10 | XY force correction only in `PreClampXyCorrect`. Then off. Timeout / max attempts → abort. |
-| S11 | Phase 2 is discrete `dZ = gain * (Fz - target)` with deadband, max step, iteration cap, sign-flip / depth limits. Abort → `stop()`. |
-| S12 | Test mode records per-iteration force-path. Aging repeats insert/extract; force is safety only. |
+| S10 | Bore-center search only in `PreClampXyCorrect`: two chords (rising-edge walls), end pose = midpoint of the second chord. Optional `bore_refine_passes` restarts from that center. Then off. No wall or `xy_correct_timeout_s` → abort. `|Fx|`/`|Fy|` above `xy_tolerance_N` with `preclamp_confirm` pauses until resume; confirm off logs and continues to Clamp. |
+| S11 | Phase 2 (`OptimizeInsert`) removed. SeatToForce is constant-velocity Z− until `Fz >= targetForce`. |
+| S12 | TestOrAge is force-threshold insert/extract. Test mode records force-path; Aging uses the same motion with anomaly checks. Coord drift / lateral force / Z limits / TCP hang raise `MsgProcedureAnomaly` (pause or `anomaly_skip` → next point). |
 | S13 | ForcePathRecorder: O(1), no heap per sample, overflow + drop counter, iteration identity. |
 | S14 | ProbeCalibration placeholder: no Complete without `probeTriggered`. |
 
@@ -214,8 +213,8 @@ uses `Machine::setSpreaderExtend` internally.
 | Plate origin / calibration teach | Yes, when process not Running (`setProbeCenter` remains available during probe calib) |
 
 GUI catalog ranges mirror `SafetyLimits` / `validateMachineConfig`. Invalid values are
-rejected (no silent clamp). Unused catalog entries are marked **zukünftig**
-(`force_filter`, `probe_backoff`).
+rejected (no silent clamp). `force_filter` is the low-pass time constant in seconds
+(0 = passthrough, default 0.05 s). See [`docs/XY_Kraftregelung.md`](XY_Kraftregelung.md) section 2.1.
 
 Password for the parameter menu is GUI-only (`tec-admin` / `PARAMETER_MENU_PASSWORD`).
 **Production password must be changed.** It is not STM32 safety.
@@ -266,10 +265,12 @@ Config/spreader commands while Running → NACK `InvalidState`.
 
 Ring buffer, O(1) push, no heap per sample, no wait on Pi.
 
-- Test mode: one logical curve per iteration (`sample.iteration`, `popSameIteration`).
+- Test mode: separate curves per `(iteration, leg)` with `leg` = Insert / Extract (`popSameIterationAndLeg`).
+- Distance gate default `force_path_dz_mm = 0.1` (first sample of a leg always kept). Opening extract (`cycle_leg_ == 0`) is not recorded.
 - Aging: no recording (force still used for safety).
 - Overflow: drop oldest, increment drop counter.
-- Streaming is opportunistic; a slow Pi must not block the tick.
+- Streaming is opportunistic (`MsgForcePathChunk` header 13 B incl. `leg`); STM32 and simulation drain in status push. A slow Pi must not block the tick.
+- Host-side statistics, overlay UI and CSV/PDF export: [`docs/Measurement_Evaluation.md`](Measurement_Evaluation.md).
 
 ---
 

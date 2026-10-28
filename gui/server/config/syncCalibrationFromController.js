@@ -7,10 +7,36 @@
  * persistProbeCenter=false → OffsetOnly: update tool only; never rewrite probeCenter
  *
  * Never reconstructs probeCenter as probe_offset_reference − toolOffset.
+ *
+ * OffsetOnly also compares |new − old| toolOffset against
+ * tool_offset_change_tolerance_mm (GUI-only param). Above tolerance → anomaly flag.
  */
 
 const calibrationStore = require('./calibrationStore');
 const machineConfigStore = require('./machineConfigStore');
+
+/** Euclidean 3D distance between two tool-offset poses [mm]. */
+function toolOffsetDeltaMm(a, b) {
+  if (!a || !b) {
+    return null;
+  }
+  const dx = Number(a.x) - Number(b.x);
+  const dy = Number(a.y) - Number(b.y);
+  const dz = Number(a.z) - Number(b.z);
+  if (![dx, dy, dz].every(Number.isFinite)) {
+    return null;
+  }
+  return Math.hypot(dx, dy, dz);
+}
+
+function resolveToleranceMm(cfg) {
+  const raw = cfg && cfg.tool_offset_change_tolerance_mm;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 0) {
+    return n;
+  }
+  return 0.5;
+}
 
 async function syncCalibrationFromController(machineClient, options = {}) {
   const persistProbeCenter = options.persistProbeCenter === true;
@@ -37,11 +63,18 @@ async function syncCalibrationFromController(machineClient, options = {}) {
   });
 
   let calib = calibrationStore.load();
+  const previousTool = calib.toolOffset
+    ? { x: calib.toolOffset.x, y: calib.toolOffset.y, z: calib.toolOffset.z }
+    : { x: 0, y: 0, z: 0 };
   const toolPose = {
     x: c.tool_offset_x,
     y: c.tool_offset_y,
     z: c.tool_offset_z,
   };
+
+  let toolOffsetChangeAnomaly = false;
+  let toolOffsetDelta = null;
+  const toleranceMm = resolveToleranceMm(storedCfg);
 
   if (persistProbeCenter) {
     if (!status.probeCenterValid) {
@@ -54,11 +87,24 @@ async function syncCalibrationFromController(machineClient, options = {}) {
       return { ok: false, error: 'MsgMachineConfig missing probe_center_*' };
     }
     calib = calibrationStore.setProbeCenter({ x: px, y: py, z: pz }, toolPose);
+    calib = calibrationStore.clearToolOffsetAnomaly();
   } else if (calib.probeCenterValid && calib.probeCenter) {
+    toolOffsetDelta = toolOffsetDeltaMm(previousTool, toolPose);
     calib = calibrationStore.save({
       ...calib,
       toolOffset: toolPose,
     });
+    if (toolOffsetDelta !== null && toolOffsetDelta > toleranceMm) {
+      toolOffsetChangeAnomaly = true;
+      calib = calibrationStore.setToolOffsetAnomaly({
+        previous: previousTool,
+        current: toolPose,
+        deltaMm: toolOffsetDelta,
+        toleranceMm,
+      });
+    } else {
+      calib = calibrationStore.clearToolOffsetAnomaly();
+    }
   }
 
   return {
@@ -67,9 +113,13 @@ async function syncCalibrationFromController(machineClient, options = {}) {
     config: machineConfigStore.load(),
     persistProbeCenter,
     legacySemanticsWarning: calibrationStore.isLegacyToolOffsetSemantics(calib),
+    toolOffsetChangeAnomaly,
+    toolOffsetDeltaMm: toolOffsetDelta,
+    toolOffsetChangeToleranceMm: toleranceMm,
   };
 }
 
 module.exports = {
   syncCalibrationFromController,
+  toolOffsetDeltaMm,
 };

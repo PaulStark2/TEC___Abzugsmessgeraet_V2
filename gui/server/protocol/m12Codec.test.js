@@ -222,10 +222,6 @@ function sampleMachineConfig() {
     spreader_extend_time_s: 0.5,
     spreader_retract_time_s: 0.5,
     force_tolerance_N: 0.5,
-    z_correction_gain: 0.1,
-    z_correction_max: 1,
-    minimum_correction: 0.01,
-    max_optimization_iterations: 10,
     v_search: 2,
     probe_search_distance: 10,
     probe_backoff: 1,
@@ -257,10 +253,6 @@ function sampleMachineConfig() {
     phase1_v_insert: 1,
     phase1_a: 0,
     phase1_corner: 0,
-    phase2_v_extract: 2,
-    phase2_v_insert: 3,
-    phase2_a: 0,
-    phase2_corner: 0,
     phase3_v_extract: 2,
     phase3_v_insert: 2,
     phase3_a: 0,
@@ -290,7 +282,7 @@ function testMachineConfigRoundtrip() {
   assert.ok(nearEqual(decoded.probe_xy_search_margin, 2));
   assert.ok(nearEqual(decoded.insert_search_distance, 10));
   assert.strictEqual(decoded.num_fine_searches, 3);
-  assert.ok(nearEqual(decoded.phase2_v_insert, 3));
+  assert.ok(nearEqual(decoded.phase3_v_insert, 2));
   assert.ok(nearEqual(decoded.corner_testpoints, 0));
   assert.ok(nearEqual(decoded.a_probe_brake, 500));
   assert.ok(nearEqual(decoded.v_approach_probe, 10));
@@ -300,7 +292,9 @@ function testMachineConfigRoundtrip() {
   assert.ok(nearEqual(decoded.force_hard_limit_y_N, 30));
   assert.ok(nearEqual(decoded.collision_approach_x_N, 20));
   assert.ok(nearEqual(decoded.a_manual, 500));
-  assert.strictEqual(decoded.max_optimization_iterations, 10);
+  assert.ok(nearEqual(decoded.coord_tolerance_mm, 0.5));
+  assert.ok(nearEqual(decoded.test_lateral_force_N, 5));
+  assert.strictEqual(decoded.anomaly_skip, 0);
   const frame = encodeFrame(MessageId.CmdSetMachineConfig, payload);
   assert.ok(frame.ok);
   const parsed = decodeFrame(frame.frame);
@@ -343,6 +337,7 @@ function testForcePathChunkRoundtrip() {
     sequence: 9,
     sampleCount: 2,
     dropped: 4,
+    leg: 1,
     z: [1.25, 1.5],
     fz: [8.5, 9],
   });
@@ -351,10 +346,15 @@ function testForcePathChunkRoundtrip() {
   assert.strictEqual(decoded.pointIndex, 2);
   assert.strictEqual(decoded.iteration, 3);
   assert.strictEqual(decoded.dropped, 4);
+  assert.strictEqual(decoded.leg, 1);
   assert.ok(nearEqual(decoded.z[1], 1.5));
   const frame = encodeFrame(MessageId.MsgForcePathChunk, payload);
   assert.strictEqual(decodeFrame(frame.frame).result, DecodeResult.Ok);
-  assert.strictEqual(encodeForcePathChunkPayload({ sampleCount: 33, z: [], fz: [] }), null);
+  assert.strictEqual(encodeForcePathChunkPayload({ sampleCount: 33, leg: 0, z: [], fz: [] }), null);
+  assert.strictEqual(
+    encodeForcePathChunkPayload({ sampleCount: 1, leg: 2, z: [0], fz: [0] }),
+    null
+  );
 }
 
 function testStatusReportProcedurePhase() {

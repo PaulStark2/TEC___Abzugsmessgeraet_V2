@@ -19,6 +19,8 @@ const {
   encodeMachineConfigMessage,
   encodeTestConfigurationMessage,
   encodePlateOriginMessage,
+  encodeStartPlateBoreSearchMessage,
+  encodeSetPlateYawMessage,
   encodeProbeCenterMessage,
   encodeRestoreMcsMessage,
   decodeAckPayload,
@@ -27,6 +29,9 @@ const {
   decodeMachineConfigPayload,
   decodeForcePathChunkPayload,
   decodeRawAdcPayload,
+  decodeBoreCenterPayload,
+  decodeProcedureAnomalyPayload,
+  encodeProcedureDecisionMessage,
   decodeForceCalibrationResultPayload,
   encodeSetForceCalibrationMessage,
   encodeSelectForceCurveMessage,
@@ -251,6 +256,15 @@ function createProtocolMachineClient(options = {}) {
       adcY: status.adcY,
       adcZ: status.adcZ,
       adcValid: status.adcValid,
+      boreCx: status.boreCx,
+      boreCy: status.boreCy,
+      boreRadius: status.boreRadius,
+      boreResidual: status.boreResidual,
+      boreFx: status.boreFx,
+      boreFy: status.boreFy,
+      boreAnomaly: status.boreAnomaly,
+      boreConfirmPending: status.boreConfirmPending,
+      boreValid: status.boreValid,
     };
     status = statusReportToGuiStatus(decoded, connected && sessionReady);
     measuredHome = latchMeasuredHome({
@@ -307,6 +321,40 @@ function createProtocolMachineClient(options = {}) {
           adcY: raw.y,
           adcZ: raw.z,
           adcValid: raw.valid,
+        };
+      }
+      return;
+    }
+
+    if (frame.messageId === MessageId.MsgBoreCenter) {
+      const bore = decodeBoreCenterPayload(frame.payload);
+      if (bore) {
+        status = {
+          ...status,
+          boreCx: bore.cx,
+          boreCy: bore.cy,
+          boreCz: bore.cz,
+          boreRadius: bore.radius,
+          boreResidual: bore.residual,
+          boreFx: bore.fx,
+          boreFy: bore.fy,
+          boreAnomaly: bore.anomaly,
+          boreConfirmPending: bore.confirmPending,
+          boreValid: bore.valid,
+          borePointId: bore.pointId,
+        };
+      }
+      return;
+    }
+
+    if (frame.messageId === MessageId.MsgProcedureAnomaly) {
+      const anomaly = decodeProcedureAnomalyPayload(frame.payload);
+      if (anomaly) {
+        status = {
+          ...status,
+          procedureAnomaly: anomaly,
+          procedureAnomalyConfirmPending: anomaly.confirmPending,
+          procedureAnomalySkipApplied: anomaly.skipApplied,
         };
       }
       return;
@@ -689,6 +737,18 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdResume, encoded.frame);
   }
 
+
+  async function sendProcedureDecision(action) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeProcedureDecisionMessage(action);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode PROCEDURE_DECISION' };
+    }
+    return sendFrameAndWait(MessageId.CmdProcedureDecision, encoded.frame);
+  }
+
   async function stop() {
     if (!isLiveSession()) {
       return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
@@ -919,6 +979,28 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdSetPlateOrigin, encoded.frame);
   }
 
+  async function startPlateBoreSearch(pointId) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeStartPlateBoreSearchMessage(pointId);
+    if (!encoded.ok) {
+      return { ok: false, error: encoded.error || 'Failed to encode START_PLATE_BORE_SEARCH' };
+    }
+    return sendFrameAndWait(MessageId.CmdStartPlateBoreSearch, encoded.frame);
+  }
+
+  async function setPlateYaw(yawRad) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeSetPlateYawMessage(yawRad);
+    if (!encoded.ok) {
+      return { ok: false, error: encoded.error || 'Failed to encode SET_PLATE_YAW' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetPlateYaw, encoded.frame);
+  }
+
   async function setForceCalibration(command) {
     if (!isLiveSession()) {
       return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
@@ -1029,6 +1111,7 @@ function createProtocolMachineClient(options = {}) {
     moveTo,
     pause,
     resume,
+    sendProcedureDecision,
     stop,
     jog,
     pneumaticOpen,
@@ -1046,6 +1129,8 @@ function createProtocolMachineClient(options = {}) {
     getMachineConfig,
     setTestConfiguration,
     setPlateOrigin,
+    startPlateBoreSearch,
+    setPlateYaw,
     setProbeCenter,
     setForceCalibration,
     selectForceCurve,

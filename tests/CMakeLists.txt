@@ -108,6 +108,39 @@ target_link_libraries(force_tare_tests
 
 add_test(NAME force_tare_tests COMMAND force_tare_tests)
 
+add_executable(force_filter_tests
+    force_filter_tests.cpp
+)
+
+target_link_libraries(force_filter_tests
+    PRIVATE
+    core
+)
+
+add_test(NAME force_filter_tests COMMAND force_filter_tests)
+
+add_executable(count_window_tests
+    count_window_tests.cpp
+)
+
+target_link_libraries(count_window_tests
+    PRIVATE
+    core
+)
+
+add_test(NAME count_window_tests COMMAND count_window_tests)
+
+add_executable(bore_search_tests
+    bore_search_tests.cpp
+)
+
+target_link_libraries(bore_search_tests
+    PRIVATE
+    core
+)
+
+add_test(NAME bore_search_tests COMMAND bore_search_tests)
+
 # CMake definition for Core unit tests of safety (Milestone 11).
 add_executable(safety_tests
     safety_tests.cpp
@@ -179,6 +212,12 @@ add_executable(transform_tests
 )
 target_link_libraries(transform_tests PRIVATE core)
 add_test(NAME transform_tests COMMAND transform_tests)
+
+add_executable(plate_rotation_tests
+    plate_rotation_tests.cpp
+)
+target_link_libraries(plate_rotation_tests PRIVATE core)
+add_test(NAME plate_rotation_tests COMMAND plate_rotation_tests)
 
 add_executable(probe_geometry_tests
     probe_geometry_tests.cpp

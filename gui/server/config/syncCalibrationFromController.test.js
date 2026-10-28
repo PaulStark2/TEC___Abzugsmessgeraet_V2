@@ -160,9 +160,133 @@ async function testOffsetOnlyPersistReloadIgnoresLegacyReference() {
   });
 }
 
+async function testOffsetOnlyAnomalyAboveTolerance() {
+  await withTempFiles(async () => {
+    calibrationStore.setMachineCoordinateSystem({ x: 100, y: 100, z: 50 });
+    calibrationStore.setProbeCenter({ x: 100, y: 120, z: 40 }, { x: 0, y: 0, z: 0 });
+    machineConfigStore.save({
+      ...machineConfigStore.load(),
+      tool_offset_x: 0,
+      tool_offset_y: 0,
+      tool_offset_z: 0,
+      tool_offset_change_tolerance_mm: 0.5,
+    });
+
+    const client = {
+      getStatus: () => ({ connected: true, probeCenterValid: true }),
+      async getMachineConfig() {
+        return {
+          ok: true,
+          config: {
+            tool_offset_x: 2,
+            tool_offset_y: 0,
+            tool_offset_z: 0,
+            probe_center_x: 100,
+            probe_center_y: 120,
+            probe_center_z: 40,
+          },
+        };
+      },
+    };
+
+    const result = await syncCalibrationFromController(client, { persistProbeCenter: false });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.toolOffsetChangeAnomaly, true);
+    assert.ok(near(result.toolOffsetDeltaMm, 2, 1e-6));
+    const calib = calibrationStore.load();
+    assert.ok(calib.toolOffsetAnomaly && calib.toolOffsetAnomaly.active === true);
+    assert.ok(near(calib.toolOffset.x, 2));
+  });
+}
+
+async function testOffsetOnlyClearsAnomalyWithinTolerance() {
+  await withTempFiles(async () => {
+    calibrationStore.setMachineCoordinateSystem({ x: 100, y: 100, z: 50 });
+    calibrationStore.setProbeCenter({ x: 100, y: 120, z: 40 }, { x: 0.1, y: 0, z: 0 });
+    calibrationStore.setToolOffsetAnomaly({
+      previous: { x: 0, y: 0, z: 0 },
+      current: { x: 2, y: 0, z: 0 },
+      deltaMm: 2,
+      toleranceMm: 0.5,
+    });
+    machineConfigStore.save({
+      ...machineConfigStore.load(),
+      tool_offset_x: 0.1,
+      tool_offset_y: 0,
+      tool_offset_z: 0,
+      tool_offset_change_tolerance_mm: 0.5,
+    });
+
+    const client = {
+      getStatus: () => ({ connected: true, probeCenterValid: true }),
+      async getMachineConfig() {
+        return {
+          ok: true,
+          config: {
+            tool_offset_x: 0.2,
+            tool_offset_y: 0,
+            tool_offset_z: 0,
+            probe_center_x: 100,
+            probe_center_y: 120,
+            probe_center_z: 40,
+          },
+        };
+      },
+    };
+
+    const result = await syncCalibrationFromController(client, { persistProbeCenter: false });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.toolOffsetChangeAnomaly, false);
+    assert.ok(near(result.toolOffsetDeltaMm, 0.1, 1e-6));
+    const calib = calibrationStore.load();
+    assert.strictEqual(calib.toolOffsetAnomaly, null);
+    assert.ok(near(calib.toolOffset.x, 0.2));
+  });
+}
+
+async function testInstallClearsAnomaly() {
+  await withTempFiles(async () => {
+    calibrationStore.setMachineCoordinateSystem({ x: 100, y: 100, z: 50 });
+    calibrationStore.setProbeCenter({ x: 90, y: 90, z: 30 }, { x: 1, y: 0, z: 0 });
+    calibrationStore.setToolOffsetAnomaly({
+      previous: { x: 0, y: 0, z: 0 },
+      current: { x: 1, y: 0, z: 0 },
+      deltaMm: 1,
+      toleranceMm: 0.5,
+    });
+
+    const client = {
+      getStatus: () => ({ connected: true, probeCenterValid: true }),
+      async getMachineConfig() {
+        return {
+          ok: true,
+          config: {
+            tool_offset_x: 0,
+            tool_offset_y: 0,
+            tool_offset_z: 0,
+            probe_center_x: 100,
+            probe_center_y: 120,
+            probe_center_z: 40,
+          },
+        };
+      },
+    };
+
+    const result = await syncCalibrationFromController(client, { persistProbeCenter: true });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.toolOffsetChangeAnomaly, false);
+    const calib = calibrationStore.load();
+    assert.strictEqual(calib.toolOffsetAnomaly, null);
+    assert.ok(near(calib.toolOffset.x, 0));
+  });
+}
+
 async function main() {
   await testFullCalibPersistReload();
   await testOffsetOnlyPersistReloadIgnoresLegacyReference();
+  await testOffsetOnlyAnomalyAboveTolerance();
+  await testOffsetOnlyClearsAnomalyWithinTolerance();
+  await testInstallClearsAnomaly();
   console.log('syncCalibrationFromController.test.js: PASS');
 }
 

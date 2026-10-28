@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandDispatcher.hpp"
+#include "CountWindow.hpp"
 #include "ForceCalibHost.hpp"
 #include "HostInputs.hpp"
 #include "Machine.hpp"
@@ -14,13 +15,15 @@ class FirmwareHost
 public:
     FirmwareHost();
 
-    // Apply ForceCalib (if active) to ADC counts, then tick Core.
-    void tickOneMillisecond(HostInputs inputs, std::uint16_t adc_x, std::uint16_t adc_y, std::uint16_t adc_z);
+    // Apply the 100 ms count window, then ForceCalib or the provisional scale, then tick Core.
+    void tickOneMillisecond(HostInputs inputs, float adc_x, float adc_y, float adc_z);
 
     void handleFrame(const tecomm::DecodedFrame& frame, tecomm::DecodeResult decode_result,
                      std::vector<simbridge::OutboundFrame>& out);
     // MsgStatusReport always; MsgRawAdc when include_adc (throttle on UART).
     void appendStatusPush(std::vector<simbridge::OutboundFrame>& out, bool include_adc = true);
+    // Opportunistic Kraft-Weg telemetry (MsgForcePathChunk); never waits on the host.
+    void appendForcePathChunks(std::vector<simbridge::OutboundFrame>& out);
 
     Machine& machine();
     const Machine& machine() const;
@@ -36,6 +39,7 @@ public:
 private:
     Machine machine_;
     simbridge::ForceCalibHost force_calib_;
+    CountWindow counts_;
     TestExecutor executor_;
     simbridge::CommandDispatcher dispatcher_;
     std::uint32_t tick_count_;

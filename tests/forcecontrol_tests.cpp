@@ -1,6 +1,7 @@
 // Deterministic unit tests for M10 force control.
 #include "ForceSample.hpp"
 #include "Machine.hpp"
+#include "MachineConfig.hpp"
 #include "TestExecutor.hpp"
 
 #include "HostInputs.hpp"
@@ -20,6 +21,16 @@ static void setForce(Machine& machine, float fx, float fy, float fz)
     in.force = ForceVector{fx, fy, fz};
     in.e_stop = false;
     machine.setHostInputs(withFreshForce(in));
+}
+
+// These cases assert the 50 ms stepper itself. The default low-pass would
+// delay a step across the on-threshold, so they run with tau = 0.
+static void disableForceFilter(Machine& machine)
+{
+    MachineConfig cfg = machine.machineConfig();
+    cfg.force.force_filter = 0.0f;
+    ConfigValidationError err = ConfigValidationError::Ok;
+    machine.trySetMachineConfig(cfg, err);
 }
 
 // Z travels before XY. Settle so a correction step is the active leg.
@@ -74,6 +85,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f; // disabled
 
         Machine m(params);
+        disableForceFilter(m);
         m.moveTo(0.0f, 0.0f, 2.0f); // X/Y at target => no motion unless XY correction updates targets
 
         for (int i = 0; i < 3; ++i)
@@ -104,6 +116,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f; // disabled
 
         Machine m(params);
+        disableForceFilter(m);
         m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
         settleMotion(m, kDt);
@@ -184,6 +197,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f;
 
         Machine m(params);
+        disableForceFilter(m);
         m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
         settleMotion(m, kDt);
@@ -239,6 +253,7 @@ int main()
         // Positive Fz case.
         {
             Machine m(params);
+            disableForceFilter(m);
             m.moveTo(0.0f, 0.0f, 2.0f);
 
             const float x0 = m.x();
@@ -265,6 +280,7 @@ int main()
         // Negative Fz case.
         {
             Machine m(params);
+            disableForceFilter(m);
             m.moveTo(0.0f, 0.0f, 2.0f);
 
             const float x0 = m.x();
@@ -304,6 +320,7 @@ int main()
         params.fz_safety_threshold_N = 10.0f;
 
         Machine m(params);
+        disableForceFilter(m);
         m.moveTo(0.0f, 0.0f, 2.0f);
 
         const float x0 = m.x();
@@ -396,6 +413,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f;
 
         Machine m(params);
+        disableForceFilter(m);
         m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
         settleMotion(m, kDt);
@@ -458,6 +476,7 @@ int main()
         params.fz_safety_threshold_N = 1000000.0f;
 
         Machine m(params);
+        disableForceFilter(m);
         m.setPreClampXyEnabled(true);
         m.moveTo(0.0f, 0.0f, 2.0f);
         setForce(m, 0.0f, 0.0f, 0.0f);
@@ -480,6 +499,42 @@ int main()
         if (!(m.x() < x0))
         {
             return 31; // the 50th millisecond emits one step
+        }
+    }
+
+    // A dip below F_off must not wipe the 50 ms clock. Spikes to 0 every 40 ms
+    // would have reset the old accumulator before it ever reached 50 ms.
+    {
+        Machine::ForceControlParams params{};
+        params.fx_threshold_on_N = 10.0f;
+        params.fx_threshold_off_N = 5.0f;
+        params.fy_threshold_on_N = 10.0f;
+        params.fy_threshold_off_N = 5.0f;
+        params.dx_step_units = 0.02f;
+        params.dy_step_units = 0.02f;
+        params.slow_z_distance_threshold_units = 1000.0f;
+        params.fz_safety_threshold_N = 1000000.0f;
+
+        Machine m(params);
+        disableForceFilter(m);
+        m.setPreClampXyEnabled(true);
+        m.moveTo(0.0f, 0.0f, 2.0f);
+        setForce(m, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 20 && m.motionState() != MotionState::AtTarget; ++i)
+        {
+            m.tick(0.05f);
+        }
+
+        const float x0 = m.x();
+        for (int i = 0; i < 50; ++i)
+        {
+            const float fx = (i % 40 == 39) ? 0.0f : 12.0f;
+            setForce(m, fx, 0.0f, 0.0f);
+            m.tick(0.001f);
+        }
+        if (!(m.x() < x0))
+        {
+            return 32; // decision at 50 ms still sees Fx = 12
         }
     }
 

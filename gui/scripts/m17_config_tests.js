@@ -26,7 +26,9 @@ function run() {
   assert.strictEqual(cfg.v_approach_probe, 10);
   assert.strictEqual(cfg.a_probe_brake, 500);
   assert.strictEqual(cfg.phase1_a, 0);
-  assert.strictEqual(cfg.phase2_corner, 0);
+  assert.strictEqual(cfg.phase3_corner, 0);
+  assert.strictEqual(cfg.coord_tolerance_mm, 0.5);
+  assert.strictEqual(cfg.anomaly_skip, 0);
   assert.strictEqual(cfg.tool_offset_z, 0);
   assert.strictEqual(cfg.safe_z_buffer, 30);
   assert.strictEqual(cfg.jog_min_step_mm, 0.1);
@@ -36,10 +38,19 @@ function run() {
   assert.strictEqual(cfg.probe_xy_search_margin, 2);
   assert.strictEqual(cfg.insert_search_distance, 10);
   assert.strictEqual(cfg.num_fine_searches, 1);
+  // Still in the M12 frame / defaults, but not shown in the parameter mask.
+  const wireOnly = new Set(['xy_correction_step', 'xy_max_correction']);
   const keys = new Set(GROUPS.flatMap((g) => g.fields.map((f) => f.key)));
   for (const key of Object.keys(cfg)) {
+    if (wireOnly.has(key)) {
+      assert.ok(!keys.has(key), `unused ${key} must stay out of the catalog`);
+      continue;
+    }
     assert.ok(keys.has(key), `catalog missing ${key}`);
   }
+  assert.ok(keys.has('bore_refine_passes'));
+  assert.strictEqual(cfg.bore_refine_passes, 0);
+  assert.strictEqual(cfg.v_bore_search, 1);
   for (const group of GROUPS) {
     for (const field of group.fields) {
       assert.ok(field.info && field.unit, `${field.key} needs info+unit`);
@@ -51,7 +62,8 @@ function run() {
   const nanCfg = { ...cfg, safe_z_buffer: Number.NaN };
   assert.strictEqual(validateMachineConfigPayload(nanCfg).ok, false);
   const future = GROUPS.flatMap((g) => g.fields).filter((f) => f.future).map((f) => f.key);
-  assert.ok(future.includes('force_filter'));
+  assert.deepStrictEqual(future, []);
+  assert.strictEqual(cfg.force_filter, 0.05);
 
   const readOnly = GROUPS.flatMap((g) => g.fields).filter((f) => f.readOnly).map((f) => f.key);
   assert.deepStrictEqual(readOnly.sort(), ['tool_offset_x', 'tool_offset_y', 'tool_offset_z']);

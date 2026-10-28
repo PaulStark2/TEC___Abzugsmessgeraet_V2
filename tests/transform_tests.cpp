@@ -46,6 +46,24 @@ int main()
         }
     }
 
+    // Yaw rotates plate XY about plateOrigin; Z stays translation-only.
+    {
+        CalibrationSet set{};
+        setPlateOrigin(set, TestPoint{10.0f, 20.0f, 5.0f});
+        set.plate_yaw_rad = 1.5707963267948966f; // +90°
+        TestPoint out{};
+        if (!toMachinePoint(set, TestPoint{1.0f, 0.0f, 3.0f}, out))
+        {
+            return 5;
+        }
+        // Rz(90°) * (1,0) = (0,1) → machine (10, 21, 8)
+        if (!nearEqual(out.x, 10.0f, 1e-4f) || !nearEqual(out.y, 21.0f, 1e-4f) ||
+            !nearEqual(out.z, 8.0f))
+        {
+            return 6;
+        }
+    }
+
     // Executor start rejected without origin; with origin plate coords are transformed.
     {
         Machine machine;
