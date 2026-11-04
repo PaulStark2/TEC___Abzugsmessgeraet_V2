@@ -7,7 +7,6 @@ add_library(core STATIC
     TestExecutor.cpp
     ProcedureController.cpp
     ProbeCalibration.cpp
-    ProbeSearch.cpp
     BoreSearch.cpp
     MachineConfig.cpp
     TestConfiguration.cpp

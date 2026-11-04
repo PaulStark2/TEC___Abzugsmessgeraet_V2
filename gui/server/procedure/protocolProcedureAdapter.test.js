@@ -124,8 +124,8 @@ function withPreparedStores(fn) {
       ...previousCalib,
       machineCoordinateSystem: {
         valid: true,
-        origin: 'positiveMaxSwitches',
-        homePosition: { x: -2, y: -2, z: -2 },
+        origin: 'xMinHomeYzMaxHome',
+        homePosition: { x: 2, y: -2, z: -2 },
       },
       plateOrigin: { x: -45, y: -43, z: -33 },
       plateOriginValid: true,
@@ -135,9 +135,6 @@ function withPreparedStores(fn) {
     });
     machineConfigStore.save({
       ...machineConfigStore.load(),
-      probe_offset_reference_x: 40,
-      probe_offset_reference_y: 40,
-      probe_offset_reference_z: 10,
       tool_offset_x: 0,
       tool_offset_y: 0,
       tool_offset_z: 0,
@@ -270,7 +267,7 @@ async function testStartDuringM19SendsNoCommands() {
     const started = await adapter.start({ mode: 'test', insertionForce: 10, iterations: 1 });
     assert.strictEqual(started.ok, false);
     assert.strictEqual(started.code, 'core_process_running');
-    assert.ok(started.error.includes('Messtaster-Kalibrierung'));
+    assert.ok(started.error.includes('Einmessbohrung-Kalibrierung'));
     assert.ok(!String(started.error).toLowerCase().includes('invalid state'));
     assert.deepStrictEqual(client.sent, [], 'no start-chain commands while M19 Running');
     assert.strictEqual(client.getStatus().processState, 'Running');
@@ -313,8 +310,8 @@ async function testOffsetOnlyCompletionPersistsToolOnly() {
     assert.ok(Math.abs(calib.toolOffset.y - 0.1) < 1e-9);
     assert.ok(Math.abs(calib.toolOffset.z - -0.1) < 1e-9);
     assert.ok(Math.abs(cfg.tool_offset_x - -0.2) < 1e-9);
-    // Legacy reference still present but unused for reconstruction.
-    assert.strictEqual(cfg.probe_offset_reference_x, 40);
+    // probe_offset_reference_* removed with disc Messtaster geometry (bore-based Einmessen).
+    assert.strictEqual(cfg.probe_offset_reference_x, undefined);
 
     adapter.dispose();
   })();

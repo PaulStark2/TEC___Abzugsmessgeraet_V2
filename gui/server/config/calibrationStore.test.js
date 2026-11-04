@@ -48,13 +48,13 @@ function testLegacyWithoutMcs() {
 
 function testCommitReplacesMcsAndClearsGeometry() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
-    store.setPlateOrigin({ x: -10, y: -20, z: -30 });
-    store.setProbeCenter({ x: -40, y: -40, z: -10 }, { x: 0, y: 0, z: 0 });
+    store.setMachineCoordinateSystem({ x: 2, y: -2, z: -2 });
+    store.setPlateOrigin({ x: 10, y: -20, z: -30 });
+    store.setProbeCenter({ x: 40, y: -40, z: -10 }, { x: 0, y: 0, z: 0 });
     let c = store.load();
     assert.strictEqual(c.plateOriginValid, true);
     assert.strictEqual(c.probeCenterValid, true);
-    assert.strictEqual(c.machineCoordinateSystem.origin, store.MCS_ORIGIN_POS_MAX_SWITCHES);
+    assert.strictEqual(c.machineCoordinateSystem.origin, store.MCS_ORIGIN_X_MIN_YZ_MAX);
 
     // Early invalidate must NOT destroy committed state (no-op).
     const before = fs.readFileSync(calibFile, 'utf8');
@@ -65,11 +65,11 @@ function testCommitReplacesMcsAndClearsGeometry() {
     assert.strictEqual(c.plateOriginValid, true);
 
     // Commit of a new MCS clears geometry.
-    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
+    store.setMachineCoordinateSystem({ x: 2, y: -2, z: -2 });
     c = store.load();
     assert.strictEqual(c.machineCoordinateSystem.valid, true);
-    assert.strictEqual(c.machineCoordinateSystem.origin, store.MCS_ORIGIN_POS_MAX_SWITCHES);
-    assert.deepStrictEqual(c.machineCoordinateSystem.homePosition, { x: -2, y: -2, z: -2 });
+    assert.strictEqual(c.machineCoordinateSystem.origin, store.MCS_ORIGIN_X_MIN_YZ_MAX);
+    assert.deepStrictEqual(c.machineCoordinateSystem.homePosition, { x: 2, y: -2, z: -2 });
     assert.strictEqual(c.plateOriginValid, false);
     assert.strictEqual(c.probeCenterValid, false);
   });
@@ -77,13 +77,35 @@ function testCommitReplacesMcsAndClearsGeometry() {
 
 function testDefineDoesNotTouchDiskViaInvalidate() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
+    store.setMachineCoordinateSystem({ x: 2, y: -2, z: -2 });
     store.setPlateOrigin({ x: 1, y: 2, z: 3 });
     const snap = JSON.parse(fs.readFileSync(calibFile, 'utf8'));
     store.invalidateForDefineMcs();
     const after = JSON.parse(fs.readFileSync(calibFile, 'utf8'));
     assert.deepStrictEqual(after.machineCoordinateSystem, snap.machineCoordinateSystem);
     assert.strictEqual(after.plateOriginValid, true);
+  });
+}
+
+function testLegacyPositiveMaxSwitchesOriginIsRejected() {
+  withTempCalib(() => {
+    fs.writeFileSync(
+      calibFile,
+      JSON.stringify({
+        machineCoordinateSystem: {
+          valid: true,
+          origin: store.MCS_ORIGIN_POS_MAX_SWITCHES,
+          homePosition: { x: -2, y: -2, z: -2 },
+        },
+        plateOrigin: { x: -10, y: -20, z: -30 },
+        plateOriginValid: true,
+      }),
+      'utf8'
+    );
+    const c = store.load();
+    assert.strictEqual(c.machineCoordinateSystem.valid, false);
+    assert.strictEqual(c.machineCoordinateSystem.origin, null);
+    assert.strictEqual(c.plateOriginValid, false);
   });
 }
 
@@ -110,7 +132,7 @@ function testLegacyIdentityMcsWithoutOriginIsRejected() {
 
 function testLegacyToolOffsetSemantics() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
+    store.setMachineCoordinateSystem({ x: 2, y: -2, z: -2 });
     store.setProbeCenter({ x: 50, y: 60, z: 60 }, { x: -10, y: -20, z: -50 });
     assert.strictEqual(store.isLegacyToolOffsetSemantics(store.load()), true);
     store.setProbeCenter({ x: 100, y: 120, z: 40 }, { x: 0, y: 0, z: 0 });
@@ -120,7 +142,7 @@ function testLegacyToolOffsetSemantics() {
 
 function testInstallPersistKeepsProbeCenter() {
   withTempCalib(() => {
-    store.setMachineCoordinateSystem({ x: -2, y: -2, z: -2 });
+    store.setMachineCoordinateSystem({ x: 2, y: -2, z: -2 });
     store.setProbeCenter({ x: 100, y: 120, z: 40 }, { x: 0, y: 0, z: 0 });
     let c = store.load();
     assert.strictEqual(c.probeCenter.x, 100);
@@ -141,6 +163,7 @@ function testInstallPersistKeepsProbeCenter() {
 testLegacyWithoutMcs();
 testCommitReplacesMcsAndClearsGeometry();
 testDefineDoesNotTouchDiskViaInvalidate();
+testLegacyPositiveMaxSwitchesOriginIsRejected();
 testLegacyIdentityMcsWithoutOriginIsRejected();
 testLegacyToolOffsetSemantics();
 testInstallPersistKeepsProbeCenter();

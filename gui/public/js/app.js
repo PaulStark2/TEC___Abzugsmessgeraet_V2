@@ -1,15 +1,13 @@
 'use strict';
 
-import { setupTcpView } from './tcpView.js';
 import { connectStatus, sendCommand } from './api.js';
-import { applyStatus, setConnectionStatus, wireGlobalStop } from './statusBar.js';
+import { applyMessageSummary, applyStatus, setConnectionStatus, wireGlobalStop } from './statusBar.js';
 import { wireFaultPanel } from './components/faultPanel.js';
 import { startRouter, navigate } from './router.js';
 import { createStartupHomingController, MCS_REQUIRED_MESSAGE } from './homingGate.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   setConnectionStatus('GUI läuft — verbinde Live-Status…', false);
-  setupTcpView();
   wireGlobalStop();
   wireFaultPanel();
   startRouter();
@@ -31,6 +29,11 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     (connected, message) => {
       setConnectionStatus(message || '', !connected);
+    },
+    (evt) => {
+      if (evt && evt.summary) {
+        applyMessageSummary(evt.summary);
+      }
     }
   );
 

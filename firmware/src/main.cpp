@@ -189,9 +189,12 @@ int main(void)
             hostio::applyOutputs(g_host.machine());
             stepgen::tickMillisecond();
 
+            // Frozen Fault keeps steppers silenced. Fault-manual recovery must
+            // still chase Core pose so the operator can jog free under elevated limits.
             const bool fault = g_host.machine().machineState() == MachineState::Fault;
+            const bool fault_manual = g_host.machine().faultManualActive();
             const bool estop = inputs.e_stop;
-            if (fault || estop)
+            if (estop || (fault && !fault_manual))
             {
                 stepgen::emergencyStop();
             }
@@ -202,7 +205,7 @@ int main(void)
             }
 
             const std::uint32_t ticks = g_host.tickCount();
-            const std::uint32_t blink_period = fault ? 100u : 500u;
+            const std::uint32_t blink_period = (fault && !fault_manual) ? 100u : 500u;
             if ((ticks % blink_period) == 0u)
             {
                 HAL_GPIO_TogglePin(PIN_DEBUG_LED_PORT, PIN_DEBUG_LED_PIN);

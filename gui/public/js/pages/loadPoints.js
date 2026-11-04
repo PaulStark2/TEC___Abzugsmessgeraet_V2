@@ -1,7 +1,14 @@
 'use strict';
 
 import { navigate } from '../router.js';
-import { uploadProgram, fetchCurrentProgram, deleteCurrentProgram, fetchProcedureStatus } from '../api.js';
+import {
+  uploadProgram,
+  fetchCurrentProgram,
+  deleteCurrentProgram,
+  fetchProcedureStatus,
+  fetchProgramFiles,
+  loadProgramFile,
+} from '../api.js';
 
 function escapeHtml(str) {
   return String(str)
@@ -111,6 +118,23 @@ export function renderLoadPoints(container) {
         <p id="upload-status" class="command-feedback" aria-live="polite"></p>
       </div>
 
+      <div class="upload-card">
+        <h3>Programme auf dem Gerät</h3>
+        <p class="placeholder-note">
+          Dateien aus dem Handmodus-Teach (<code>gui/server/data/programs</code>).
+        </p>
+        <div class="control-form">
+          <label>
+            Gespeicherte Datei
+            <select id="device-program-select"></select>
+          </label>
+        </div>
+        <div class="control-actions">
+          <button type="button" id="btn-load-device-program">Vom Gerät laden</button>
+          <button type="button" id="btn-refresh-device-programs">Aktualisieren</button>
+        </div>
+      </div>
+
       <div id="program-summary-root" class="summary-root"></div>
 
       <div class="control-actions page-actions">
@@ -127,10 +151,65 @@ export function renderLoadPoints(container) {
   const summaryRoot = container.querySelector('#program-summary-root');
   const uploadBtn = container.querySelector('#btn-upload-program');
   const deleteBtn = container.querySelector('#btn-delete-program');
+  const deviceSelect = container.querySelector('#device-program-select');
+  const loadDeviceBtn = container.querySelector('#btn-load-device-program');
+  const refreshDeviceBtn = container.querySelector('#btn-refresh-device-programs');
 
   function setStatus(text, isError) {
     statusEl.textContent = text || '';
     statusEl.classList.toggle('command-feedback--error', Boolean(isError));
+  }
+
+  async function refreshDeviceProgramList() {
+    deviceSelect.innerHTML = '';
+    try {
+      const result = await fetchProgramFiles();
+      const files = (result.files || []).filter((f) => f.valid);
+      if (files.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Keine gespeicherten Programme';
+        deviceSelect.appendChild(opt);
+        loadDeviceBtn.disabled = true;
+        return;
+      }
+      loadDeviceBtn.disabled = false;
+      for (const f of files) {
+        const opt = document.createElement('option');
+        opt.value = f.fileName;
+        const labelName = f.programName ? `${f.programName} (${f.fileName})` : f.fileName;
+        opt.textContent = `${labelName} — ${f.pointCount} Punkte`;
+        deviceSelect.appendChild(opt);
+      }
+    } catch (err) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = err.message || 'Liste nicht verfügbar';
+      deviceSelect.appendChild(opt);
+      loadDeviceBtn.disabled = true;
+    }
+  }
+
+  async function onLoadDeviceProgram() {
+    const fileName = String(deviceSelect.value || '').trim();
+    if (!fileName) {
+      setStatus('Bitte eine gespeicherte Datei wählen.', true);
+      return;
+    }
+    summaryRoot.innerHTML = '';
+    setStatus('Programm wird vom Gerät geladen…', false);
+    try {
+      const result = await loadProgramFile(fileName);
+      if (!result.ok) {
+        setStatus(result.error || 'Laden fehlgeschlagen', true);
+        return;
+      }
+      setStatus(`Programm „${fileName}“ geladen.`, false);
+      summaryRoot.innerHTML = renderProgramSummary(result.summary);
+      await refreshDeleteButton();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
   }
 
   async function refreshDeleteButton() {
@@ -206,6 +285,16 @@ export function renderLoadPoints(container) {
     onDeleteProgram().catch((err) => setStatus(err.message || String(err), true));
   });
 
+  loadDeviceBtn.addEventListener('click', () => {
+    onLoadDeviceProgram().catch((err) => setStatus(err.message || String(err), true));
+  });
+
+  refreshDeviceBtn.addEventListener('click', () => {
+    refreshDeviceProgramList().catch((err) => setStatus(err.message || String(err), true));
+  });
+
+  refreshDeviceProgramList().catch(() => {});
+
   fetchCurrentProgram()
     .then((programResult) => {
       if (programResult.ok && programResult.current) {
@@ -236,5 +325,7 @@ export function renderLoadPoints(container) {
   return () => {
     uploadBtn.onclick = null;
     deleteBtn.onclick = null;
+    loadDeviceBtn.onclick = null;
+    refreshDeviceBtn.onclick = null;
   };
 }

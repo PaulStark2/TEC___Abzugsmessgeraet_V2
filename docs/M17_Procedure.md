@@ -16,7 +16,7 @@ Writable parameters:
 
 | Type | File | Role |
 |------|------|------|
-| `MachineConfig` | `core/MachineConfig.hpp` | Motion, force (incl. anomaly params), collision, spreader, probe, plate_calib, home/tool offset |
+| `MachineConfig` | `core/MachineConfig.hpp` | Motion (incl. safe_z_calib_buffer), force (incl. anomaly params), collision, spreader, probe, home/tool offset |
 | `TestConfiguration` | `core/TestConfiguration.hpp` | `Test` / `Aging`, `targetForce`, `iterations`, `activePointIndex` |
 | `CalibrationSet` | `core/CalibrationSet.hpp` | Taught `plateOrigin`, `probeCenter`, `toolOffset`, `homeOffset` |
 
@@ -69,6 +69,10 @@ full Z + four-point protocol. See [`docs/M19_ProbeCalibration.md`](M19_ProbeCali
 `TestExecutor::startProbeCalibration()` (no ProbeApproach). `CmdStart` runs
 ProbeApproach then the same protocol before MoveSafePose.
 
+`CmdStartTestOrAge` (`0x63`, empty) starts a **hand-mode** SeatToForce + TestOrAge
+loop from the current pose via `TestExecutor::startTestOrAgeManual()` (no program,
+no PreClamp). Send `CmdSetTestConfiguration` first. Abort/complete keep Homed.
+
 ## M17.6 — ProcedureController
 
 `MachineState` stays the operating/safety SM. Process steps live in `ProcedurePhase`
@@ -86,13 +90,13 @@ Per point (after initial OffsetOnly at run start):
 
 ```text
 PointApproach → PreClamp → Clamp → SeatToForce → Unclamp AfterSeat
-  → PreClamp → Clamp → TestOrAge → Unclamp AfterTest → ProbeRemeasure → NextPoint
+  → ForceTare → PreClamp → Clamp → TestOrAge → Unclamp AfterTest → ProbeRemeasure → NextPoint
 ```
 
 - PreClamp: bore-center search via `BoreSearch` (two chords). Twice per point.
-- SeatToForce (`InsertInitial`): constant-velocity Z− until `Fz >= targetForce`, then Unclamp AfterSeat (open at seat, standoff, redescend).
-- TestOrAge: first to kraftfrei (`|Fz| <= force.force_tolerance_N`), then `iterations` of force-threshold insert/extract; Test mode records force-path; anomalies for coord drift, lateral force, Z travel limits.
-- Unclamp AfterTest: re-seat to target force, open, fine then coarse to Safe-Z.
+- SeatToForce (`InsertInitial`): constant-velocity Z− until `Fz >= targetForce`, then Unclamp AfterSeat (open at seat, fixed retract, then ForceTare before second PreClamp). Second Clamp goes straight to TestOrAge (no post-Clamp tare).
+- TestOrAge: extract arms on Zug (`Fz < -force.force_tolerance_N`), then kraftfrei (`|Fz| <= force_tolerance_N`); optional `extract_after_free_mm` +Z after kraftfrei at `extract_after_free_v` (0 mm = stop there). Insert returns that offset to kraftfrei at the same `extract_after_free_v`, then dives at `phase3_v_insert`. Then `iterations` of force-threshold insert/extract; Test mode records force-path; anomalies for coord drift, lateral force, Z travel limits.
+- Unclamp AfterTest: if still above kraftfrei by `extract_after_free_mm`, return to kraftfrei at `extract_after_free_v`, then re-seat to target force, open, fine then coarse to Safe-Z.
 - ProbeRemeasure: OffsetOnly hang check vs `tool_offset_change_tolerance_mm`.
 - Phase 2 (`OptimizeInsert`) removed.
 
@@ -104,6 +108,7 @@ Coarse approach stand-off for ProbeApproach and PointApproach uses
 | ID | Name | Payload |
 |----|------|---------|
 | `0x54` | `CmdStartProbeCalib` | empty |
+| `0x63` | `CmdStartTestOrAge` | empty (hand-mode Seat + iterations) |
 | `0xA2` | `MsgForcePathChunk` | header 13 B (incl. `leg`) + `sampleCount * 8` B; max 32 samples; see [`Measurement_Evaluation.md`](Measurement_Evaluation.md) |
 
 Chunk fields: `pointIndex u8`, `iteration u16`, `sequence u32`, `sampleCount u8`,

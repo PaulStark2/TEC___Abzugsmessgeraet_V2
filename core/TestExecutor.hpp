@@ -18,6 +18,8 @@ public:
     bool start();
     bool startProbeCalibration();
     bool startPlateBoreSearch(std::uint8_t point_id);
+    bool startApproachCalibPoint(std::uint8_t point_id);
+    bool startTestOrAgeManual();
     void tick(float dt);
     void pause();
     void resume();

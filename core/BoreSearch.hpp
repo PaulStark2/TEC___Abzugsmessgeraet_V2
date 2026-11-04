@@ -6,8 +6,8 @@
 
 #include <cstdint>
 
-// Two-chord rising-edge bore center search (shared by PreClamp and plate calibration).
-// Optional −Z floor probe and lift after the XY center is found.
+// Two-chord rising-edge bore center search (PreClamp, plate teach, probe bore calib).
+// Floor modes: none | after XY (plate) | before XY (probe Einmessen z_first).
 class BoreSearch
 {
 public:
@@ -53,7 +53,8 @@ public:
         float z_lift_mm = 2.0f;
         float timeout_s = 30.0f;
         std::uint8_t refine_passes = 0;
-        bool do_floor = false;
+        bool do_floor = false; // after XY (plate teach)
+        bool z_first = false; // before XY (probe bore); implies floor+lift then XY
     };
 
     struct Result

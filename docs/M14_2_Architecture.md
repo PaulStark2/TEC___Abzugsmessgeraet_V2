@@ -129,7 +129,7 @@ sequenceDiagram
     Bridge-->>Host: MSG_STATUS_REPORT
     Host-->>PMC: status
     PMC-->>Node: cache
-    Node-->>UI: WS status / setTcpPose
+    Node-->>UI: WS status / statusBar
   end
 ```
 
@@ -144,9 +144,9 @@ StatusSnapshot / MSG_STATUS_REPORT   ← M12
         ▼
 ProtocolMachineClient status cache
         ▼
-Node WS /api + public/js/statusBar.js
+Node WS /api
         ▼
-setTcpPose(status)                   ← visualization only
+public/js/statusBar.js               ← display only (pose, force, state)
 ```
 
 GUI must not invent:

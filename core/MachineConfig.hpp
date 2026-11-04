@@ -30,10 +30,18 @@ struct MachineConfig
         float a_manual = 500.0f;
 
         float v_homing = 5.0f;
-        float a_homing = 0.0f; // seek/retract only; endstop hit is hard stop
+        // Targeted travel toward home standoff (Reference, session already Homed).
+        float v_homing_fast = 18.0f;
+        // Stop this far before derived home, then slow-seek to the switch [mm].
+        float homing_approach_distance = 50.0f;
+        float a_homing = 0.0f; // slow seek/retract/creep; endstop hit is hard stop
+        // Acceleration for fast approach only [mm/s²]; 0 = constant velocity.
+        float a_homing_fast = 500.0f;
 
         // Clearance above max(highest plate-frame program Z, probe Z in plate frame) [mm].
         float safe_z_buffer = 30.0f;
+        // Teach Anfahrt clearance above max machine-Z of stored calib poses (KM/K1–K3/probe) [mm].
+        float safe_z_calib_buffer = 30.0f;
 
         // Procedure phase extract (+Z) / insert (−Z) speeds and path profile.
         float phase1_v_extract = 1.0f;
@@ -42,8 +50,12 @@ struct MachineConfig
         float phase1_corner = 0.0f;
         float phase3_v_extract = 2.0f;
         float phase3_v_insert = 2.0f;
+        // Insert speed once Fz reaches force_near_target_frac · target [mm/s].
+        float phase3_v_insert_fine = 0.5f;
         float phase3_a = 0.0f;
         float phase3_corner = 0.0f;
+        // +Z after extract kraftfrei (when extract_after_free_mm > 0) [mm/s].
+        float extract_after_free_v = 1.0f;
     };
 
     struct Force
@@ -55,7 +67,14 @@ struct MachineConfig
         float xy_correction_step = 0.05f; // PreClamp XY step [units]
         float xy_max_correction = 2.0f; // unused by the bore search; kept so the config frame order stays
         float insertion_buffer = 1.0f; // ExtractionPoint = InsertionPoint + buffer in +Z
-        float insert_search_distance = 10.0f; // Phase-1 Z dive; independent of probe.search_distance
+        // AfterSeat fixed +Z retract from insertion_z_ before second PreClamp [mm].
+        // 0 = no retract (tare / second PreClamp at seat pose).
+        float after_seat_retract_mm = 2.0f;
+        // After true kraftfrei on extract (+Z): continue this far and keep measuring [mm].
+        // 0 = stop at kraftfrei (after tensile arming). Kraftfrei is the second 0 N
+        // crossing (after Zug), not the Druck→Zug sign change.
+        float extract_after_free_mm = 0.0f;
+        float insert_search_distance = 10.0f; // Phase-1 Z dive; independent of probe.*
         float sample_timeout_s = 0.5f; // stale HostInputs.force → Fault [s]
         float xy_correct_timeout_s = 30.0f; // whole four-wall bore search [s]
         unsigned xy_max_attempts = 80u; // unused by the bore search; kept in the config frame
@@ -82,9 +101,12 @@ struct MachineConfig
         bool anomaly_skip = false;
         float tool_offset_change_tolerance_mm = 0.5f;
         // Minimum |Δz| between stored Kraft-Weg samples [mm]. 0 = every tick.
-        // Default 0.1 mm matches the force correlation length at phase3_v ≈ 2 mm/s
-        // (see docs/Measurement_Evaluation.md). Not yet on the M12 MachineConfig wire.
-        float force_path_dz_mm = 0.1f;
+        // Default 0.01 mm; see docs/Measurement_Evaluation.md.
+        float force_path_dz_mm = 0.01f;
+        // Finer |Δz| gate during insert near Sollkraft (see force_near_target_frac).
+        float force_path_dz_fine_mm = 0.005f;
+        // Enter insert fine phase when Fz >= frac · target_force_N (0…1].
+        float force_near_target_frac = 0.8f;
     };
 
     struct Collision
@@ -105,9 +127,22 @@ struct MachineConfig
         float contact_N = 30.0f;
         float contact_x_N = 30.0f;
         float contact_y_N = 30.0f;
-        float measure_N = 30.0f;
-        float measure_x_N = 30.0f;
-        float measure_y_N = 30.0f;
+        // Measure / Phase-3 thresholds as percent of Prüfkraft (target_force_N).
+        // Wire field names keep the historic *_N suffix; values are percent (e.g. 150).
+        float measure_N = 150.0f;
+        float measure_x_N = 150.0f;
+        float measure_y_N = 150.0f;
+    };
+
+    // Restricted jog while MachineState::Fault (operator recovery).
+    struct FaultManual
+    {
+        float v_max = 5.0f; // mm/s
+        float a = 500.0f;   // mm/s^2; must be > 0
+        // Elevated hard limits while fault-manual is active (phase collision off).
+        float hard_limit_N = 50.0f;
+        float hard_limit_x_N = 50.0f;
+        float hard_limit_y_N = 50.0f;
     };
 
     struct Spreader
@@ -116,31 +151,22 @@ struct MachineConfig
         float retract_time_s = 0.5f;
     };
 
+    // Einmess-Bohrung + plate bore teach (KM/K1–K3). Independent of PreClamp force.*.
+    // BoreSearch z_first: floor → lift → XY two-chord. Durable pose in CalibrationSet.probe_center
+    // (Install) or MsgBoreCenter report (plate teach).
     struct Probe
     {
-        float v_approach_probe = 10.0f; // raise / align / descend to search start
-        float v_transfer_probe = 10.0f; // backoff, retreat, hub transfers
-        float v_search = 2.0f; // coarse contact search
-        float v_search_fine = 1.0f; // fine contact search
-        float a_probe_transfer = 0.0f;
-        float corner_probe_transfer = 0.0f;
-        float a_probe_search = 0.0f; // trapezoid during search (no blend)
-        float a_probe_brake = 500.0f; // emergency stop accel on trigger
-
-        float search_distance = 10.0f; // ABB-style extra XY start clearance (not insert depth)
-        float backoff = 1.0f; // backoff after trigger [units]
-        float search_depth = 5.0f; // XY work height = measured center Z − search_depth; Z search end
-        float approach_distance = 15.0f;
-        float head_diameter = 0.0f; // reserved; unused by the current protocol
-        float measuring_head_diameter = 8.0f;
-        float measuring_head_thickness = 3.0f;
-        float tool_diameter = 2.5f;
-        float tool_cylindrical_height = 15.0f; // vertical tool cylinder from TCP in +Z
-        float xy_search_margin = 2.0f; // extra inward XY travel past probe radius; not tool radius
-        unsigned num_fine_searches = 1u;
-        // Legacy field only (older builds used it for tool_offset math). Not the durable
-        // probe position; not a motion/search target. Current M19 uses CalibrationSet.probe_center.
-        TestPoint probe_offset_reference{40.0f, 40.0f, 10.0f};
+        float v_approach = 10.0f; // ProbeApproach / CalibApproach XY / coarse Z
+        float v_search = 1.0f; // bore wall / floor search
+        float wall_force_N = 0.5f;
+        float floor_force_N = 0.5f;
+        float xy_search_limit = 5.0f;
+        // Must exceed approach_distance so OffsetOnly / plate teach can reach the floor from standoff.
+        float z_search_limit = 20.0f;
+        float z_lift_mm = 2.0f;
+        float timeout_s = 60.0f;
+        uint8_t refine_passes = 0;
+        float approach_distance = 15.0f; // coarse Z standoff above stored center before z_first
     };
 
     struct Communication
@@ -150,38 +176,27 @@ struct MachineConfig
 
     struct Calibration
     {
-        TestPoint home_offset{0.0f, 0.0f, 0.0f}; // retract distance R from +max switch [mm] per axis;
+        TestPoint home_offset{0.0f, 0.0f, 0.0f}; // retract distance R from homing switch [mm] per axis;
                                                  // 0 → Machine uses kDefaultHomingRetract (2 mm).
-                                                 // MCS origin is the +max switch (machine = 0). Home is (-R,-R,-R).
+                                                 // X homes at Min (home +R); Y/Z at +Max (home −R).
                                                  // Changing R updates CalibrationSet.home_offset; MCS is not redefined.
         TestPoint tool_offset{0.0f, 0.0f, 0.0f}; // TCP correction in machine coordinates
-    };
-
-    // Plate bore teach (KM / K1–K3). Independent of PreClamp force.* search params.
-    struct PlateCalib
-    {
-        float v_plate_bore_search = 1.0f;
-        float wall_force_N = 0.5f;
-        float floor_force_N = 0.5f;
-        float xy_search_limit = 5.0f;
-        float z_search_limit = 10.0f;
-        float z_lift_mm = 2.0f;
-        float timeout_s = 60.0f;
-        uint8_t refine_passes = 0;
     };
 
     Motion motion{};
     Force force{};
     Collision collision{};
+    FaultManual fault_manual{};
     Spreader spreader{};
     Probe probe{};
     Calibration calibration{};
     Communication communication{};
-    PlateCalib plate_calib{};
 
-    // Z threshold for a collision context (raw, no clamp).
+    // Z threshold for a collision context (raw stored value, no clamp).
+    // For Measure this is percent of Prüfkraft, not Newton.
     float collisionThreshold(CollisionContext context) const;
-    // Per-axis threshold for the same context. x/y/z are |Fx|/|Fy|/|Fz|.
+    // Per-axis threshold for the same context. Approach…Contact: |F| in N.
+    // Measure: percent of target_force_N (scale at watchdog evaluation time).
     AxisForceLimit collisionLimit(CollisionContext context) const;
 };
 

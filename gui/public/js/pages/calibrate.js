@@ -7,6 +7,7 @@ import {
   fetchCalibration,
   setPlateOrigin,
   startPlateBoreSearch,
+  approachCalibPoint,
   setPlateYaw,
   defineMcs,
   persistMcs,
@@ -15,6 +16,7 @@ import {
   syncCalibrationFromController,
   fixtureOpen,
   fixtureClose,
+  pneumaticOpen,
   invalidateHoming,
   fetchMachineConfig,
 } from '../api.js';
@@ -244,6 +246,15 @@ export function renderCalibrate(container) {
     });
   }
 
+  /** Spreizer must be open for Einmess-Bohrung (force contact). Spannsystem uses fixtureOpen separately. */
+  async function ensureSpreaderOpen() {
+    await pneumaticOpen();
+    const st = getStatus();
+    if (st && st.spreaderExtended === false) {
+      await pollMachineStatus();
+    }
+  }
+
   async function refreshStoreFlags() {
     try {
       const result = await fetchCalibration();
@@ -303,7 +314,7 @@ export function renderCalibrate(container) {
       <div class="success-card">
         <h3>Kalibrieren</h3>
         <div class="calib-group">
-          <button type="button" id="btn-open-geometry" class="menu-nav__item">Geometrische Kalibrierung Bauplatte/Messtaster</button>
+          <button type="button" id="btn-open-geometry" class="menu-nav__item">Geometrische Kalibrierung Bauplatte/Einmessbohrung</button>
           <button type="button" id="btn-open-force" class="menu-nav__item">Kraftkalibrierung der Kraftmessdose</button>
         </div>
         <p id="menu-feedback" class="command-feedback" aria-live="polite"></p>
@@ -337,10 +348,10 @@ export function renderCalibrate(container) {
       const geomDisabled = !mcsValidInStore;
       contentEl.innerHTML = `
       <div class="success-card">
-        <h3>Geometrische Kalibrierung Bauplatte/Messtaster</h3>
+        <h3>Geometrische Kalibrierung Bauplatte/Einmessbohrung</h3>
         <div class="calib-group">
-          <button type="button" id="btn-calib-full" class="menu-nav__item">MCS und Bauplatte/Messtaster definieren und kalibrieren</button>
-          <button type="button" id="btn-calib-geometry" class="menu-nav__item" ${geomDisabled ? 'disabled' : ''}>Bauplatte/Messtaster kalibrieren</button>
+          <button type="button" id="btn-calib-full" class="menu-nav__item">MCS und Bauplatte/Einmessbohrung definieren und kalibrieren</button>
+          <button type="button" id="btn-calib-geometry" class="menu-nav__item" ${geomDisabled ? 'disabled' : ''}>Bauplatte/Einmessbohrung kalibrieren</button>
           <button type="button" id="btn-calib-values" class="menu-nav__item">Kalibrierkennwerte</button>
         </div>
         <p id="menu-feedback" class="command-feedback" aria-live="polite"></p>
@@ -374,6 +385,13 @@ export function renderCalibrate(container) {
             mcsCommittedThisSession = false;
             savedPlateOrigin = null;
             savedProbeCenter = null;
+            try {
+              await ensureSpreaderOpen();
+            } catch (err) {
+              feedbackEl.textContent = err.message || String(err);
+              feedbackEl.classList.add('command-feedback--error');
+              return;
+            }
             setStep(STEPS.DEFINE_MCS);
           })();
       });
@@ -389,6 +407,13 @@ export function renderCalibrate(container) {
           const gate = await runCalibrationHomingGate(feedbackEl, async () => {});
           if (gate.result !== 'ran') {
             showGateFeedback(feedbackEl, gate);
+            return;
+          }
+          try {
+            await ensureSpreaderOpen();
+          } catch (err) {
+            feedbackEl.textContent = err.message || String(err);
+            feedbackEl.classList.add('command-feedback--error');
             return;
           }
           selectedMode = MODE.GEOMETRY;
@@ -459,7 +484,7 @@ export function renderCalibrate(container) {
           ${poseBlock('K1', calib.k1, calib.rotationPointsValid)}
           ${poseBlock('K2', calib.k2, calib.rotationPointsValid)}
           ${poseBlock('K3', calib.k3, calib.rotationPointsValid)}
-          ${poseBlock('Messtaster (probeCenter)', calib.probeCenter, calib.probeCenterValid)}
+          ${poseBlock('Einmessbohrung (probeCenter)', calib.probeCenter, calib.probeCenterValid)}
           ${poseBlock('Werkzeugoffset (toolOffset)', calib.toolOffset, true)}
           <div>
             <strong>Live-TCP (Controller)</strong><br/>
@@ -561,7 +586,7 @@ export function renderCalibrate(container) {
           <h3>Schritt 1 – Maschinenkoordinatensystem definieren</h3>
           <p>
             Die Maschine fährt an die Endanschläge und legt den Homing-Punkt neu fest.
-            Bestehende Bauplatten- und Messtasterwerte werden im Core ungültig.
+            Bestehende Bauplatten- und Einmessbohrungswerte werden im Core ungültig.
             Die gespeicherte Kalibrierung bleibt bis zur Bestätigung unverändert.
           </p>
           ${mcsOk ? '<p class="homed-marker" style="color:var(--clr-ok,green);font-weight:600;">✔ MCS definiert und referenziert (noch nicht gespeichert).</p>' : ''}
@@ -744,21 +769,30 @@ export function renderCalibrate(container) {
 
   function waitForPlateBoreResult(pointId, timeoutMs = 120000) {
     const started = Date.now();
+    let sawRunning = false;
+    let latched = null;
     return new Promise((resolve, reject) => {
       const tick = async () => {
         try {
           const st = await fetchMachineStatus();
           liveStatus = st;
-          const processDone =
-            st.processState === 'Completed' || st.processState === 'Idle' || st.processState === 'Aborted';
-          if (st.boreValid && Number(st.borePointId) === pointId && processDone) {
-            resolve({
+          if (st.processState === 'Running') {
+            sawRunning = true;
+          }
+          if (st.boreValid && Number(st.borePointId) === Number(pointId)) {
+            latched = {
               x: st.boreCx,
               y: st.boreCy,
               z: st.boreCz,
               anomaly: !!st.boreAnomaly,
               radius: st.boreRadius,
-            });
+            };
+          }
+          const processDone =
+            st.processState === 'Completed' ||
+            (sawRunning && st.processState === 'Idle');
+          if (latched && processDone) {
+            resolve(latched);
             return;
           }
           if (st.processState === 'Aborted' || st.machineState === 'Fault') {
@@ -778,24 +812,101 @@ export function renderCalibrate(container) {
     });
   }
 
+  async function ensurePlateTeachIdle() {
+    const st = await fetchMachineStatus();
+    liveStatus = st;
+    if (st.machineState === 'Fault') {
+      await sendCommand({ command: 'clearFault' });
+    }
+    const again = await fetchMachineStatus();
+    liveStatus = again;
+    // Soft-STOP after a prior search: no-op MoveTo returns to Idle so tare/jog/search work.
+    if (again.machineState === 'Stopped' || again.machineState === 'Paused') {
+      await sendCommand({
+        command: 'moveTo',
+        x: again.x,
+        y: again.y,
+        z: again.z,
+      });
+    }
+  }
+
+  function waitForCalibApproach(timeoutMs = 120000) {
+    const started = Date.now();
+    let sawRunning = false;
+    return new Promise((resolve, reject) => {
+      const tick = async () => {
+        try {
+          const st = await fetchMachineStatus();
+          liveStatus = st;
+          if (st.processState === 'Running') {
+            sawRunning = true;
+          }
+          if (sawRunning && st.processState === 'Completed') {
+            resolve(st);
+            return;
+          }
+          if (sawRunning && (st.processState === 'Aborted' || st.machineState === 'Fault')) {
+            reject(new Error(st.faultReason || 'Anfahrt abgebrochen'));
+            return;
+          }
+          if (Date.now() - started > timeoutMs) {
+            reject(new Error('Timeout bei Kalibrierpunkt-Anfahrt'));
+            return;
+          }
+          window.setTimeout(tick, 100);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      void tick();
+    });
+  }
+
+  async function resolveStoredPoseForPoint(pointId) {
+    try {
+      const result = await fetchCalibration();
+      const c = (result && result.calibration) || {};
+      if (pointId === PLATE_POINT.KM) {
+        return c.plateOriginValid && c.plateOrigin ? c.plateOrigin : savedPlateOrigin;
+      }
+      if (pointId === PLATE_POINT.K1) {
+        return (c.rotationPointsValid && c.k1) || measuredK1;
+      }
+      if (pointId === PLATE_POINT.K2) {
+        return (c.rotationPointsValid && c.k2) || measuredK2;
+      }
+      if (pointId === PLATE_POINT.K3) {
+        return (c.rotationPointsValid && c.k3) || measuredK3;
+      }
+      if (pointId === 5) {
+        return c.probeCenterValid && c.probeCenter ? c.probeCenter : savedProbeCenter;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
   function renderPlateBoreTeachStep(pointId) {
     const label = PLATE_POINT_LABEL[pointId] || String(pointId);
     const hint =
       pointId === PLATE_POINT.KM
-        ? 'Fahre grob in die Kalibrierbohrung in der Bauplattenmitte (KM) und tauche ein. Anschließend Mittelpunktsuche starten.'
-        : `Fahre grob in die Bohrung ${label} ein (K2→K1 = +Y, K2→K3 = +X der Platte). Anschließend Mittelpunktsuche starten.`;
+        ? 'Optional alten KM anfahren (Stopp über dem Punkt), Position ggf. per Jog nachkorrigieren, dann Einmessprotokoll starten.'
+        : `Optional alten ${label} anfahren, Position ggf. nachkorrigieren (K2→K1 = +Y, K2→K3 = +X), dann Einmessprotokoll starten.`;
     contentEl.innerHTML = `
       <div class="success-card" style="display:flex;gap:32px;align-items:flex-start;">
         <div style="flex:1;">
           <h3>Kalibrierpunkt ${label}</h3>
           <p>${hint}</p>
-          <p>Ablauf: XY-Sehnensuche (wie PreClamp), dann Bodenantastung −Z und Lift.</p>
+          <p>Ablauf: Hub über Bohrung → Einmessprotokoll (Ruheprobe + Boden → XY-Sehnen).</p>
           <div id="plate-jog-panel"></div>
           <div id="plate-aligned-info"></div>
           <p id="plate-feedback" class="command-feedback" aria-live="polite"></p>
         </div>
         <div class="control-actions" style="flex-direction:column;gap:8px;">
-          <button type="button" id="btn-start-bore">Mittelpunktsuche starten</button>
+          <button type="button" id="btn-approach" disabled>Alten Kalibrierpunkt ${label} anfahren</button>
+          <button type="button" id="btn-start-bore">Einmessprotokoll starten</button>
           <button type="button" id="btn-save-yes" disabled>Ja, speichern</button>
           <button type="button" id="btn-save-no" disabled>Nein</button>
           <button type="button" id="btn-retry" disabled>Wiederholen</button>
@@ -812,6 +923,7 @@ export function renderCalibrate(container) {
 
     const feedbackEl = contentEl.querySelector('#plate-feedback');
     const infoEl = contentEl.querySelector('#plate-aligned-info');
+    const btnApproach = contentEl.querySelector('#btn-approach');
     const btnStart = contentEl.querySelector('#btn-start-bore');
     const btnYes = contentEl.querySelector('#btn-save-yes');
     const btnNo = contentEl.querySelector('#btn-save-no');
@@ -821,6 +933,11 @@ export function renderCalibrate(container) {
       btnYes.disabled = !on;
       btnNo.disabled = !on;
       btnRetry.disabled = !on;
+    }
+
+    function setBusy(busy) {
+      btnStart.disabled = busy;
+      btnApproach.disabled = busy || btnApproach.dataset.hasPose !== '1';
     }
 
     function showAligned(pose) {
@@ -836,24 +953,60 @@ export function renderCalibrate(container) {
       setDecisionEnabled(true);
     }
 
+    void (async () => {
+      const pose = await resolveStoredPoseForPoint(pointId);
+      if (pose) {
+        btnApproach.dataset.hasPose = '1';
+        btnApproach.disabled = false;
+      } else {
+        btnApproach.dataset.hasPose = '0';
+        btnApproach.disabled = true;
+        feedbackEl.textContent =
+          'Kein gespeicherter Alt-Punkt — Hub per Jog über die Bohrung fahren, dann Protokoll starten.';
+      }
+    })();
+
+    btnApproach.addEventListener('click', async () => {
+      try {
+        feedbackEl.textContent = `Fahre alten ${label} an (Safe-Z-Calib)…`;
+        feedbackEl.classList.remove('command-feedback--error');
+        setBusy(true);
+        setDecisionEnabled(false);
+        await ensurePlateTeachIdle();
+        await ensureSpreaderOpen();
+        await approachCalibPoint(pointId);
+        await waitForCalibApproach();
+        feedbackEl.textContent =
+          `Alter ${label} angefahren (Standoff). Position ggf. nachkorrigieren, dann Einmessprotokoll starten.`;
+        setBusy(false);
+      } catch (err) {
+        feedbackEl.textContent = err.message || String(err);
+        feedbackEl.classList.add('command-feedback--error');
+        setBusy(false);
+      }
+    });
+
     btnStart.addEventListener('click', async () => {
       try {
-        feedbackEl.textContent = 'Bohrungssuche läuft…';
+        feedbackEl.textContent = 'Einmessprotokoll läuft…';
         feedbackEl.classList.remove('command-feedback--error');
-        btnStart.disabled = true;
+        setBusy(true);
         setDecisionEnabled(false);
         pendingAlignedPose = null;
         infoEl.innerHTML = '';
+        await ensurePlateTeachIdle();
+        await ensureSpreaderOpen();
         await startPlateBoreSearch(pointId);
         const pose = await waitForPlateBoreResult(pointId);
         showAligned(pose);
         feedbackEl.textContent = pose.anomaly
           ? 'Ausgerichtet (Restkraft-Hinweis). Speichern?'
           : 'Ausgerichtet. Speichern?';
+        setBusy(false);
       } catch (err) {
         feedbackEl.textContent = err.message || String(err);
         feedbackEl.classList.add('command-feedback--error');
-        btnStart.disabled = false;
+        setBusy(false);
       }
     });
 
@@ -883,16 +1036,26 @@ export function renderCalibrate(container) {
       pendingAlignedPose = null;
       infoEl.innerHTML = '';
       setDecisionEnabled(false);
-      btnStart.disabled = false;
-      feedbackEl.textContent = 'Nicht gespeichert. Erneut anfahren oder Suche starten.';
+      feedbackEl.textContent = 'Nicht gespeichert. Idle wiederherstellen…';
+      void (async () => {
+        try {
+          await ensurePlateTeachIdle();
+          setBusy(false);
+          feedbackEl.textContent = 'Nicht gespeichert. Erneut anfahren oder Protokoll starten.';
+        } catch (err) {
+          feedbackEl.textContent = err.message || String(err);
+          feedbackEl.classList.add('command-feedback--error');
+          setBusy(false);
+        }
+      })();
     });
 
     btnRetry.addEventListener('click', () => {
       pendingAlignedPose = null;
       infoEl.innerHTML = '';
       setDecisionEnabled(false);
-      btnStart.disabled = false;
-      feedbackEl.textContent = 'Bereit zum Wiederholen.';
+      feedbackEl.textContent = 'Wiederholen: Position prüfen, dann Protokoll erneut starten.';
+      setBusy(false);
     });
 
     contentEl.querySelector('#btn-cancel').addEventListener('click', () => {
@@ -1117,11 +1280,13 @@ export function renderCalibrate(container) {
     contentEl.innerHTML = `
       <div class="success-card" style="display:flex;gap:32px;align-items:flex-start;">
         <div style="flex:1;">
-          <h3>Messtaster grob anfahren</h3>
-          <p>Fahre den Messtaster von Hand grob in die Nähe der Messposition.</p>
+          <h3>Einmessbohrung grob anfahren</h3>
+          <p>Optional alten Einmesspunkt anfahren (Stopp über dem Punkt), Position ggf. per Jog nachkorrigieren, dann Weiter.</p>
           <div id="probe-jog-panel"></div>
+          <p id="probe-approach-feedback" class="command-feedback" aria-live="polite"></p>
         </div>
         <div class="control-actions" style="flex-direction:column;gap:8px;">
+          <button type="button" id="btn-approach-probe" disabled>Alten Einmesspunkt anfahren</button>
           <button type="button" id="btn-next">Bestätigen und Weiter</button>
           <button type="button" id="btn-cancel">Abbrechen</button>
         </div>
@@ -1134,7 +1299,44 @@ export function renderCalibrate(container) {
       if (origCleanup) origCleanup();
     };
 
-    contentEl.querySelector('#btn-next').addEventListener('click', () => setStep(STEPS.PROBE_CALIBRATE));
+    const feedbackEl = contentEl.querySelector('#probe-approach-feedback');
+    const btnApproach = contentEl.querySelector('#btn-approach-probe');
+    const btnNext = contentEl.querySelector('#btn-next');
+
+    void (async () => {
+      const pose = await resolveStoredPoseForPoint(5);
+      if (pose) {
+        btnApproach.disabled = false;
+      } else {
+        btnApproach.disabled = true;
+        feedbackEl.textContent =
+          'Kein gespeicherter Einmesspunkt — Hub per Jog über die Bohrung fahren.';
+      }
+    })();
+
+    btnApproach.addEventListener('click', async () => {
+      try {
+        feedbackEl.textContent = 'Fahre alten Einmesspunkt an (Safe-Z-Calib)…';
+        feedbackEl.classList.remove('command-feedback--error');
+        btnApproach.disabled = true;
+        btnNext.disabled = true;
+        await ensurePlateTeachIdle();
+        await ensureSpreaderOpen();
+        await approachCalibPoint(5);
+        await waitForCalibApproach();
+        feedbackEl.textContent =
+          'Alter Einmesspunkt angefahren (Standoff). Position ggf. nachkorrigieren, dann Weiter.';
+        btnApproach.disabled = false;
+        btnNext.disabled = false;
+      } catch (err) {
+        feedbackEl.textContent = err.message || String(err);
+        feedbackEl.classList.add('command-feedback--error');
+        btnApproach.disabled = false;
+        btnNext.disabled = false;
+      }
+    });
+
+    btnNext.addEventListener('click', () => setStep(STEPS.PROBE_CALIBRATE));
     contentEl.querySelector('#btn-cancel').addEventListener('click', () => {
       void abortCalibrationWizard();
     });
@@ -1146,8 +1348,8 @@ export function renderCalibrate(container) {
     contentEl.innerHTML = `
       <div class="success-card" style="display:flex;gap:32px;align-items:flex-start;">
         <div style="flex:1;">
-          <h3>Messtaster einmessen</h3>
-          <p>Der Messtaster wird jetzt automatisch eingemessen.</p>
+          <h3>Einmessbohrung einmessen</h3>
+          <p>Die Einmess-Bohrung wird jetzt automatisch kraftbasiert eingemessen.</p>
           <p id="probe-status" style="font-weight:600;"></p>
           <p id="probe-feedback" class="command-feedback" aria-live="polite"></p>
         </div>
@@ -1174,6 +1376,9 @@ export function renderCalibrate(container) {
         btnStart.disabled = true;
         waitingForCalib = true;
         sawCalibRunning = false;
+        // Soft-STOP / prior abort may leave Stopped; recover Idle before CmdStartProbeCalib.
+        await ensurePlateTeachIdle();
+        await ensureSpreaderOpen();
         await startProbeCalibration();
       } catch (err) {
         waitingForCalib = false;
@@ -1207,7 +1412,7 @@ export function renderCalibrate(container) {
       ) {
         sawCalibRunning = true;
       }
-      // Stale Aborted from the previous circle-fit / STOP must not abort the new start.
+      // Stale Aborted from a previous run / STOP must not abort the new start.
       if (!sawCalibRunning) {
         return;
       }
@@ -1221,23 +1426,16 @@ export function renderCalibrate(container) {
         const phase = s.procedurePhase ? String(s.procedurePhase) : '—';
         if (fault === 'ProbeSearchNoContact') {
           feedbackEl.textContent =
-            'Kein Messtasterkontakt (Timeout). Bisherige gültige Kalibrierung bleibt erhalten.';
-        } else if (fault === 'ProbeApproachContact') {
-          feedbackEl.textContent =
-            'Messtaster-Kontakt bereits während der Approach-Z-Fahrt (gespeichertes probeCenter.z zu tief?). ' +
-            'Bisherige gültige Kalibrierung bleibt erhalten.';
+            'Kein Wand-/Bodenkontakt in der Einmess-Bohrung (Timeout). Anfahrt, Kraftschwellen und Suchlimits prüfen. Bisherige gültige Kalibrierung bleibt erhalten.';
         } else if (fault === 'CommunicationTimeout') {
           feedbackEl.textContent =
             'CommunicationTimeout: Host-Heartbeat (CmdNop) während der Kalibrierung ausgefallen. UART/Link prüfen, dann erneut. Bisherige Kalibrierung bleibt erhalten.';
         } else if (fault) {
           feedbackEl.textContent = `Abbruch mit Fault „${fault}“ (Phase ${phase}). Bisherige gültige Kalibrierung bleibt erhalten.`;
         } else {
-          // Typical: all search legs ran, then finishAndStore() rejected the 4-point circle
-          // (radius ≠ measuring_head/2 + tool/2). No Core fault is latched for that case.
           feedbackEl.textContent =
-            `Kalibrierung verworfen (Phase ${phase}) — oft ungültiger Kreis-Fit am Ende ` +
-            `(Hub über Scheibenmitte? measuring_head_diameter/tool_diameter? steps/mm?). ` +
-            `Statusleiste Fault-Reason und Phase prüfen. Bisherige gültige Kalibrierung bleibt erhalten.`;
+            `Kalibrierung abgebrochen (Phase ${phase}). Wiederholen ohne Re-Homing möglich. ` +
+            `Bisherige gültige Kalibrierung bleibt erhalten.`;
         }
         feedbackEl.classList.add('command-feedback--error');
         return;
@@ -1286,7 +1484,7 @@ export function renderCalibrate(container) {
       <div class="success-card">
         <h3 style="color:var(--clr-ok,green);">Kalibrierung erfolgreich abgeschlossen</h3>
         <p style="margin-top:8px;">
-          Modus: ${selectedMode === MODE.FULL ? 'MCS + Bauplatte/Messtaster' : 'Bauplatte/Messtaster'}
+          Modus: ${selectedMode === MODE.FULL ? 'MCS + Bauplatte/Einmessbohrung' : 'Bauplatte/Einmessbohrung'}
         </p>
         <div style="display:flex;gap:32px;flex-wrap:wrap;margin-top:12px;">
           <div>
@@ -1302,7 +1500,7 @@ export function renderCalibrate(container) {
             ${po ? `X = ${formatCoord(po.x)}<br/>Y = ${formatCoord(po.y)}<br/>Z = ${formatCoord(po.z)}` : '—'}
           </div>
           <div>
-            <strong>Messtaster-Referenz (probeCenter)</strong><br/>
+            <strong>Einmessbohrung (probeCenter)</strong><br/>
             ${pc ? `X = ${formatCoord(pc.x)}<br/>Y = ${formatCoord(pc.y)}<br/>Z = ${formatCoord(pc.z)}` : '—'}
           </div>
           <div>

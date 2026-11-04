@@ -71,8 +71,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
 
     if (isFaultGuarded(message_id) && machine_.machineState() == MachineState::Fault)
     {
-        appendAck(message_id, tecomm::AckResultCode::FaultLatched, out);
-        return;
+        if (!(machine_.faultManualActive() && isFaultManualAllowed(message_id)))
+        {
+            appendAck(message_id, tecomm::AckResultCode::FaultLatched, out);
+            return;
+        }
     }
 
     switch (static_cast<tecomm::MessageId>(message_id))
@@ -84,6 +87,7 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
     case tecomm::MessageId::CmdStop:
     {
         const MachineState before = machine_.machineState();
+        const bool fault_manual_before = machine_.faultManualActive();
         if (executor_.processState() == ProcessState::Running)
         {
             executor_.stop();
@@ -92,7 +96,12 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         else
         {
             machine_.stop();
-            if (before == MachineState::Fault || before == MachineState::Stopped)
+            if (before == MachineState::Fault && fault_manual_before)
+            {
+                // Recovery jog stop — Fault stays latched with manual still armed.
+                appendAck(message_id, tecomm::AckResultCode::Ok, out);
+            }
+            else if (before == MachineState::Fault || before == MachineState::Stopped)
             {
                 appendAck(message_id, tecomm::AckResultCode::Rejected, out);
             }
@@ -222,6 +231,19 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdEnableFaultManual:
+    {
+        if (machine_.enableFaultManual())
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
+        break;
+    }
+
     case tecomm::MessageId::CmdHome:
     {
         if (executor_.processState() == ProcessState::Running)
@@ -324,7 +346,12 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
 
         // Match GUI mock clamp: 1 … SafetyLimits::kMaxVelocity (50).
         constexpr float kMinManualSpeed = 1.0f;
-        if (speed < kMinManualSpeed || speed > SafetyLimits::kMaxVelocity)
+        float max_speed = SafetyLimits::kMaxVelocity;
+        if (machine_.faultManualActive())
+        {
+            max_speed = machine_.machineConfig().fault_manual.v_max;
+        }
+        if (speed < kMinManualSpeed || speed > max_speed)
         {
             appendAck(message_id, tecomm::AckResultCode::Rejected, out);
             break;
@@ -600,6 +627,34 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         break;
     }
 
+    case tecomm::MessageId::CmdStartTestOrAge:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.homingState() != HomingState::Homed)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.machineState() == MachineState::Fault)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (executor_.startTestOrAgeManual())
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
+        break;
+    }
+
     case tecomm::MessageId::CmdStartPlateBoreSearch:
     {
         if (executor_.processState() == ProcessState::Running)
@@ -626,6 +681,70 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         {
             appendAck(message_id, tecomm::AckResultCode::Rejected, out);
         }
+        break;
+    }
+
+    case tecomm::MessageId::CmdApproachCalibPoint:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (machine_.homingState() != HomingState::Homed)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (frame.payload_length != tecomm::kCalibPointIdWireSize || frame.payload == nullptr)
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        const uint8_t point_id = frame.payload[0];
+        if (executor_.startApproachCalibPoint(point_id))
+        {
+            appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        }
+        else
+        {
+            appendAck(message_id, tecomm::AckResultCode::Rejected, out);
+        }
+        break;
+    }
+
+    case tecomm::MessageId::CmdSetRotationPoints:
+    {
+        if (executor_.processState() == ProcessState::Running)
+        {
+            appendAck(message_id, tecomm::AckResultCode::InvalidState, out);
+            break;
+        }
+        if (frame.payload_length != tecomm::kRotationPointsPayloadWireSize || frame.payload == nullptr)
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        std::size_t offset = 0;
+        TestPoint k1{};
+        TestPoint k2{};
+        TestPoint k3{};
+        if (!tecomm::readF32LE(frame.payload, frame.payload_length, offset, k1.x, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k1.y, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k1.z, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k2.x, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k2.y, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k2.z, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k3.x, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k3.y, true) ||
+            !tecomm::readF32LE(frame.payload, frame.payload_length, offset, k3.z, true) ||
+            offset != frame.payload_length)
+        {
+            appendNack(message_id, tecomm::NackErrorCode::InvalidPayload, 0, out);
+            break;
+        }
+        machine_.setRotationPoints(k1, k2, k3);
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
     }
 
@@ -862,6 +981,7 @@ bool CommandDispatcher::isFaultGuarded(uint8_t message_id) const
     {
     case tecomm::MessageId::CmdNop:
     case tecomm::MessageId::CmdClearFault:
+    case tecomm::MessageId::CmdEnableFaultManual:
     case tecomm::MessageId::CmdRequestStatus:
     case tecomm::MessageId::CmdGetMachineConfig:
     case tecomm::MessageId::CmdSetForceCalibration:
@@ -870,6 +990,19 @@ bool CommandDispatcher::isFaultGuarded(uint8_t message_id) const
         return false;
     default:
         return true;
+    }
+}
+
+bool CommandDispatcher::isFaultManualAllowed(uint8_t message_id) const
+{
+    switch (static_cast<tecomm::MessageId>(message_id))
+    {
+    case tecomm::MessageId::CmdMoveTo:
+    case tecomm::MessageId::CmdSetManualSpeed:
+    case tecomm::MessageId::CmdStop:
+        return true;
+    default:
+        return false;
     }
 }
 

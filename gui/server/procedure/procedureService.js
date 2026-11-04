@@ -82,6 +82,28 @@ function createProcedureService(machineClient, options = {}) {
     async stop() {
       return adapter.stop();
     },
+    resetUi() {
+      if (typeof adapter.resetUi === 'function') {
+        return adapter.resetUi();
+      }
+      const current = procedureStore.getStatus();
+      if (current.state === 'running' || current.state === 'paused') {
+        return {
+          ok: false,
+          error: 'Prozedur läuft noch — bitte zuerst stoppen.',
+          status: current,
+        };
+      }
+      const keptParams = current.params;
+      procedureStore.reset();
+      procedureStore.patch({
+        backend: current.backend,
+        params: keptParams,
+        state: 'idle',
+        capabilities: current.capabilities,
+      });
+      return { ok: true, status: procedureStore.getStatus() };
+    },
     async applyProcedureDecision(action) {
       if (typeof adapter.applyProcedureDecision !== 'function') {
         return { ok: false, error: 'applyProcedureDecision not supported by adapter' };

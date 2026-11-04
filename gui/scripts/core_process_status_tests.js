@@ -27,7 +27,7 @@ async function main() {
     false
   );
   assert.strictEqual(
-    mod.describeRunningCoreProcess('ProbeCalibrate').startBlockedMessage.includes('Messtaster'),
+    mod.describeRunningCoreProcess('ProbeCalibrate').startBlockedMessage.includes('Einmessbohrung'),
     true
   );
   assert.strictEqual(mod.describeRunningCoreProcess('PointApproach').startBlockedMessage, 'Die Prüfprozedur läuft bereits.');
@@ -35,7 +35,7 @@ async function main() {
     mod.describeRunningCoreProcess('UnknownPhaseX').startBlockedMessage.includes('anderer Maschinenprozess'),
     true
   );
-  assert.strictEqual(mod.formatProcedurePhaseLabel('ProbeCalibrate'), 'Messtaster kalibrieren');
+  assert.strictEqual(mod.formatProcedurePhaseLabel('ProbeCalibrate'), 'Einmessbohrung kalibrieren');
 
   console.log('core_process_status_tests.js: PASS');
 }

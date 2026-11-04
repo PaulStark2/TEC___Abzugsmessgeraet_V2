@@ -81,7 +81,7 @@ export function renderParameters(container) {
       <p class="placeholder-note">
         Geschütztes Menü. Ungültige Werte werden vom Controller mit NACK abgelehnt;
         der bisherige gültige Wert bleibt erhalten (kein stilles Clamping).
-        SafetyLimits sind nicht editierbar. toolOffset nur über Messtaster-Einmessung.
+        SafetyLimits sind nicht editierbar. toolOffset nur über Einmess-Bohrung.
       </p>
       <p id="parameters-feedback" class="command-feedback" aria-live="polite"></p>
       <div id="parameters-content"></div>
@@ -122,7 +122,7 @@ export function renderParameters(container) {
       <p><strong>Zulässiger Bereich:</strong> ${escapeHtml(rangeText(field))}</p>
       <p><strong>Wirkung:</strong> ${
         field.readOnly
-          ? 'nur Anzeige — Wert wird durch Messtaster-Einmessung gesetzt'
+          ? 'nur Anzeige — Wert wird durch Einmess-Bohrung gesetzt'
           : field.future
             ? 'noch nicht im Core ausgewertet'
             : 'wirkt auf Core MachineConfig'

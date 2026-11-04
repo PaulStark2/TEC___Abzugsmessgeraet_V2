@@ -202,15 +202,8 @@ void SimProtocolBridge::appendForcePathChunks(std::vector<OutboundFrame>& out)
 
 void SimProtocolBridge::applyHostInputs()
 {
-    // Disc center stays independently configurable. Collision geometry follows
-    // MachineConfig so the spreader cylinder and disc size match the Core.
-    simplant::ProbeDisc disc = plant_.probeDisc();
-    const MachineConfig::Probe& probe = machine_.machineConfig().probe;
-    disc.diameter = probe.measuring_head_diameter;
-    disc.thickness = probe.measuring_head_thickness;
-    disc.tool_diameter = probe.tool_diameter;
-    disc.tool_cylindrical_height = probe.tool_cylindrical_height;
-    plant_.setProbeDisc(disc);
+    // Probe-disc geometry sync removed with Messtaster measuring-head params;
+    // plant contact is pulse-only. Disc center remains set via plant commands.
 
     HostInputs inputs = plant_.sample(machine_.rawX(), machine_.rawY(), machine_.rawZ());
     // SimPlant latches trigger XYZ in raw/plant. Core ProbeSearch/backoff treats
@@ -256,10 +249,10 @@ void SimProtocolBridge::applyHostInputs()
         // Idle/jog: plant injected force (default 0) is the HostInputs vector.
     }
 
-    // One dose and one sign for every axis. The stored Z curve is applied to the
-    // window mean of X, Y and Z. Tension stays negative; there is no second flip.
-    // Uncalibrated plant Newton is left as-is: the simulation has no ADC noise,
-    // and procedure tests expect that force in the same tick.
+    // One Z curve on X/Y/Z. Tension stays negative; no second Fz flip.
+    // Sim injects Core-frame forces (action convention, channels already mapped).
+    // STM32 FirmwareHost swaps ADC X↔Y and negates Fx/Fy for the physical cell;
+    // do not repeat that here or procedure tests would double-correct.
     const float dt = host_dt_ > 0.0f ? host_dt_ : 0.05f;
     const CountWindow::Mean mean = counts_.push(
         static_cast<float>(simplant::syntheticFzCounts(inputs.force.fx)),

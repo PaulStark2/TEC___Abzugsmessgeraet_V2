@@ -84,13 +84,11 @@ function sampleMachineConfig(overrides = {}) {
     collision_clamp_N: 20,
     collision_unclamp_N: 20,
     collision_contact_N: 40,
-    collision_measure_N: 40,
+    collision_measure_N: 150,
     spreader_extend_time_s: 0.5,
     spreader_retract_time_s: 0.5,
     force_tolerance_N: 0.5,
     v_search: 2,
-    probe_search_distance: 10,
-    probe_backoff: 1,
     home_offset_x: 0,
     home_offset_y: 0,
     home_offset_z: 0,
@@ -98,23 +96,20 @@ function sampleMachineConfig(overrides = {}) {
     tool_offset_y: -0.5,
     tool_offset_z: 1,
     safe_z_buffer: 30,
+    safe_z_calib_buffer: 30,
     sample_timeout_s: 0.5,
     heartbeat_timeout_s: 0.3,
     xy_correct_timeout_s: 2,
-    head_diameter: 0,
-    measuring_head_diameter: 8,
-    measuring_head_thickness: 3,
-    tool_diameter: 2.5,
-    tool_cylindrical_height: 15,
-    probe_xy_search_margin: 2,
     insert_search_distance: 10,
-    search_depth: 5,
     approach_distance: 10,
-    v_search_fine: 1,
-    probe_offset_reference_x: 0,
-    probe_offset_reference_y: 0,
-    probe_offset_reference_z: 5,
-    num_fine_searches: 3,
+    probe_v_approach: 10,
+    probe_wall_force_N: 0.5,
+    probe_floor_force_N: 0.5,
+    probe_xy_search_limit: 5,
+    probe_z_search_limit: 10,
+    probe_z_lift_mm: 2,
+    probe_bore_timeout_s: 60,
+    probe_bore_refine_passes: 0,
     phase1_v_extract: 1,
     phase1_v_insert: 1,
     phase1_a: 0,
@@ -123,12 +118,6 @@ function sampleMachineConfig(overrides = {}) {
     phase3_v_insert: 2,
     phase3_a: 0,
     phase3_corner: 0,
-    v_approach_probe: 10,
-    v_transfer_probe: 10,
-    a_probe_transfer: 0,
-    corner_probe_transfer: 0,
-    a_probe_search: 0,
-    a_probe_brake: 500,
     probe_center_x: 0,
     probe_center_y: 0,
     probe_center_z: 0,
@@ -676,7 +665,7 @@ async function testGetMachineConfigAckAndConfigSameChunk() {
 }
 
 async function testGetMachineConfigAckAndConfigSeparateWrites() {
-  const cfg = sampleMachineConfig({ measuring_head_diameter: 12 });
+  const cfg = sampleMachineConfig({ probe_v_approach: 12 });
   const { server, port } = await startMockHost((socket, frame) => {
     if (frame.messageId !== MessageId.CmdGetMachineConfig) {
       return;
@@ -689,7 +678,7 @@ async function testGetMachineConfigAckAndConfigSeparateWrites() {
     await withClient(port, async (client) => {
       const result = await client.getMachineConfig();
       assert.ok(result.ok, result.error);
-      assert.ok(Math.abs(result.config.measuring_head_diameter - 12) < 1e-4);
+      assert.ok(Math.abs(result.config.probe_v_approach - 12) < 1e-4);
     });
   } finally {
     server.close();

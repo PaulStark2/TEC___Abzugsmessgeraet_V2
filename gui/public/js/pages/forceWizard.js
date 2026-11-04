@@ -418,6 +418,7 @@ export function mountForceCalibration(contentEl, opts) {
       stop.addEventListener('click', async () => {
         sampleToken += 1;
         await sendCommand({ command: 'stop' });
+        await setCollisionGuard(true);
         phase = 'aborted';
         render();
       });
@@ -469,6 +470,13 @@ export function mountForceCalibration(contentEl, opts) {
   }
 
   async function runApproachMove(store) {
+    // Relax phase collision + configured hard limits for the whole calib session
+    // (hanging masses / uncalibrated ADC must not latch Fault).
+    const guardOff = await setCollisionGuard(false);
+    if (!guardOff.ok) {
+      setFeedback(guardOff.error || 'Die Phasengrenze konnte nicht ausgeschaltet werden.', true);
+      return;
+    }
     const moved = await sendCommand({
       command: 'moveTo',
       x: store.probeCenter.x,
@@ -486,17 +494,12 @@ export function mountForceCalibration(contentEl, opts) {
         setFeedback('Anfahrt abgebrochen.', true);
         return;
       }
-        if (status.motionState && status.motionState !== 'Moving') {
-          if (disposed) return;
-          const guard = await setCollisionGuard(false);
-          if (!guard.ok) {
-            setFeedback(guard.error || 'Die Phasengrenze konnte nicht ausgeschaltet werden.', true);
-            return;
-          }
-          phase = 'free';
-          render();
-          return;
-        }
+      if (status.motionState && status.motionState !== 'Moving') {
+        if (disposed) return;
+        phase = 'free';
+        render();
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     setFeedback('Anfahrt nicht beendet.', true);
@@ -505,7 +508,7 @@ export function mountForceCalibration(contentEl, opts) {
   async function renderApproach() {
     shell(
       'Anfahrt',
-      `<p>Die Maschine fährt auf die Mitte des Messtasters, ${FORCE_CALIB_SCHEDULE.zClearanceMm} mm unter den oberen Anschlag.</p>
+      `<p>Die Maschine fährt auf die Mitte der Einmessbohrung, ${FORCE_CALIB_SCHEDULE.zClearanceMm} mm unter den oberen Anschlag.</p>
        <button type="button" id="btn-approach" class="force-wizard__primary">Anfahrt starten</button>`,
       false
     );
@@ -513,7 +516,7 @@ export function mountForceCalibration(contentEl, opts) {
       const calib = await fetchCalibration();
       const store = (calib && calib.calibration) || {};
       if (!store.machineCoordinateSystem || !store.machineCoordinateSystem.valid || !store.probeCenterValid || !store.probeCenter) {
-        setFeedback('Zuerst MCS und Messtaster kalibrieren.', true);
+        setFeedback('Zuerst MCS und Einmessbohrung kalibrieren.', true);
         return;
       }
       await refreshStatus();
@@ -547,7 +550,7 @@ export function mountForceCalibration(contentEl, opts) {
       } else if (gate.result === 'timeout') {
         setFeedback('Homing-Timeout — Anfahrt nicht gestartet.', true);
       } else if (gate.result === 'mcs_required') {
-        setFeedback('Zuerst MCS und Messtaster kalibrieren.', true);
+        setFeedback('Zuerst MCS und Einmessbohrung kalibrieren.', true);
       }
     });
   }

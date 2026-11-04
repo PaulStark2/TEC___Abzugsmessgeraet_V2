@@ -20,6 +20,8 @@ const {
   encodeTestConfigurationMessage,
   encodePlateOriginMessage,
   encodeStartPlateBoreSearchMessage,
+  encodeApproachCalibPointMessage,
+  encodeSetRotationPointsMessage,
   encodeSetPlateYawMessage,
   encodeProbeCenterMessage,
   encodeRestoreMcsMessage,
@@ -250,7 +252,9 @@ function createProtocolMachineClient(options = {}) {
         startNopHeartbeat();
       }
     }
-    // StatusReport has no ADC fields. Keep the last MsgRawAdc sample.
+    // StatusReport has no ADC / bore-event fields. Keep last MsgRawAdc and
+    // MsgBoreCenter latch — otherwise borePointId/boreCz vanish on the next
+    // status push and plate-calib waitForPlateBoreResult never resolves.
     const keptAdc = {
       adcX: status.adcX,
       adcY: status.adcY,
@@ -258,6 +262,7 @@ function createProtocolMachineClient(options = {}) {
       adcValid: status.adcValid,
       boreCx: status.boreCx,
       boreCy: status.boreCy,
+      boreCz: status.boreCz,
       boreRadius: status.boreRadius,
       boreResidual: status.boreResidual,
       boreFx: status.boreFx,
@@ -265,6 +270,7 @@ function createProtocolMachineClient(options = {}) {
       boreAnomaly: status.boreAnomaly,
       boreConfirmPending: status.boreConfirmPending,
       boreValid: status.boreValid,
+      borePointId: status.borePointId,
     };
     status = statusReportToGuiStatus(decoded, connected && sessionReady);
     measuredHome = latchMeasuredHome({
@@ -772,12 +778,31 @@ function createProtocolMachineClient(options = {}) {
     if (dir !== 1 && dir !== -1) {
       return { ok: false, error: 'jog direction must be 1 or -1' };
     }
-    const stepSize = step === undefined ? DEFAULT_JOG_STEP : Number(step);
+    let stepSize = step === undefined ? DEFAULT_JOG_STEP : Number(step);
     if (!Number.isFinite(stepSize) || stepSize <= 0) {
       return { ok: false, error: 'jog step must be a positive finite number' };
     }
 
     const current = getStatus();
+    if (current.faultManual) {
+      let maxStep = 1;
+      try {
+        // Lazy require avoids a circular import with the HTTP config layer.
+        // eslint-disable-next-line global-require
+        const { load } = require('../config/machineConfigStore');
+        const cfg = load();
+        const configured = Number(cfg.fault_manual_max_step_mm);
+        if (Number.isFinite(configured) && configured > 0) {
+          maxStep = configured;
+        }
+      } catch {
+        // keep default maxStep
+      }
+      if (stepSize > maxStep) {
+        stepSize = maxStep;
+      }
+    }
+
     const delta = dir * stepSize;
     const target = { x: current.x, y: current.y, z: current.z };
     if (axisKey === 'X') target.x += delta;
@@ -817,6 +842,17 @@ function createProtocolMachineClient(options = {}) {
       return { ok: false, error: 'Failed to encode CLEAR_FAULT' };
     }
     return sendFrameAndWait(MessageId.CmdClearFault, encoded.frame);
+  }
+
+  async function enableFaultManual() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdEnableFaultManual);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode ENABLE_FAULT_MANUAL' };
+    }
+    return sendFrameAndWait(MessageId.CmdEnableFaultManual, encoded.frame);
   }
 
   /** Core homing sequence Z+ → X+ → Y+ (CmdHome) — Reference only. */
@@ -987,6 +1023,13 @@ function createProtocolMachineClient(options = {}) {
     if (!encoded.ok) {
       return { ok: false, error: encoded.error || 'Failed to encode START_PLATE_BORE_SEARCH' };
     }
+    // Drop previous MsgBoreCenter latch so the wizard does not resolve on a stale point.
+    status = {
+      ...status,
+      boreValid: false,
+      boreConfirmPending: false,
+      borePointId: undefined,
+    };
     return sendFrameAndWait(MessageId.CmdStartPlateBoreSearch, encoded.frame);
   }
 
@@ -999,6 +1042,28 @@ function createProtocolMachineClient(options = {}) {
       return { ok: false, error: encoded.error || 'Failed to encode SET_PLATE_YAW' };
     }
     return sendFrameAndWait(MessageId.CmdSetPlateYaw, encoded.frame);
+  }
+
+  async function approachCalibPoint(pointId) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeApproachCalibPointMessage(pointId);
+    if (!encoded.ok) {
+      return { ok: false, error: encoded.error || 'Failed to encode APPROACH_CALIB_POINT' };
+    }
+    return sendFrameAndWait(MessageId.CmdApproachCalibPoint, encoded.frame);
+  }
+
+  async function setRotationPoints(k1, k2, k3) {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeSetRotationPointsMessage(k1, k2, k3);
+    if (!encoded.ok) {
+      return { ok: false, error: encoded.error || 'Failed to encode SET_ROTATION_POINTS' };
+    }
+    return sendFrameAndWait(MessageId.CmdSetRotationPoints, encoded.frame);
   }
 
   async function setForceCalibration(command) {
@@ -1078,6 +1143,17 @@ function createProtocolMachineClient(options = {}) {
     return sendFrameAndWait(MessageId.CmdStartProbeCalib, encoded.frame);
   }
 
+  async function startTestOrAge() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdStartTestOrAge);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode START_TEST_OR_AGE' };
+    }
+    return sendFrameAndWait(MessageId.CmdStartTestOrAge, encoded.frame);
+  }
+
   function onSessionReady(handler) {
     sessionReadyHandler = handler;
   }
@@ -1122,6 +1198,7 @@ function createProtocolMachineClient(options = {}) {
     invalidateHoming,
     restoreMcs,
     clearFault,
+    enableFaultManual,
     setSpeed,
     loadProgram,
     start,
@@ -1130,7 +1207,9 @@ function createProtocolMachineClient(options = {}) {
     setTestConfiguration,
     setPlateOrigin,
     startPlateBoreSearch,
+    approachCalibPoint,
     setPlateYaw,
+    setRotationPoints,
     setProbeCenter,
     setForceCalibration,
     selectForceCurve,
@@ -1138,6 +1217,7 @@ function createProtocolMachineClient(options = {}) {
     fixtureOpen,
     fixtureClose,
     startProbeCalibration,
+    startTestOrAge,
     onSessionReady,
     onForcePathChunk,
     close,

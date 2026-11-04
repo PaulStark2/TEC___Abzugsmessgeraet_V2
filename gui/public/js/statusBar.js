@@ -2,7 +2,6 @@
 
 import { sendCommand } from './api.js';
 import { applyFixtureStateDisplay } from './fixtureStateDisplay.js';
-import { setTcpPose } from './tcpView.js';
 import { deriveDisplayState, formatHomingStatus } from './machineGuiState.js';
 import { applyFaultPanel } from './components/faultPanel.js';
 import {
@@ -55,7 +54,7 @@ function applyMachineWarnings(warnings) {
 }
 
 /**
- * Update global status bar and 3D TCP (display-only).
+ * Update global status bar (display-only).
  * @param {object} status
  */
 export function applyStatus(status) {
@@ -183,7 +182,45 @@ export function applyStatus(status) {
     }
   }
 
-  setTcpPose(status);
+  if (status.messageSummary) {
+    applyMessageSummary(status.messageSummary);
+  }
+}
+
+/**
+ * Update the compact HMI message strip from store summary.
+ * @param {{ activeCount?: number, topTitle?: string|null, topSeverity?: string|null }} summary
+ */
+export function applyMessageSummary(summary) {
+  const strip = $('message-strip');
+  const titleEl = $('message-strip-title');
+  const sevEl = $('message-strip-severity');
+  const countEl = $('message-strip-count');
+  if (!strip || !titleEl || !sevEl || !countEl) {
+    return;
+  }
+  const count = Number(summary && summary.activeCount) || 0;
+  if (!summary || count <= 0 || !summary.topTitle) {
+    strip.hidden = true;
+    strip.className = 'message-strip';
+    sevEl.textContent = '';
+    titleEl.textContent = '';
+    countEl.hidden = true;
+    countEl.textContent = '';
+    return;
+  }
+  strip.hidden = false;
+  const sev = summary.topSeverity || 'error';
+  strip.className = `message-strip message-strip--${sev}`;
+  sevEl.textContent = String(sev).toUpperCase();
+  titleEl.textContent = summary.topTitle;
+  if (count > 1) {
+    countEl.hidden = false;
+    countEl.textContent = `+${count - 1}`;
+  } else {
+    countEl.hidden = true;
+    countEl.textContent = '';
+  }
 }
 
 export function setConnectionStatus(text, isError) {

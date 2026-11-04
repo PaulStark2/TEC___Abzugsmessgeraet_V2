@@ -120,11 +120,11 @@
         <p id="sim-plant-feedback" class="command-feedback" aria-live="polite"></p>
 
         <section class="sim-group">
-          <h3>Messtaster</h3>
+          <h3>Einmessbohrung (Sim-Scheibe)</h3>
           <p class="placeholder-note">
             Scheiben-<b>Position</b> (x/y/z) ist SimPlant-Ground-Truth und gelangt nicht in den Core.
-            Ø, Dicke und Spreizergeometrie kommen ausschließlich aus der zentralen
-            MachineConfig (Seite Parameter) — hier nur Anzeige, nicht editierbar.
+            Ø, Dicke und Spreizergeometrie sind plant-eigene Darstellungswerte (Defaults) —
+            nicht mehr Teil der MachineConfig.
           </p>
           <p class="placeholder-note">
             Automatischer geometrischer Trigger bei Kontakt des Spreizerzylinders mit der Messscheibe
@@ -240,7 +240,7 @@
           </div>
           <div class="sim-field sim-field--inline">
             <input type="checkbox" id="toggle-ref-probe" checked />
-            <label for="toggle-ref-probe">Messtaster-Zentrum (Core)</label>
+            <label for="toggle-ref-probe">Einmessbohrung-Zentrum (Core)</label>
           </div>
           <div class="sim-field sim-field--inline">
             <input type="checkbox" id="toggle-ref-points" checked />

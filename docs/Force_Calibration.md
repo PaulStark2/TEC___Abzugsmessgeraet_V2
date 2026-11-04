@@ -6,7 +6,9 @@ Die Kennlinie ist eine Regression der Sensorkraft auf den ADC-Zählwert. Sie wir
 
 ## Vorzeichen
 
-Zug ist negativ, Druck ist positiv. Das gilt für die Kennlinie und für `HostInputs`. Es gibt keine zweite Umkehr an der Host-Grenze. Dieselbe gespeicherte Z-Funktion wird auf die Rohzählwerte aller drei Achsen angewendet:
+Zug ist negativ, Druck ist positiv. Das gilt für die Kennlinie und für `HostInputs.fz`. Am STM32 gibt es **keine** zweite Fz-Umkehr. Dieselbe gespeicherte Z-Funktion wird auf die (nach Achsenzuordnung) gemittelten Zählwerte aller drei Kanäle angewendet.
+
+**Lateral (nur FirmwareHost):** ADC-Kanäle X↔Y sind mechanisch getauscht (`MsgRawAdc` und `HostInputs` in Machine-Achsreihenfolge). Anschließend einmal `fx = −fx`, `fy = −fy`, damit die Reaktionskraft der Dose zur Core-Konvention (+F entlang +Maschine, Entlastung `u = −sign(F)`) passt. Simulation injiziert bereits Core-Frame-Kräfte und wiederholt Swap/Negate nicht.
 
 ```191:198:simulation_bridge/SimProtocolBridge.cpp
     force_calib_.observeRaw(simplant::syntheticFzCounts(inputs.force.fx),
@@ -161,7 +163,7 @@ Eine Vorschau (`commit = 0`) ersetzt die aktive Kennlinie nicht. Erst `commit = 
 ## Ablauf in der GUI
 
 1. Bestätigung, dass neu kalibriert werden soll. Die bisherige Kennlinie bleibt bis zum Speichern gültig.
-2. Fahrt zum Tastermittelpunkt bei Z = −5 mm. Während der Fahrt ist Jog gesperrt und die Phasengrenze `collisionApproach` bleibt aktiv. Danach ist diese Phasengrenze aus, Jog und Spreizer bleiben verfügbar. Die harte Grenze ist der Parameter `force_hard_limit_N`, Default 30 N. STOP bricht ab, schaltet die Phasengrenze wieder ein und verwirft nur die laufende Sitzung.
+2. Fahrt zum Tastermittelpunkt bei Z = −5 mm. Ab Start der Anfahrt schaltet der Wizard `CmdSetCollisionGuard(false)`: Phasen-Kollision aus, und die konfigurierten Hard-Limits greifen nicht (nur noch die SafetyLimits-Typo-Bremse 500 N). So lösen aufgehängte Massen und noch unkalibrierte ADC-Rohwerte keinen Fault aus. STOP / Verlassen des Wizards schaltet die Phasengrenze wieder ein.
 3. Kraftfreie Messung, dann Adapter einspannen, dann Adaptermessung. Jede Aufnahme mittelt bis zu 20 Werte in 2 Sekunden. Der Bediener übernimmt den Mittelwert oder wiederholt den Punkt.
 4. Zug- und Druckstufen aus den Parametern. Default sind fünf Stufen je Richtung mit 500 g Schritt, also 500, 1000, 1500, 2000 und 2500 g. Anzahl 1…16 und Schrittweite größer als 200 g stehen in der Parameterdatei und nicht im MachineConfig-Frame. Die letzte Stufe muss im Messbereich liegen.
 5. Druck: Waage nullen, auf die Waage fahren, abgelesene Gramm eintragen.
@@ -171,8 +173,8 @@ Eine Vorschau (`commit = 0`) ersetzt die aktive Kennlinie nicht. Erst `commit = 
 
 Die Zählwerte sind hier keine Messung. Der Simulationshost rechnet sie aus der injizierten Prozesskraft. Zwei Fenster: die Maschinen-GUI unter Kalibrieren und die Sim-Oberfläche unter `/simulation`. GUI und `simulation_protocol` müssen aus diesem Stand laufen, sonst bleibt `adcValid` leer.
 
-1. MCS, Messtaster und Referenzfahrt sind gültig.
-2. Kraftmessdose starten und die Anfahrt ausführen. Während der Anfahrt gilt `collisionApproach`. Danach nicht mehr, deshalb lösen 24,5 N kein `ForceCollision` aus, solange die harte Grenze darüber liegt. Default der harten Grenze ist 30 N. Bei gelöster Kraft muss die Live-Zeile einen ADC Z zeigen. Kraftfreie Messung und Adaptermessung beide ohne eingerastete Kraft aufnehmen, damit die Adapterdifferenz 0 ist.
+1. MCS, Einmessbohrung (`probe_center`) und Referenzfahrt sind gültig.
+2. Kraftmessdose starten und die Anfahrt ausführen. Ab Anfahrt-Start sind Phasen-Kollision und konfigurierte Hard-Limits aus (`CmdSetCollisionGuard(false)`); 24,5 N oder volle Lastpunkte lösen keinen Fault aus. Bei gelöster Kraft muss die Live-Zeile einen ADC Z zeigen. Kraftfreie Messung und Adaptermessung beide ohne eingerastete Kraft aufnehmen, damit die Adapterdifferenz 0 ist.
 3. Pro Stufe den Betrag unten eintragen, in der Sim-Oberfläche +Z oder −Z anklicken und im Wizard die Soll-Gramm eintragen. +Z und −Z bleiben stehen, bis „Kraft lösen“ gedrückt wird. −Z ist Zug, +Z ist Druck. X und Y nicht einrasten.
 
 - 500 g → 4,903 N
@@ -218,8 +220,7 @@ In der Prüfprozedur gibt es an jedem Stillstand genau eine Ruheprobe, nicht zwe
 
 1. nach der groben Anfahrt, vor der feinen Z-Abfahrt (`PointApproach`). Nicht vor `PreClampXyCorrect`: die XY-Korrektur muss die Kraft der feinen Anfahrt sehen.
 2. nach dem ersten Clamp, vor SeatToForce (`InsertInitial`)
-3. nach SeatToForce, vor Unclamp AfterSeat
-4. nach dem zweiten Clamp, vor der Prüfphase (`TestOrAge`)
-5. nach der Prüfphase, vor Unclamp AfterTest
+3. nach AfterSeat-Rückhub, vor dem zweiten PreClamp (lastfrei). **Nicht** erneut nach dem zweiten Clamp — sonst wird Restgegenkraft unter Spreizerlast genullt und verfälscht das Ausgliedern.
+4. nach der Prüfphase, vor Unclamp AfterTest
 
 Die Phase heißt `ForceTare` und hat die Ordnungszahl 17. Im Handmodus startet der Knopf „Ruheprobe“ dasselbe über `CmdForceTare`. Der Befehl wird abgelehnt, solange eine Prozedur läuft, eine Achse fährt, referenziert wird oder bereits eine Ruheprobe läuft.

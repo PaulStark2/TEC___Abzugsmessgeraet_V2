@@ -7,28 +7,31 @@ the firmware uses `arm-none-eabi` and a different toolchain.
 
 - 180 MHz, IWDG, SysTick 1 kHz → Core `Machine` / `TestExecutor`
 - ADC DMA Fx/Fy/Fz (every scan of the millisecond, then a 100 ms count window), limits, probe, E-Stop, spreader pair, fixture
-- XYZ step GPIO (PB6/PB4/PB8), DIR PC1/PC3/PC5, 200 steps/mm
+- XYZ step GPIO (PB6/PB4/PB8), DIR PC1/PC3/PC5, 200 steps/mm; **X DIR inverted** (`kInvertDir[0]`) so machine +X is into the workspace
+- Limit map: physical XP → `limitXMin` (X home), physical XN → `limitXMax`; Y/Z +Max still home
 - **M12 binary protocol** on host UART (replaces ASCII Phase-2–4 bench)
-- **ForceCalibHost**: `MsgRawAdc` at 50 Hz; after GUI commit, polynomial on Fx/Fy/Fz (same Z curve)
+- **ForceCalibHost**: `MsgRawAdc` at 50 Hz; ADC X↔Y swapped then Fx/Fy negated for Core; same Z curve on all channels
 - **Process (Phase 6)**: shared `CommandDispatcher` Start/Stop/Pause; `TestExecutor` tick while Running; Core comm-watchdog advances **only on `CmdNop`** (GUI already sends 10 Hz)
-- **Probe latch**: NC on PA5; `FirmwareHost` latches machine pose + sequence on contact (required by Core)
+- **Probe GPIO PA5**: still wired/latched in firmware for legacy host fields; **unused by Core Einmessen** (kraftbasierte Einmess-Bohrung)
 
 ## Critical host contracts (do not regress)
 
 These are easy to break on the MCU path and look like “hardware dead” in the GUI.
 
-### Probe / Messtaster
+### Probe GPIO (PA5) — unused by Core Einmessen
+
+Legacy NC input; Core `probe_center` Einmessen is force-based `BoreSearch` and
+does **not** consume `probeTriggered`. Firmware may still latch pose/sequence
+for host-field compatibility.
 
 | Item | Value |
 |------|--------|
 | Pin | **PA5** (not Nucleo LD2 — disconnect LD2 solder bridge if shared) |
 | Switch | **NC**: idle High, contact Low |
-| GPIO | Input + pull-down; `HostIo`: `probeTriggered = !pinHigh(PA5)` |
-| Core | Latches **only** if host also sets `probeTriggerPoseValid`, finite X/Y/Z, and a **new** `probeTriggerSequence` |
-| Firmware | `FirmwareHost` on rising edge of `probeTriggered`: store `machine_.x/y/z()`, bump sequence; hold while contact |
+| GPIO | Input + pull-down; `HostIo`: `probeTriggered = !pinHigh(PA5)` after **15 ms** debounce |
+| Firmware | Optional latch on rising edge of debounced `probeTriggered` |
 
-Without the pose latch, plate/probe Einmessung never sees contact even when the
-scope shows Low on PA5. Spec: [docs/M19_ProbeCalibration.md](../docs/M19_ProbeCalibration.md).
+Einmessen spec: [docs/M19_ProbeCalibration.md](../docs/M19_ProbeCalibration.md).
 
 ### Limit switches / false Homing
 
@@ -65,7 +68,11 @@ SFU machine.
 | **`USART2`** (default) | PA2/PA3 | Laptop ST-Link VCP → GUI `PROTOCOL_TRANSPORT=uart` |
 | `USART3` | PC10/PC11 | Pi `/dev/serial0` (Phase 5b) |
 
-115200 8N1. StatusReport **50 Hz**, `MsgRawAdc` **10 Hz**. During TestOrAge (test mode) the same status push also drains `MsgForcePathChunk` (`0xA2`, Kraft-Weg samples; see `docs/Measurement_Evaluation.md`). GUI sends **CmdNop 10 Hz** when the session is live.
+115200 8N1. StatusReport **50 Hz** (**44 B** wire, inkl. `abort_reason` u16 — siehe
+[`docs/HMI_Messages.md`](../docs/HMI_Messages.md)), `MsgRawAdc` **10 Hz**. During TestOrAge
+(test mode) the same status push also drains `MsgForcePathChunk` (`0xA2`, Kraft-Weg
+samples; see `docs/Measurement_Evaluation.md`). GUI sends **CmdNop 10 Hz** when the
+session is live.
 
 ### UART stalls / sticky jog / hung calibration (important)
 
@@ -160,12 +167,12 @@ Same M12 commands as simulation. Typical gate for `CmdStart`:
 
 While `ProcessState::Running`, Core enables the communication watchdog — GUI `CmdNop` must keep flowing or the machine Faults (no auto-resume). STOP always works.
 
-### Probe Einmessung (Bauplatte / Messtaster)
+### Probe Einmessen (Einmessbohrung)
 
-1. MCS + Homing as usual; probe wired NC to PA5 (Low = contact).
-2. Flash a build that includes the `FirmwareHost` pose latch (see Critical host contracts).
-3. Start geometric probe calibration from the GUI over UART.
-4. On contact, Core must consume the latched event — if search times out with a clear Low on PA5, the latch/sequence path is broken (not the NC wiring).
+1. MCS + Homing as usual; Spreizer open before geometric calib.
+2. Jog hub above the Einmessbohrung; start `CmdStartProbeCalib` (Install) from the GUI over UART.
+3. Core runs Z-first `BoreSearch` (floor → lift → XY two-chord). Force / wall-floor faults → `ProbeSearchNoContact`.
+4. PA5 Messtaster GPIO is not part of this path.
 
 ### Real XYZ jog (existing code, parallel to Phase 6)
 

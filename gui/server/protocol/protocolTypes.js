@@ -18,10 +18,10 @@ const MANUAL_SPEED_PAYLOAD_WIRE_SIZE = 4;
 const BOOL_PAYLOAD_WIRE_SIZE = 1;
 const ACK_PAYLOAD_WIRE_SIZE = 2;
 const NACK_PAYLOAD_WIRE_SIZE = 3;
-const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 41;
+const STATUS_REPORT_PAYLOAD_WIRE_SIZE = 46; // + abort_reason u16 + current_iteration u16
 const PROGRAM_SUMMARY_PAYLOAD_WIRE_SIZE = 26;
 const LOAD_PROGRAM_MAX_POINT_COUNT = 32;
-const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 386;
+const MACHINE_CONFIG_PAYLOAD_WIRE_SIZE = 372; // + force_path_dz / fine insert
 const TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE = 8;
 const PLATE_ORIGIN_PAYLOAD_WIRE_SIZE = 12;
 const FORCE_PATH_CHUNK_MAX_SAMPLES = 32;
@@ -60,6 +60,10 @@ const MessageId = Object.freeze({
   CmdStartPlateBoreSearch: 0x5d,
   CmdSetPlateYaw: 0x5e,
   CmdProcedureDecision: 0x5f,
+  CmdEnableFaultManual: 0x60,
+  CmdApproachCalibPoint: 0x61,
+  CmdSetRotationPoints: 0x62,
+  CmdStartTestOrAge: 0x63,
   CmdSetProbeCenter: 0x55,
   CmdDefineMcs: 0x56,
   CmdRestoreMcs: 0x57,
@@ -146,6 +150,8 @@ const PROCEDURE_PHASE_NAMES = Object.freeze([
   'Completed',
   'Aborted',
   'ForceTare',
+  'PlateBoreSearch',
+  'CalibApproach',
 ]);
 
 const FAULT_REASON_NAMES = Object.freeze([

@@ -3,7 +3,6 @@
 #include "HostInputs.hpp"
 #include "Machine.hpp"
 #include "MachineConfig.hpp"
-#include "ProbeGeometry.hpp"
 #include "TestExecutor.hpp"
 
 #include <cmath>
@@ -20,50 +19,21 @@ inline HostInputs withFreshForce(HostInputs in)
     return in;
 }
 
-// Core-independent virtual probe disc for architecture tests.
-// disc_center represents the SimPlant "ground truth" disc center in machine coordinates.
-inline HostInputs withVirtualProbeDisc(const Machine& machine, const TestPoint& disc_center,
-                                         HostInputs in = HostInputs{})
-{
-    const MachineConfig::Probe& probe = machine.machineConfig().probe;
-    if (toolContactsProbeDisc(machine.x(), machine.y(), machine.z(), disc_center.x, disc_center.y, disc_center.z,
-                              probe.measuring_head_diameter, probe.measuring_head_thickness,
-                              probe.tool_diameter, probe.tool_cylindrical_height))
-    {
-        static std::uint32_t probe_seq = 1u;
-        in.probeTriggered = true;
-        in.probeTriggerPoseValid = true;
-        in.probeTriggerX = machine.x();
-        in.probeTriggerY = machine.y();
-        in.probeTriggerZ = machine.z();
-        // Mirror STM32 behavior: sequence number advances per trigger event.
-        in.probeTriggerSequence = probe_seq++;
-    }
-    return in;
-}
-
-// Default helper: disc center equals the configured probe_offset_reference.
-// This keeps legacy unit tests stable; architecture tests should prefer withVirtualProbeDisc().
-inline HostInputs withVirtualProbe(const Machine& machine, HostInputs in = HostInputs{})
-{
-    const MachineConfig::Probe& probe = machine.machineConfig().probe;
-    return withVirtualProbeDisc(machine, probe.probe_offset_reference, in);
-}
-
 inline HostInputs withPlantInputs(const Machine& machine, HostInputs in = HostInputs{})
 {
     // Soft +max switches for end-of-procedure Machine::home() in unit tests
     // (SimProtocolBridge gets these from SimPlant; bare Machine tests do not).
     if (machine.machineState() == MachineState::Homing)
     {
-        constexpr float kXMax = 100.0f;
+        // Match Machine homing sense: X at Min, Y/Z at +Max (see homeMachine()).
+        constexpr float kXMin = 0.0f;
         constexpr float kYMax = 100.0f;
         constexpr float kZMax = 50.0f;
-        in.limitXMax = machine.rawX() >= kXMax;
+        in.limitXMin = machine.rawX() <= kXMin + 0.5f;
         in.limitYMax = machine.rawY() >= kYMax;
         in.limitZMax = machine.rawZ() >= kZMax;
     }
-    return withFreshForce(withVirtualProbe(machine, in));
+    return withFreshForce(in);
 }
 
 // Deliver a fresh sample then tick. Use in tests that previously ticked Machine
@@ -81,44 +51,95 @@ inline bool phaseNeedsProcessForce(ProcedurePhase phase)
            phase == ProcedurePhase::TestOrAge || phase == ProcedurePhase::Unclamp;
 }
 
-// Radial bore around the pose where PreClamp is first seen. Only while that phase
-// runs, and only when the caller left Fx and Fy at zero. Approach and insert stay
-// on the caller's force. A +X wall reads +Fx, so the search moves −X.
+// Radial bore around a latched center. Used for PreClamp and ProbeCalibrate (z_first).
+inline void applySyntheticBoreForce(HostInputs& in, const Machine& machine, float cx, float cy,
+                                    float cz, float radius_mm, float wall_N, float floor_N)
+{
+    if (in.force.fx != 0.0f || in.force.fy != 0.0f)
+    {
+        return;
+    }
+    const float dx = machine.x() - cx;
+    const float dy = machine.y() - cy;
+    const float radius = std::hypot(dx, dy);
+    if (radius > radius_mm)
+    {
+        const float penetration = radius - radius_mm;
+        constexpr float kStiffness = 80.0f;
+        in.force.fx = kStiffness * penetration * dx / radius;
+        in.force.fy = kStiffness * penetration * dy / radius;
+        if (std::fabs(in.force.fx) < wall_N && std::fabs(in.force.fy) < wall_N)
+        {
+            in.force.fx = (dx >= 0.0f ? 1.0f : -1.0f) * (wall_N + 0.2f);
+            in.force.fy = (dy >= 0.0f ? 1.0f : -1.0f) * (wall_N + 0.2f);
+        }
+    }
+    if (machine.z() < cz - 0.05f && in.force.fz == 0.0f)
+    {
+        in.force.fz = floor_N + 0.5f;
+    }
+}
+
+// Radial bore around the pose where PreClamp / ProbeCalibrate is first entered.
+// Re-latch on every transition into a bore phase (pointer identity is unsafe across tests).
 inline HostInputs withProcedurePlant(const TestExecutor& ex, const Machine& machine, HostInputs in = HostInputs{})
 {
     struct Latch
     {
-        const Machine* machine = nullptr;
         float cx = 0.0f;
         float cy = 0.0f;
+        float cz = 0.0f;
+        bool active = false;
     };
     static Latch latch;
-    const bool preclamp = ex.procedurePhase() == ProcedurePhase::PreClampXyCorrect;
-    if (!preclamp)
+    static bool was_bore_phase = false;
+    const ProcedurePhase ph = ex.procedurePhase();
+    const bool bore_phase = ph == ProcedurePhase::PreClampXyCorrect ||
+                            ph == ProcedurePhase::ProbeCalibrate ||
+                            ph == ProcedurePhase::ProbeRemeasure;
+    if (!bore_phase)
     {
-        if (latch.machine == &machine)
-        {
-            latch.machine = nullptr;
-        }
+        was_bore_phase = false;
+        latch.active = false;
     }
-    else if (in.force.fx == 0.0f && in.force.fy == 0.0f)
+    else
     {
-        if (latch.machine != &machine)
+        const bool offset_only =
+            (ph == ProcedurePhase::ProbeCalibrate || ph == ProcedurePhase::ProbeRemeasure) &&
+            machine.calibrationSet().probe_center_valid;
+        const float dist_xy =
+            latch.active ? std::hypot(machine.x() - latch.cx, machine.y() - latch.cy) : 1e9f;
+        // Re-latch on bore-phase entry, when TCP jumped (stack Machine reuse across tests),
+        // or when OffsetOnly must follow the stored Install center.
+        if (!was_bore_phase || !latch.active || dist_xy > 2.0f || offset_only)
         {
-            latch.machine = &machine;
-            latch.cx = machine.x();
-            latch.cy = machine.y();
+            was_bore_phase = true;
+            latch.active = true;
+            if (offset_only)
+            {
+                const TestPoint& c = machine.calibrationSet().probe_center;
+                latch.cx = c.x;
+                latch.cy = c.y;
+                latch.cz = c.z;
+            }
+            else
+            {
+                latch.cx = machine.x();
+                latch.cy = machine.y();
+                latch.cz = machine.z() - 3.0f; // floor a bit below start height
+            }
         }
-        constexpr float kRadiusMm = 0.4f;
-        constexpr float kStiffness = 80.0f;
-        const float dx = machine.x() - latch.cx;
-        const float dy = machine.y() - latch.cy;
-        const float radius = std::hypot(dx, dy);
-        if (radius > kRadiusMm)
+        // Skip Safe-Z / long approaches: only engage near the bore work height.
+        const float standoff = machine.machineConfig().probe.approach_distance;
+        const bool near_work_z = machine.z() <= latch.cz + standoff + 1.0f;
+        if (near_work_z)
         {
-            const float penetration = radius - kRadiusMm;
-            in.force.fx = kStiffness * penetration * dx / radius;
-            in.force.fy = kStiffness * penetration * dy / radius;
+            const float wall = (ph == ProcedurePhase::ProbeCalibrate ||
+                                ph == ProcedurePhase::ProbeRemeasure)
+                                   ? machine.machineConfig().probe.wall_force_N
+                                   : machine.machineConfig().force.xy_tolerance_N;
+            const float floor = machine.machineConfig().probe.floor_force_N;
+            applySyntheticBoreForce(in, machine, latch.cx, latch.cy, latch.cz, 0.4f, wall, floor);
         }
     }
     return withPlantInputs(machine, in);
@@ -134,8 +155,28 @@ inline HostInputs withProcessForce(const TestExecutor& ex, const Machine& machin
     }
     else if (ph == ProcedurePhase::TestOrAge)
     {
-        // Legs 0/2 extract → kraftfrei (0). Leg 1 insert → seat force.
-        in.force.fz = (ex.procedure().cycleLeg() == 1) ? target : 0.0f;
+        // Leg 1 insert → seat force. Legs 0/2 extract: Druck → Zug → kraftfrei
+        // (must see tensile before accepting 0 N as Ausgliederpunkt).
+        if (ex.procedure().cycleLeg() == 1)
+        {
+            in.force.fz = target;
+        }
+        else
+        {
+            const float dz = machine.z() - ex.procedure().insertionZ();
+            if (dz < 0.3f)
+            {
+                in.force.fz = target;
+            }
+            else if (dz < 1.0f)
+            {
+                in.force.fz = -target;
+            }
+            else
+            {
+                in.force.fz = 0.0f;
+            }
+        }
     }
     else if (ph == ProcedurePhase::ProbeRemeasure)
     {
@@ -146,19 +187,8 @@ inline HostInputs withProcessForce(const TestExecutor& ex, const Machine& machin
 
 // Drive Z+ → X+ → Y+ to Homed. First call on a fresh machine defines MCS;
 // subsequent calls use reference home() only.
-// If DefineMcs runs, plate/probe taught before this helper are restored afterward so
-// existing unit tests that setPlateOrigin() then homeMachine() keep working.
-// Production GUI never depends on that restore (it teaches after Define).
 inline bool homeMachine(Machine& machine)
 {
-    MachineConfig cfg = machine.machineConfig();
-    cfg.probe.num_fine_searches = 0;
-    ConfigValidationError err = ConfigValidationError::Ok;
-    if (!machine.trySetMachineConfig(cfg, err))
-    {
-        return false;
-    }
-
     const bool need_define = !machine.machineCoordinateSystemValid();
     const TestPoint plate_before = machine.calibrationSet().plate_origin;
     const bool plate_v_before = machine.calibrationSet().plate_origin_valid;
@@ -178,9 +208,6 @@ inline bool homeMachine(Machine& machine)
     auto advanceAxis = [&](HomingState seek_phase, bool& limit_flag) {
         if (!need_define)
         {
-            // Reference harness: trip immediately so raw barely moves. A long seek
-            // before the soft switch would inflate reference_offset and desync
-            // SimPlant raw discs from machine-frame probe_center.
             limit_flag = true;
             machine.setHostInputs(withFreshForce(in));
             machine.tick(0.05f);
@@ -192,8 +219,6 @@ inline bool homeMachine(Machine& machine)
             }
             return;
         }
-        // DefineMcs: virtual +max 1 mm ahead of the axis start pose (bit only).
-        // Creep flank find then Retract-R — same sensor model as production sim.
         float trip = 0.0f;
         switch (seek_phase)
         {
@@ -201,7 +226,7 @@ inline bool homeMachine(Machine& machine)
             trip = machine.rawZ() + 1.0f;
             break;
         case HomingState::HomingX:
-            trip = machine.rawX() + 1.0f;
+            trip = machine.rawX() - 1.0f;
             break;
         case HomingState::HomingY:
             trip = machine.rawY() + 1.0f;
@@ -217,7 +242,7 @@ inline bool homeMachine(Machine& machine)
                 limit_flag = machine.rawZ() >= trip;
                 break;
             case HomingState::HomingX:
-                limit_flag = machine.rawX() >= trip;
+                limit_flag = machine.rawX() <= trip;
                 break;
             case HomingState::HomingY:
                 limit_flag = machine.rawY() >= trip;
@@ -240,7 +265,7 @@ inline bool homeMachine(Machine& machine)
     {
         return false;
     }
-    advanceAxis(HomingState::HomingX, in.limitXMax);
+    advanceAxis(HomingState::HomingX, in.limitXMin);
     if (machine.homingState() != HomingState::HomingY && machine.homingState() != HomingState::Homed)
     {
         return false;
@@ -266,18 +291,13 @@ inline bool homeMachine(Machine& machine)
     return true;
 }
 
-// For tests that require the automatic procedure to start,
-// we must calibrate probe_center via a standalone M19 run first.
+// For tests that require automatic procedure start: Install probe_center via bore calib.
 inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
 {
-    // Preserve the test's intended machine pose. Some unit tests assume that
-    // after homing the TCP is at/near (0,0,...) when they start an automatic process.
     const TestPoint start_pose{machine.x(), machine.y(), machine.z()};
+    constexpr TestPoint kBore{40.0f, 40.0f, 5.0f};
 
-    // Manual calibration: operator jogs TCP to the hub above the disc.
-    const MachineConfig::Probe& probe_cfg = machine.machineConfig().probe;
-    machine.moveTo(probe_cfg.probe_offset_reference.x, probe_cfg.probe_offset_reference.y,
-                    probe_cfg.probe_offset_reference.z + probe_cfg.approach_distance);
+    machine.moveTo(kBore.x, kBore.y, kBore.z + machine.machineConfig().probe.approach_distance);
     for (int i = 0; i < 600 && machine.motionState() != MotionState::AtTarget; ++i)
     {
         machine.setHostInputs(withFreshForce(HostInputs{}));
@@ -291,17 +311,14 @@ inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
     }
     for (int i = 0; i < max_ticks && ex.processState() == ProcessState::Running; ++i)
     {
-        machine.setHostInputs(withPlantInputs(machine));
+        machine.setHostInputs(withProcedurePlant(ex, machine));
         ex.tick(0.05f);
     }
     const bool ok = machine.calibrationSet().probe_center_valid;
 
-    // Ensure config lock from the standalone process is released even if the
-    // tick budget ended before ProcessState::Completed (slower fine-speed M19).
     machine.setRuntimeConfigLocked(false);
     machine.setCommunicationWatchdogEnabled(false);
 
-    // Standalone M19 completion calls Machine::stop() → Stopped. moveTo recovers.
     machine.moveTo(start_pose.x, start_pose.y, start_pose.z);
     for (int i = 0; i < 600 && machine.motionState() != MotionState::AtTarget; ++i)
     {
@@ -314,8 +331,6 @@ inline bool calibrateProbeCenter(Machine& machine, int max_ticks = 12000)
         return false;
     }
 
-    // Prefer latching isHomed at the MCS home pose without a second soft-limit
-    // Reference seek (which can disturb offsets vs SimPlant). Fall back to home().
     if (machine.confirmHomedIfAtHome(1.0f))
     {
         return true;

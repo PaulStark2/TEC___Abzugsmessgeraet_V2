@@ -36,7 +36,7 @@ int main()
         homeMachine(machine);
         // Manual calibration: operator jogs TCP to the hub above the disc.
         {
-            const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
+            const TestPoint disc = TestPoint{40.0f, 40.0f, 5.0f};
             const float standoff = machine.machineConfig().probe.approach_distance;
             machine.moveTo(disc.x, disc.y, disc.z + standoff);
             for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
@@ -89,7 +89,7 @@ int main()
         // Manual calibration first.
         {
             TestExecutor ex(machine);
-            const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
+            const TestPoint disc = TestPoint{40.0f, 40.0f, 5.0f};
             const float standoff = machine.machineConfig().probe.approach_distance;
             machine.moveTo(disc.x, disc.y, disc.z + standoff);
             for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
@@ -185,6 +185,54 @@ int main()
         (void)saw_approach;
     }
 
+    // Teach Soft-STOP / abort keeps HomingState::Homed so retry works without re-home.
+    {
+        Machine machine;
+        homeMachine(machine);
+        const TestPoint disc = TestPoint{40.0f, 40.0f, 5.0f};
+        const float standoff = machine.machineConfig().probe.approach_distance;
+        machine.moveTo(disc.x, disc.y, disc.z + standoff);
+        for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)
+        {
+            machine.setHostInputs(withFreshForce(HostInputs{}));
+            machine.tick(0.05f);
+        }
+        TestExecutor ex(machine);
+        if (!ex.startProbeCalibration())
+        {
+            return 30;
+        }
+        machine.setHostInputs(withProcedurePlant(ex, machine));
+        ex.tick(0.05f);
+        if (ex.processState() != ProcessState::Running)
+        {
+            return 31;
+        }
+        ex.stop(); // Soft-STOP path: machine.stop + abortProcess (teach keeps Homed)
+        if (machine.homingState() != HomingState::Homed)
+        {
+            return 32;
+        }
+        if (machine.machineState() == MachineState::Stopped)
+        {
+            // Mirror GUI ensurePlateTeachIdle / startProbeCalibration recovery.
+            machine.moveTo(machine.x(), machine.y(), machine.z());
+        }
+        if (!ex.startProbeCalibration())
+        {
+            return 33; // InvalidState regression: Homed cleared or stuck Stopped
+        }
+        for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
+        {
+            machine.setHostInputs(withProcedurePlant(ex, machine));
+            ex.tick(0.05f);
+        }
+        if (ex.processState() != ProcessState::Completed || !machine.calibrationSet().probe_center_valid)
+        {
+            return 34;
+        }
+    }
+
     // ProbeApproach Formel 2: with stored tool_offset, hub XY/Z = probe_center - tool_offset.
     {
         Machine machine;
@@ -193,7 +241,7 @@ int main()
 
         {
             TestExecutor ex(machine);
-            const TestPoint disc = machine.machineConfig().probe.probe_offset_reference;
+            const TestPoint disc = TestPoint{40.0f, 40.0f, 5.0f};
             const float standoff = machine.machineConfig().probe.approach_distance;
             machine.moveTo(disc.x, disc.y, disc.z + standoff);
             for (int i = 0; i < 800 && machine.motionState() != MotionState::AtTarget; ++i)

@@ -104,8 +104,10 @@ At each +max switch the software axis is re-referenced to machine 0 (open-loop, 
 after retract the axis is at the derived MCS home (−R). **`CmdHome` (`0x15`) never
 defines MCS** — use `CmdDefineMcs` (`0x56`) / `CmdRestoreMcs` (`0x57`). See
 [`docs/Homing.md`](Homing.md) and [`docs/Calibration.md`](Calibration.md).
-The M12 StatusReport is 41 bytes (`homingState`, `blockedDirections`, `flags`,
-`procedurePhase`, `faultReason`, `spreaderState`); StatusFlag bit 6 = McsValid. See
+The M12 StatusReport is **44 bytes** (`homingState`, `blockedDirections`, `flags`,
+`procedurePhase`, `faultReason`, `spreaderState`, `fault_manual`, `abort_reason` u16);
+StatusFlag bit 6 = McsValid. Soft procedure aborts latch `AbortReason` for the HMI
+([`docs/HMI_Messages.md`](HMI_Messages.md)). See
 [`docs/M16_Agent2_Interface.md`](M16_Agent2_Interface.md),
 [`docs/M17_Procedure.md`](M17_Procedure.md), and [`docs/M18_Procedure.md`](M18_Procedure.md).
 Probe calibration on the 3-axis Core is **M19.0**

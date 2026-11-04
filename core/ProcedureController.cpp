@@ -1,4 +1,5 @@
 #include "ProcedureController.hpp"
+#include "AbortReason.hpp"
 
 #include "SafeZ.hpp"
 
@@ -127,10 +128,19 @@ bool ProcedureController::start()
     }
     process_state_ = ProcessState::Running;
     setAutomaticProcessGuards(true);
+    machine_.clearAbortReason();
     probe_calib_standalone_ = false;
     plate_bore_standalone_ = false;
+    calib_approach_standalone_ = false;
+    test_or_age_standalone_ = false;
+    test_or_age_await_spreader_ = false;
     plate_bore_point_id_ = 0;
     fine_approach_after_tare_ = false;
+    probe_bore_after_tare_ = false;
+    plate_bore_after_tare_ = false;
+    plate_await_spreader_ = false;
+    probe_await_spreader_retract_ = false;
+    preclamp_await_spreader_retracted_ = false;
     point_stage_ = 0;
     anomaly_exit_pending_ = false;
     anomaly_report_ = AnomalyReport{};
@@ -154,25 +164,31 @@ bool ProcedureController::startProbeCalibration()
     {
         return false;
     }
-    // M19: need a valid home reference (HomingState::Homed), but the TCP is
-    // normally jogged near the probe first — so isHomed() (at home pose) is
-    // intentionally not required here. Procedure start still requires isHomed().
+    if (machine_.machineState() == MachineState::Fault)
+    {
+        return false;
+    }
+    // Need HomingState::Homed; TCP is jogged above the bore (not isHomed() pose).
     if (machine_.homingState() != HomingState::Homed)
     {
         return false;
     }
-    // Manual start: operator jogs TCP to the hub above the disc. That pose is the
-    // only location reference; no assumed disc center is derived from it.
-    const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
-    // CmdStartProbeCalib / FullCalib / Geometry → Install (set probeCenter, toolOffset=0).
-    if (!probe_calib_.start(machine_, hub, ProbeCalibration::StorePolicy::Install))
+    // Soft-STOP latch after a prior teach abort: recover to Idle via no-op moveTo.
+    if (machine_.machineState() == MachineState::Stopped ||
+        machine_.machineState() == MachineState::Paused)
     {
-        return false;
+        machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
     }
+    // Spreizer must be open before / during Einmessen (avoid tool damage).
+    machine_.setSpreaderExtend(true);
     process_state_ = ProcessState::Running;
     setAutomaticProcessGuards(true);
     probe_calib_standalone_ = true;
     plate_bore_standalone_ = false;
+    calib_approach_standalone_ = false;
+    test_or_age_standalone_ = false;
+    test_or_age_await_spreader_ = false;
+    probe_await_spreader_ = true;
     phase_ = ProcedurePhase::ProbeCalibrate;
     return true;
 }
@@ -180,6 +196,10 @@ bool ProcedureController::startProbeCalibration()
 bool ProcedureController::startPlateBoreSearch(std::uint8_t point_id)
 {
     if (process_state_ == ProcessState::Running)
+    {
+        return false;
+    }
+    if (machine_.machineState() == MachineState::Fault)
     {
         return false;
     }
@@ -191,32 +211,167 @@ bool ProcedureController::startPlateBoreSearch(std::uint8_t point_id)
     {
         return false;
     }
-    const MachineConfig& cfg = machine_.machineConfig();
-    const MachineConfig::PlateCalib& pc = cfg.plate_calib;
-    BoreSearch::Params params{};
-    params.wall_force_N = pc.wall_force_N;
-    params.floor_force_N = pc.floor_force_N;
-    params.xy_search_limit = pc.xy_search_limit;
-    params.z_search_limit = pc.z_search_limit;
-    params.z_lift_mm = pc.z_lift_mm;
-    params.timeout_s = pc.timeout_s;
-    params.refine_passes = pc.refine_passes;
-    params.do_floor = true;
-    machine_.setCollisionContext(CollisionContext::Contact);
-    machine_.setActiveMotionProfile(pc.v_plate_bore_search, cfg.motion.a_testpoints,
-                                    cfg.motion.corner_testpoints);
-    machine_.setPreClampXyEnabled(false);
-    if (!bore_search_.start(machine_, params))
+    // Soft-STOP latch after a prior teach/abort: recover to Idle via no-op moveTo.
+    if (machine_.machineState() == MachineState::Stopped ||
+        machine_.machineState() == MachineState::Paused)
     {
-        return false;
+        machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
     }
     process_state_ = ProcessState::Running;
     setAutomaticProcessGuards(true);
     probe_calib_standalone_ = false;
+    calib_approach_standalone_ = false;
+    test_or_age_standalone_ = false;
+    test_or_age_await_spreader_ = false;
     plate_bore_standalone_ = true;
     plate_bore_point_id_ = point_id;
     preclamp_await_confirm_ = false;
+    plate_bore_after_tare_ = false;
+    plate_await_spreader_ = true;
+    machine_.setSpreaderExtend(true);
+    machine_.setCollisionContext(CollisionContext::Approach);
     phase_ = ProcedurePhase::PlateBoreSearch;
+    return true;
+}
+
+bool ProcedureController::resolveCalibApproachTarget(std::uint8_t point_id, TestPoint& out) const
+{
+    const CalibrationSet& calib = machine_.calibrationSet();
+    switch (point_id)
+    {
+    case 1:
+        if (!calib.plate_origin_valid)
+        {
+            return false;
+        }
+        out = calib.plate_origin;
+        return true;
+    case 2:
+        if (!calib.rotation_points_valid)
+        {
+            return false;
+        }
+        out = calib.k1;
+        return true;
+    case 3:
+        if (!calib.rotation_points_valid)
+        {
+            return false;
+        }
+        out = calib.k2;
+        return true;
+    case 4:
+        if (!calib.rotation_points_valid)
+        {
+            return false;
+        }
+        out = calib.k3;
+        return true;
+    case 5:
+        if (!calib.probe_center_valid)
+        {
+            return false;
+        }
+        out = calib.probe_center;
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool ProcedureController::startApproachCalibPoint(std::uint8_t point_id)
+{
+    if (process_state_ == ProcessState::Running)
+    {
+        return false;
+    }
+    if (machine_.machineState() == MachineState::Fault)
+    {
+        return false;
+    }
+    if (machine_.homingState() != HomingState::Homed)
+    {
+        return false;
+    }
+    TestPoint target{};
+    if (!resolveCalibApproachTarget(point_id, target))
+    {
+        return false;
+    }
+    float safe_z = 0.0f;
+    if (!resolveCalibSafeZMachine(machine_.calibrationSet(),
+                                  machine_.machineConfig().motion.safe_z_calib_buffer, safe_z))
+    {
+        return false;
+    }
+    (void)safe_z;
+    if (machine_.machineState() == MachineState::Stopped ||
+        machine_.machineState() == MachineState::Paused)
+    {
+        machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+    }
+    target_machine_ = target;
+    process_state_ = ProcessState::Running;
+    setAutomaticProcessGuards(true);
+    probe_calib_standalone_ = false;
+    plate_bore_standalone_ = false;
+    calib_approach_standalone_ = true;
+    test_or_age_standalone_ = false;
+    test_or_age_await_spreader_ = false;
+    preclamp_await_confirm_ = false;
+    enterPhase(ProcedurePhase::CalibApproach);
+    return process_state_ == ProcessState::Running;
+}
+
+bool ProcedureController::startTestOrAgeManual()
+{
+    if (process_state_ == ProcessState::Running)
+    {
+        return false;
+    }
+    if (machine_.machineState() == MachineState::Fault)
+    {
+        return false;
+    }
+    if (machine_.homingState() != HomingState::Homed)
+    {
+        return false;
+    }
+    const TestConfiguration& tcfg = machine_.testConfiguration();
+    if (!(tcfg.target_force_N > 0.0f) || tcfg.iterations == 0u)
+    {
+        std::fprintf(stderr,
+                     "[TestOrAgeManual] REJECTED force=%.3f iterations=%u\n", tcfg.target_force_N,
+                     tcfg.iterations);
+        return false;
+    }
+    if (machine_.machineState() == MachineState::Stopped ||
+        machine_.machineState() == MachineState::Paused)
+    {
+        machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+    }
+    machine_.setSpreaderExtend(true);
+    process_state_ = ProcessState::Running;
+    setAutomaticProcessGuards(true);
+    machine_.clearAbortReason();
+    probe_calib_standalone_ = false;
+    plate_bore_standalone_ = false;
+    calib_approach_standalone_ = false;
+    test_or_age_standalone_ = true;
+    test_or_age_await_spreader_ = true;
+    fine_approach_after_tare_ = false;
+    probe_bore_after_tare_ = false;
+    plate_bore_after_tare_ = false;
+    point_stage_ = 1;
+    anomaly_exit_pending_ = false;
+    anomaly_report_ = AnomalyReport{};
+    tare_next_ = ProcedurePhase::InsertInitial;
+    // Wait for spreader, then beginForceTare in handleForceTare (do not enterPhase yet).
+    phase_ = ProcedurePhase::ForceTare;
+    std::fprintf(stderr,
+                 "[TestOrAgeManual] start pose=(%.3f,%.3f,%.3f) target=%.3f iterations=%u mode=%u\n",
+                 machine_.x(), machine_.y(), machine_.z(), tcfg.target_force_N, tcfg.iterations,
+                 static_cast<unsigned>(tcfg.mode));
     return true;
 }
 
@@ -226,8 +381,12 @@ void ProcedureController::tick(float dt)
     {
         return;
     }
-    if (machine_.machineState() == MachineState::Stopped ||
-        machine_.machineState() == MachineState::Fault)
+    if (machine_.machineState() == MachineState::Stopped)
+    {
+        abortProcess(AbortReason::SoftStop);
+        return;
+    }
+    if (machine_.machineState() == MachineState::Fault)
     {
         abortProcess();
         return;
@@ -242,8 +401,12 @@ void ProcedureController::tick(float dt)
     machine_.invokeHostInputUpdateCallback();
     machine_.evaluateHostSafety(dt);
 
-    if (machine_.machineState() == MachineState::Stopped ||
-        machine_.machineState() == MachineState::Fault)
+    if (machine_.machineState() == MachineState::Stopped)
+    {
+        abortProcess(AbortReason::SoftStop);
+        return;
+    }
+    if (machine_.machineState() == MachineState::Fault)
     {
         abortProcess();
         return;
@@ -303,6 +466,9 @@ void ProcedureController::tick(float dt)
     case ProcedurePhase::PlateBoreSearch:
         handlePlateBoreSearch(dt);
         break;
+    case ProcedurePhase::CalibApproach:
+        handleCalibApproach();
+        break;
     default:
         break;
     }
@@ -334,7 +500,7 @@ void ProcedureController::stop()
         return;
     }
     machine_.stop();
-    abortProcess();
+    abortProcess(AbortReason::SoftStop);
 }
 
 ProcessState ProcedureController::processState() const
@@ -428,10 +594,16 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         break;
     case ProcedurePhase::ProbeApproach:
         machine_.setCollisionContext(CollisionContext::Approach);
-        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
-                                        probe.corner_probe_transfer);
+        machine_.setSpreaderExtend(true);
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
         approach_leg_ = 0;
         commandRaiseSafeZ();
+        break;
+    case ProcedurePhase::CalibApproach:
+        machine_.setCollisionContext(CollisionContext::Approach);
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
+        approach_leg_ = 0;
+        commandRaiseCalibSafeZ();
         break;
     case ProcedurePhase::MoveSafeEnd:
         machine_.setCollisionContext(CollisionContext::Approach);
@@ -457,31 +629,28 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         commandRaiseSafeZ();
         break;
     case ProcedurePhase::PreClampXyCorrect:
-    {
+        // Spreizer must be closed (deactivated) during PreClamp wall search; Clamp opens it.
         machine_.setCollisionContext(CollisionContext::Contact);
         machine_.setActiveMotionProfile(motion.v_bore_search, motion.a_testpoints,
                                         motion.corner_testpoints);
         machine_.setPreClampXyEnabled(false);
         preclamp_await_confirm_ = false;
-        const MachineConfig::Force& force_cfg = machine_.machineConfig().force;
-        BoreSearch::Params params{};
-        params.wall_force_N = force_cfg.xy_tolerance_N;
-        params.xy_search_limit = force_cfg.xy_search_limit;
-        params.timeout_s = force_cfg.xy_correct_timeout_s;
-        params.refine_passes = force_cfg.bore_refine_passes;
-        params.do_floor = false;
-        if (!bore_search_.start(machine_, params))
-        {
-            abortProcess("preclamp bore search start failed");
-            return;
-        }
-        machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+        preclamp_await_spreader_retracted_ = true;
+        machine_.setSpreaderExtend(false);
         break;
-    }
     case ProcedurePhase::Clamp:
+        // Keep Contact limits until ForceTare finishes. Switching to Clamp (lower
+        // thresholds) while residual PreClamp / fine-approach force is still live
+        // trips ForceCollision before tare can clear the sample.
         machine_.setPreClampXyEnabled(false);
-        machine_.setCollisionContext(CollisionContext::Clamp);
+        machine_.setCollisionContext(CollisionContext::Contact);
         machine_.setSpreaderExtend(true);
+        std::fprintf(stderr,
+                     "[Clamp] enter Contact context fx=%.3f fy=%.3f fz=%.3f "
+                     "contact_N=%.3f clamp_N=%.3f\n",
+                     machine_.hostInputs().force.fx, machine_.hostInputs().force.fy,
+                     machine_.hostInputs().force.fz, machine_.machineConfig().collision.contact_N,
+                     machine_.machineConfig().collision.clamp_N);
         break;
     case ProcedurePhase::InsertInitial:
         machine_.setCollisionContext(CollisionContext::Contact);
@@ -512,6 +681,7 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         force_path_.setLeg(ForcePathRecorder::kLegExtract);
         force_path_have_z_ = false;
         force_path_last_z_ = 0.0f;
+        resetExtractSeek();
         ref_insert_valid_ = false;
         ref_extract_valid_ = false;
         point_x_ = machine_.x();
@@ -522,44 +692,72 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
         {
             const float search = machine_.machineConfig().force.insert_search_distance;
             std::fprintf(stderr,
-                         "[TestOrAge] start extract +Z looking for kraftfrei from z=%.3f search=%.3f\n",
+                         "[TestOrAge] start extract +Z looking for kraftfrei (after Zug) from z=%.3f "
+                         "search=%.3f\n",
                          machine_.z(), search);
             machine_.moveTo(point_x_, point_y_, machine_.z() + search);
         }
         break;
     case ProcedurePhase::Unclamp:
         machine_.setPreClampXyEnabled(false);
-        machine_.setCollisionContext(CollisionContext::Unclamp);
         cycle_leg_ = 0;
         point_x_ = machine_.x();
         point_y_ = machine_.y();
         if (unclamp_mode_ == UnclampMode::AfterSeat)
         {
+            // Still seated under load — keep Contact (not Unclamp 20 N) until the
+            // fixed retract lift finishes and ForceTare runs load-free.
             point_stage_ = 1;
+            machine_.setCollisionContext(CollisionContext::Contact);
+            insert_return_to_free_ = false;
             machine_.setActiveMotionProfile(motion.v_unclamp, motion.a_testpoints,
                                             motion.corner_testpoints);
-            std::fprintf(stderr, "[Unclamp] AfterSeat at z=%.3f\n", machine_.z());
+            std::fprintf(stderr,
+                         "[Unclamp] AfterSeat at z=%.3f insertion_z=%.3f retract_mm=%.3f\n",
+                         machine_.z(), insertion_z_,
+                         machine_.machineConfig().force.after_seat_retract_mm);
         }
         else
         {
-            machine_.setActiveMotionProfile(motion.phase1_v_insert, motion.phase1_a,
-                                            motion.phase1_corner);
+            // After last extract we may still sit above kraftfrei by extract_after_free_mm.
+            // Return that offset at extract_after_free_v before the slow re-seat dive.
             machine_.setCollisionContext(CollisionContext::Contact);
-            const float search = machine_.machineConfig().force.insert_search_distance;
-            std::fprintf(stderr, "[Unclamp] AfterTest re-seat dive from z=%.3f\n", machine_.z());
-            machine_.moveTo(point_x_, point_y_, machine_.z() - search);
+            const float offset_mm = machine_.machineConfig().force.extract_after_free_mm;
+            if (offset_mm > 0.0f && machine_.z() > force_free_z_ + 1.0e-3f)
+            {
+                insert_return_to_free_ = true;
+                machine_.setActiveMotionProfile(motion.extract_after_free_v, motion.phase3_a,
+                                                motion.phase3_corner);
+                std::fprintf(stderr,
+                             "[Unclamp] AfterTest return to kraftfrei z=%.3f at v=%.3f "
+                             "(then re-seat)\n",
+                             force_free_z_, motion.extract_after_free_v);
+                machine_.moveTo(point_x_, point_y_, force_free_z_);
+            }
+            else
+            {
+                insert_return_to_free_ = false;
+                machine_.setActiveMotionProfile(motion.phase1_v_insert, motion.phase1_a,
+                                                motion.phase1_corner);
+                const float search = machine_.machineConfig().force.insert_search_distance;
+                std::fprintf(stderr, "[Unclamp] AfterTest re-seat dive from z=%.3f\n",
+                             machine_.z());
+                machine_.moveTo(point_x_, point_y_, machine_.z() - search);
+            }
         }
         break;
     case ProcedurePhase::ProbeRemeasure:
     {
         const CalibrationSet& calib = machine_.calibrationSet();
-        const MachineConfig::Probe& probe = machine_.machineConfig().probe;
+        const MachineConfig& cfg = machine_.machineConfig();
+        const MachineConfig::Probe& probe = cfg.probe;
         tool_offset_before_remeasure_ = calib.tool_offset;
         probe_remeasure_calib_active_ = false;
         approach_leg_ = 0;
+        machine_.setSpreaderExtend(true);
         machine_.setCollisionContext(CollisionContext::Approach);
-        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
-                                        probe.corner_probe_transfer);
+        machine_.setActiveMotionProfile(probe.v_approach, cfg.motion.a_testpoints,
+                                        cfg.motion.corner_testpoints);
         std::fprintf(stderr,
                      "[ProbeRemeasure] enter at Safe-Z pose=(%.3f,%.3f,%.3f) prev_offset=(%.3f,%.3f,%.3f)\n",
                      machine_.x(), machine_.y(), machine_.z(), calib.tool_offset.x, calib.tool_offset.y,
@@ -569,7 +767,7 @@ void ProcedureController::enterPhase(ProcedurePhase phase)
     case ProcedurePhase::ForceTare:
         if (!machine_.beginForceTare())
         {
-            abortProcess("force tare busy");
+            abortProcess(AbortReason::ForceTareBusy);
         }
         break;
     case ProcedurePhase::Completed:
@@ -600,6 +798,17 @@ bool ProcedureController::atSafeZ() const
         return false;
     }
     return std::fabs(machine_.z() - safe_z_machine) <= 1.0e-3f;
+}
+
+bool ProcedureController::atCalibSafeZ() const
+{
+    float safe_z = 0.0f;
+    if (!resolveCalibSafeZMachine(machine_.calibrationSet(),
+                                  machine_.machineConfig().motion.safe_z_calib_buffer, safe_z))
+    {
+        return false;
+    }
+    return std::fabs(machine_.z() - safe_z) <= 1.0e-3f;
 }
 
 bool ProcedureController::resolveCurrentMachinePoint()
@@ -655,6 +864,28 @@ void ProcedureController::commandRaiseSafeZ()
     machine_.moveTo(machine_.x(), machine_.y(), safe_z_machine);
 }
 
+void ProcedureController::commandRaiseCalibSafeZ()
+{
+    float safe_z = 0.0f;
+    if (!resolveCalibSafeZMachine(machine_.calibrationSet(),
+                                  machine_.machineConfig().motion.safe_z_calib_buffer, safe_z))
+    {
+        return;
+    }
+    machine_.moveTo(machine_.x(), machine_.y(), safe_z);
+}
+
+void ProcedureController::commandTraverseCalibSafeXY(float x, float y)
+{
+    float safe_z = 0.0f;
+    if (!resolveCalibSafeZMachine(machine_.calibrationSet(),
+                                  machine_.machineConfig().motion.safe_z_calib_buffer, safe_z))
+    {
+        return;
+    }
+    machine_.moveTo(x, y, safe_z);
+}
+
 void ProcedureController::commandTraverseXY(float x, float y)
 {
     float safe_z_machine = 0.0f;
@@ -676,12 +907,48 @@ void ProcedureController::setAutomaticProcessGuards(bool active)
     machine_.setRuntimeConfigLocked(active);
 }
 
-void ProcedureController::abortProcess(const char* reason)
+void ProcedureController::abortProcess(AbortReason reason)
 {
-    probe_calib_.abort();
+    machine_.latchAbortReason(reason);
+
+    const bool teach_standalone = probe_calib_standalone_ || plate_bore_standalone_ ||
+                                  calib_approach_standalone_ || test_or_age_standalone_;
+    probe_calib_.abort(machine_);
+    bore_search_.abort();
     machine_.setPreClampXyEnabled(false);
     fine_approach_after_tare_ = false;
+    probe_bore_after_tare_ = false;
+    plate_bore_after_tare_ = false;
+    plate_await_spreader_ = false;
+    probe_await_spreader_retract_ = false;
+    preclamp_await_spreader_retracted_ = false;
+    test_or_age_await_spreader_ = false;
     setAutomaticProcessGuards(false);
+    machine_.setCollisionContext(CollisionContext::Approach);
+
+    if (teach_standalone)
+    {
+        // Teach / hand TestOrAge: keep HomingState::Homed and leave Idle so
+        // commands can retry without re-home.
+        if (machine_.machineState() != MachineState::Fault)
+        {
+            machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+        }
+        phase_ = ProcedurePhase::Aborted;
+        process_state_ = ProcessState::Aborted;
+        probe_calib_standalone_ = false;
+        plate_bore_standalone_ = false;
+        calib_approach_standalone_ = false;
+        test_or_age_standalone_ = false;
+        std::fprintf(stderr,
+                     "[ProcedureAbort] reason=%s | teach standalone (Homed kept, Idle) fault=%u "
+                     "pose=(%.3f,%.3f,%.3f)\n",
+                     abortReasonMessage(reason),
+                     static_cast<unsigned>(machine_.lastFaultReason()), machine_.x(), machine_.y(),
+                     machine_.z());
+        return;
+    }
+
     if (machine_.machineState() != MachineState::Fault)
     {
         machine_.stop();
@@ -693,7 +960,7 @@ void ProcedureController::abortProcess(const char* reason)
     std::fprintf(stderr,
                  "[ProcedureAbort] reason=%s | isHomed cleared (NeedsHoming) fault=%u "
                  "watchdogTrip=%u lastFz=%.3f pose=(%.3f,%.3f,%.3f) raw=(%.3f,%.3f,%.3f)\n",
-                 reason != nullptr ? reason : "unspecified",
+                 abortReasonMessage(reason),
                  static_cast<unsigned>(machine_.lastFaultReason()),
                  static_cast<unsigned>(machine_.lastForceWatchdogTrip()),
                  machine_.hostInputs().force.fz, machine_.x(), machine_.y(), machine_.z(),
@@ -703,6 +970,7 @@ void ProcedureController::abortProcess(const char* reason)
 void ProcedureController::startForceTare(ProcedurePhase next)
 {
     fine_approach_after_tare_ = false;
+    probe_bore_after_tare_ = false;
     tare_next_ = next;
     enterPhase(ProcedurePhase::ForceTare);
 }
@@ -710,8 +978,97 @@ void ProcedureController::startForceTare(ProcedurePhase next)
 void ProcedureController::startForceTareBeforeFineApproach()
 {
     fine_approach_after_tare_ = true;
+    probe_bore_after_tare_ = false;
     tare_next_ = ProcedurePhase::Idle;
     enterPhase(ProcedurePhase::ForceTare);
+}
+
+void ProcedureController::startForceTareBeforeProbeBore(ProbeCalibration::StorePolicy policy,
+                                                       bool remeasure)
+{
+    fine_approach_after_tare_ = false;
+    probe_bore_after_tare_ = true;
+    plate_bore_after_tare_ = false;
+    probe_bore_policy_ = policy;
+    probe_bore_remeasure_ = remeasure;
+    tare_next_ = ProcedurePhase::Idle;
+    enterPhase(ProcedurePhase::ForceTare);
+}
+
+void ProcedureController::startForceTareBeforePlateBore()
+{
+    fine_approach_after_tare_ = false;
+    probe_bore_after_tare_ = false;
+    plate_bore_after_tare_ = true;
+    tare_next_ = ProcedurePhase::Idle;
+    enterPhase(ProcedurePhase::ForceTare);
+}
+
+void ProcedureController::startProbeBoreAfterTare()
+{
+    const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
+    std::fprintf(stderr,
+                 "[ProbeBore] after Ruheprobe start policy=%u rem=%d pose=(%.3f,%.3f,%.3f)\n",
+                 static_cast<unsigned>(probe_bore_policy_), probe_bore_remeasure_ ? 1 : 0,
+                 hub.x, hub.y, hub.z);
+    if (!probe_calib_.start(machine_, hub, probe_bore_policy_))
+    {
+        abortProcess(probe_bore_remeasure_ ? AbortReason::ProbeRemeasureOffsetOnlyStart
+                                           : AbortReason::ProbeBoreSearchFailed);
+        return;
+    }
+    if (probe_bore_remeasure_)
+    {
+        probe_remeasure_calib_active_ = true;
+        phase_ = ProcedurePhase::ProbeRemeasure;
+    }
+    else
+    {
+        phase_ = ProcedurePhase::ProbeCalibrate;
+    }
+}
+
+void ProcedureController::startPlateBoreAfterTare()
+{
+    const MachineConfig& cfg = machine_.machineConfig();
+    const MachineConfig::Probe& probe = cfg.probe;
+    BoreSearch::Params params{};
+    params.wall_force_N = probe.wall_force_N;
+    params.floor_force_N = probe.floor_force_N;
+    params.xy_search_limit = probe.xy_search_limit;
+    params.z_search_limit = probe.z_search_limit;
+    params.z_lift_mm = probe.z_lift_mm;
+    params.timeout_s = probe.timeout_s;
+    params.refine_passes = probe.refine_passes;
+    params.do_floor = true;
+    params.z_first = true;
+    machine_.setCollisionContext(CollisionContext::Contact);
+    machine_.setActiveMotionProfile(probe.v_search, cfg.motion.a_testpoints,
+                                    cfg.motion.corner_testpoints);
+    machine_.setPreClampXyEnabled(false);
+    std::fprintf(stderr,
+                 "[PlateBore] after Ruheprobe z_first point_id=%u pose=(%.3f,%.3f,%.3f)\n",
+                 static_cast<unsigned>(plate_bore_point_id_), machine_.x(), machine_.y(),
+                 machine_.z());
+    if (!bore_search_.start(machine_, params))
+    {
+        abortProcess(AbortReason::PlateBoreStartFailed);
+        return;
+    }
+    phase_ = ProcedurePhase::PlateBoreSearch;
+}
+
+bool ProcedureController::awaitSpreaderRetracted()
+{
+    if (!machine_.spreaderBusy() && !machine_.hostOutputs().spreaderExtended)
+    {
+        return true;
+    }
+    if (!machine_.spreaderBusy() && machine_.hostOutputs().spreaderExtended)
+    {
+        machine_.setSpreaderExtend(false);
+    }
+    return false;
 }
 
 void ProcedureController::commandFineApproach()
@@ -732,8 +1089,38 @@ void ProcedureController::commandFineApproach()
 
 void ProcedureController::handleForceTare()
 {
+    if (test_or_age_await_spreader_)
+    {
+        if (machine_.spreaderBusy())
+        {
+            return;
+        }
+        if (!machine_.hostOutputs().spreaderExtended)
+        {
+            machine_.setSpreaderExtend(true);
+            return;
+        }
+        test_or_age_await_spreader_ = false;
+        if (!machine_.beginForceTare())
+        {
+            abortProcess(AbortReason::ForceTareBusy);
+        }
+        return;
+    }
     if (machine_.forceTareActive())
     {
+        return;
+    }
+    if (probe_bore_after_tare_)
+    {
+        probe_bore_after_tare_ = false;
+        startProbeBoreAfterTare();
+        return;
+    }
+    if (plate_bore_after_tare_)
+    {
+        plate_bore_after_tare_ = false;
+        startPlateBoreAfterTare();
         return;
     }
     if (fine_approach_after_tare_)
@@ -806,7 +1193,7 @@ void ProcedureController::handlePointApproach()
         if (std::fabs(machine_.x() - target_machine_.x) > xy_tol ||
             std::fabs(machine_.y() - target_machine_.y) > xy_tol)
         {
-            abortProcess("PointApproach: XY not at programmed target before Z descent");
+            abortProcess(AbortReason::PointApproachXyMiss);
             return;
         }
         if (!atSafeZ())
@@ -839,51 +1226,41 @@ void ProcedureController::handlePointApproach()
 void ProcedureController::handleProbeApproach()
 {
     const CalibrationSet& calib = machine_.calibrationSet();
-    const MachineConfig::Probe& probe = machine_.machineConfig().probe;
-    // Formula 2: last tip-on-disc TCP pose (OffsetOnly measured).
-    // target = probe_center - tool_offset (= measured); not toMachinePoint(+offset).
+    const MachineConfig& cfg = machine_.machineConfig();
+    const MachineConfig::Probe& probe = cfg.probe;
+    const MachineConfig::Motion& motion = cfg.motion;
+    // Formula 2: target = probe_center - tool_offset (last measured TCP in bore).
     const TestPoint target{calib.probe_center.x - calib.tool_offset.x,
                            calib.probe_center.y - calib.tool_offset.y,
                            calib.probe_center.z - calib.tool_offset.z};
     const float standoff = probe.approach_distance;
     const float coarse_z = target.z + standoff;
 
-    // Leg 2: blind coarse Z toward hub. Abort immediately on Messtaster contact —
-    // typically stored probe_center.z too low vs. the real disc.
+    if (!machine_.hostOutputs().spreaderExtended && !machine_.spreaderBusy())
+    {
+        machine_.setSpreaderExtend(true);
+    }
+
+    // Leg 2: coarse Z above bore → Ruheprobe → OffsetOnly z_first BoreSearch.
     if (approach_leg_ == 2)
     {
-        TestPoint contact{};
-        if (machine_.consumeProbeTrigger(contact))
-        {
-            std::fprintf(stderr,
-                         "[ProbeApproach] CONTACT during coarse Z at (%.3f,%.3f,%.3f) "
-                         "target_hub_z=%.3f probe_center.z=%.3f tool_offset.z=%.3f — abort\n",
-                         contact.x, contact.y, contact.z, coarse_z, calib.probe_center.z,
-                         calib.tool_offset.z);
-            machine_.brakeToStop(probe.a_probe_brake);
-            machine_.latchFaultReason(FaultReason::ProbeApproachContact);
-            abortProcess("ProbeApproach: probe contact during coarse Z approach");
-            return;
-        }
         if (!motionSettled())
         {
             return;
         }
-        // Hub reached without early contact — start M19 OffsetOnly from current TCP.
-        machine_.consumeProbeTrigger();
+        if (machine_.spreaderBusy() || !machine_.hostOutputs().spreaderExtended)
+        {
+            return;
+        }
         std::fprintf(stderr,
-                     "[ProbeApproach] start M19 at hub pose=(%.3f,%.3f,%.3f) "
-                     "target=(%.3f,%.3f,%.3f) tool_offset=(%.3f,%.3f,%.3f) v_search=%.3f\n",
+                     "[ProbeApproach] coarse done → Ruheprobe then OffsetOnly "
+                     "pose=(%.3f,%.3f,%.3f) target=(%.3f,%.3f,%.3f) "
+                     "tool_offset=(%.3f,%.3f,%.3f) v_search=%.3f\n",
                      machine_.x(), machine_.y(), machine_.z(), target.x, target.y, target.z,
                      calib.tool_offset.x, calib.tool_offset.y, calib.tool_offset.z,
                      probe.v_search);
-        const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
-        if (!probe_calib_.start(machine_, hub, ProbeCalibration::StorePolicy::OffsetOnly))
-        {
-            abortProcess();
-            return;
-        }
-        phase_ = ProcedurePhase::ProbeCalibrate;
+        probe_await_spreader_ = false;
+        startForceTareBeforeProbeBore(ProbeCalibration::StorePolicy::OffsetOnly, false);
         return;
     }
 
@@ -895,16 +1272,15 @@ void ProcedureController::handleProbeApproach()
     {
         if (!atSafeZ())
         {
-            abortProcess("ProbeApproach leg0: Raise Safe-Z did not reach (soft-limit or blocked)");
+            abortProcess(AbortReason::ProbeApproachSafeZLeg0);
             return;
         }
-        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
-                                        probe.corner_probe_transfer);
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
         machine_.setCollisionContext(CollisionContext::Approach);
         std::fprintf(stderr,
-                     "[ProbeApproach] XY v_approach_probe=%.3f → (%.3f,%.3f) @ Safe-Z "
+                     "[ProbeApproach] XY v_approach=%.3f → (%.3f,%.3f) @ Safe-Z "
                      "(probe_center-tool_offset)\n",
-                     probe.v_approach_probe, target.x, target.y);
+                     probe.v_approach, target.x, target.y);
         commandTraverseXY(target.x, target.y);
         approach_leg_ = 1;
         return;
@@ -915,24 +1291,21 @@ void ProcedureController::handleProbeApproach()
         if (std::fabs(machine_.x() - target.x) > xy_tol ||
             std::fabs(machine_.y() - target.y) > xy_tol)
         {
-            abortProcess("ProbeApproach: XY not at probe center - tool_offset before Z descent");
+            abortProcess(AbortReason::ProbeApproachXyMiss);
             return;
         }
         if (!atSafeZ())
         {
-            abortProcess("ProbeApproach leg1: left Safe-Z before coarse Z");
+            abortProcess(AbortReason::ProbeApproachSafeZLeg1);
             return;
         }
-        // Discard stale latch from jog / prior search before the open-loop descent.
-        machine_.consumeProbeTrigger();
-        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
-                                        probe.corner_probe_transfer);
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
         machine_.setCollisionContext(CollisionContext::Approach);
         std::fprintf(stderr,
                      "[ProbeApproach] COARSE z=%.3f (target.z=%.3f + standoff=%.3f) "
-                     "v_approach_probe=%.3f pose=(%.3f,%.3f,%.3f)\n",
-                     coarse_z, target.z, standoff, probe.v_approach_probe, machine_.x(),
-                     machine_.y(), machine_.z());
+                     "v_approach=%.3f pose=(%.3f,%.3f,%.3f)\n",
+                     coarse_z, target.z, standoff, probe.v_approach, machine_.x(), machine_.y(),
+                     machine_.z());
         commandLowerToZ(coarse_z);
         approach_leg_ = 2;
         return;
@@ -941,15 +1314,41 @@ void ProcedureController::handleProbeApproach()
 
 void ProcedureController::handleProbeCalibrate(float dt)
 {
-    probe_calib_.tick(dt, machine_);
-    if (probe_calib_.isComplete())
+    if (probe_await_spreader_)
     {
+        if (machine_.spreaderBusy())
+        {
+            return;
+        }
+        if (!machine_.hostOutputs().spreaderExtended)
+        {
+            machine_.setSpreaderExtend(true);
+            return;
+        }
+        // Standalone Install: Spreizer open at hub → Ruheprobe → z_first BoreSearch.
+        probe_await_spreader_ = false;
+        startForceTareBeforeProbeBore(ProbeCalibration::StorePolicy::Install, false);
+        return;
+    }
+
+    if (probe_await_spreader_retract_)
+    {
+        if (!awaitSpreaderRetracted())
+        {
+            return;
+        }
+        probe_await_spreader_retract_ = false;
         if (probe_calib_standalone_)
         {
-            machine_.stop();
+            machine_.setCollisionContext(CollisionContext::Approach);
             setAutomaticProcessGuards(false);
+            if (machine_.machineState() != MachineState::Fault)
+            {
+                machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+            }
             phase_ = ProcedurePhase::Completed;
             process_state_ = ProcessState::Completed;
+            probe_calib_standalone_ = false;
         }
         else
         {
@@ -959,17 +1358,30 @@ void ProcedureController::handleProbeCalibrate(float dt)
                 handleMoveSafePose();
             }
         }
+        return;
     }
-    else if (probe_calib_.isError())
+
+    probe_calib_.tick(dt, machine_);
+    if (probe_calib_.isComplete())
     {
-        if (probe_calib_.searchErrorReason() == ProbeSearch::ErrorReason::NoContact)
+        // After Einmessen: Spreizer einfahren before Messpunkt Feinanfahrt / Completed.
+        probe_await_spreader_retract_ = true;
+        machine_.setSpreaderExtend(false);
+        return;
+    }
+    if (probe_calib_.isError())
+    {
+        const BoreSearch::ErrorReason reason = probe_calib_.searchErrorReason();
+        if (reason == BoreSearch::ErrorReason::Timeout ||
+            reason == BoreSearch::ErrorReason::WallNotFound ||
+            reason == BoreSearch::ErrorReason::FloorNotFound)
         {
             machine_.latchFaultReason(FaultReason::ProbeSearchNoContact);
-            abortProcess("probe search: no contact before timeout");
+            abortProcess(AbortReason::ProbeBoreSearchFailed);
         }
         else
         {
-            abortProcess("probe calibration error");
+            abortProcess(AbortReason::ProbeCalibrationError);
         }
     }
 }
@@ -1013,22 +1425,38 @@ void ProcedureController::publishBoreReport(const BoreSearch::Result& result, bo
 
 void ProcedureController::handlePlateBoreSearch(float dt)
 {
+    if (plate_await_spreader_)
+    {
+        if (machine_.spreaderBusy())
+        {
+            return;
+        }
+        if (!machine_.hostOutputs().spreaderExtended)
+        {
+            machine_.setSpreaderExtend(true);
+            return;
+        }
+        plate_await_spreader_ = false;
+        startForceTareBeforePlateBore();
+        return;
+    }
+
     bore_search_.tick(dt, machine_);
     if (bore_search_.isError())
     {
         switch (bore_search_.errorReason())
         {
         case BoreSearch::ErrorReason::Timeout:
-            abortProcess("plate bore search timeout");
+            abortProcess(AbortReason::PlateBoreTimeout);
             break;
         case BoreSearch::ErrorReason::WallNotFound:
-            abortProcess("plate bore wall not found");
+            abortProcess(AbortReason::PlateBoreWallNotFound);
             break;
         case BoreSearch::ErrorReason::FloorNotFound:
-            abortProcess("plate bore floor not found");
+            abortProcess(AbortReason::PlateBoreFloorNotFound);
             break;
         default:
-            abortProcess("plate bore search failed");
+            abortProcess(AbortReason::PlateBoreSearchFailed);
             break;
         }
         return;
@@ -1038,11 +1466,84 @@ void ProcedureController::handlePlateBoreSearch(float dt)
         return;
     }
     publishBoreReport(bore_search_.result(), false);
-    machine_.stop();
+    machine_.setPreClampXyEnabled(false);
+    // Teach end must not soft-STOP: Wiederholen / erneute Suche brauchen Idle.
+    // Leave Contact context so residual force cannot trip the watchdog after the search.
+    machine_.setCollisionContext(CollisionContext::Approach);
     setAutomaticProcessGuards(false);
+    if (machine_.machineState() != MachineState::Fault)
+    {
+        machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+    }
     phase_ = ProcedurePhase::Completed;
     process_state_ = ProcessState::Completed;
     plate_bore_standalone_ = false;
+}
+
+void ProcedureController::handleCalibApproach()
+{
+    const MachineConfig::Probe& probe = machine_.machineConfig().probe;
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+    const float standoff = probe.approach_distance;
+    const float coarse_z = target_machine_.z + standoff;
+
+    if (!motionSettled())
+    {
+        return;
+    }
+    if (approach_leg_ == 0)
+    {
+        if (!atCalibSafeZ())
+        {
+            abortProcess(AbortReason::CalibApproachSafeZLeg0);
+            return;
+        }
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
+        machine_.setCollisionContext(CollisionContext::Approach);
+        std::fprintf(stderr,
+                     "[CalibApproach] XY v_approach=%.3f → (%.3f,%.3f) @ Safe-Z-Calib\n",
+                     probe.v_approach, target_machine_.x, target_machine_.y);
+        commandTraverseCalibSafeXY(target_machine_.x, target_machine_.y);
+        approach_leg_ = 1;
+        return;
+    }
+    if (approach_leg_ == 1)
+    {
+        const float xy_tol = 0.05f;
+        if (std::fabs(machine_.x() - target_machine_.x) > xy_tol ||
+            std::fabs(machine_.y() - target_machine_.y) > xy_tol)
+        {
+            abortProcess(AbortReason::CalibApproachXyMiss);
+            return;
+        }
+        if (!atCalibSafeZ())
+        {
+            abortProcess(AbortReason::CalibApproachSafeZLeg1);
+            return;
+        }
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
+        machine_.setCollisionContext(CollisionContext::Approach);
+        std::fprintf(stderr,
+                     "[CalibApproach] COARSE z=%.3f (target.z=%.3f + standoff=%.3f)\n",
+                     coarse_z, target_machine_.z, standoff);
+        commandLowerToZ(coarse_z);
+        approach_leg_ = 2;
+        return;
+    }
+    if (approach_leg_ == 2)
+    {
+        setAutomaticProcessGuards(false);
+        if (machine_.machineState() != MachineState::Fault)
+        {
+            machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+        }
+        phase_ = ProcedurePhase::Completed;
+        process_state_ = ProcessState::Completed;
+        calib_approach_standalone_ = false;
+        std::fprintf(stderr,
+                     "[CalibApproach] done pose=(%.3f,%.3f,%.3f)\n", machine_.x(), machine_.y(),
+                     machine_.z());
+    }
 }
 
 void ProcedureController::handlePreClamp(float dt)
@@ -1061,6 +1562,29 @@ void ProcedureController::handlePreClamp(float dt)
         return;
     }
 
+    if (preclamp_await_spreader_retracted_)
+    {
+        if (!awaitSpreaderRetracted())
+        {
+            return;
+        }
+        preclamp_await_spreader_retracted_ = false;
+        const MachineConfig::Force& force_cfg = machine_.machineConfig().force;
+        BoreSearch::Params params{};
+        params.wall_force_N = force_cfg.xy_tolerance_N;
+        params.xy_search_limit = force_cfg.xy_search_limit;
+        params.timeout_s = force_cfg.xy_correct_timeout_s;
+        params.refine_passes = force_cfg.bore_refine_passes;
+        params.do_floor = false;
+        if (!bore_search_.start(machine_, params))
+        {
+            abortProcess(AbortReason::PreclampStartFailed);
+            return;
+        }
+        machine_.moveTo(machine_.x(), machine_.y(), machine_.z());
+        return;
+    }
+
     bore_search_.tick(dt, machine_);
 
     if (bore_search_.isError())
@@ -1068,13 +1592,13 @@ void ProcedureController::handlePreClamp(float dt)
         switch (bore_search_.errorReason())
         {
         case BoreSearch::ErrorReason::Timeout:
-            abortProcess("preclamp bore search timeout");
+            abortProcess(AbortReason::PreclampTimeout);
             break;
         case BoreSearch::ErrorReason::WallNotFound:
-            abortProcess("preclamp wall not found");
+            abortProcess(AbortReason::PreclampWallNotFound);
             break;
         default:
-            abortProcess("preclamp bore search failed");
+            abortProcess(AbortReason::PreclampSearchFailed);
             break;
         }
         return;
@@ -1114,11 +1638,15 @@ void ProcedureController::handleClamp()
         }
         else if (point_stage_ == 1)
         {
-            startForceTare(ProcedurePhase::TestOrAge);
+            // Ruheprobe already ran after AfterSeat retract, before this PreClamp/Clamp.
+            // Taring again under spreader load zeros residual Gegenkraft and skews extract.
+            std::fprintf(stderr,
+                         "[Clamp] stage1 spreader ready → TestOrAge (no post-Clamp tare)\n");
+            enterPhase(ProcedurePhase::TestOrAge);
         }
         else
         {
-            abortProcess("Clamp after test stage");
+            abortProcess(AbortReason::ClampAfterTestStage);
         }
     }
 }
@@ -1133,11 +1661,22 @@ void ProcedureController::handleInsertInitial()
     {
         insertion_z_ = machine_.z();
         machine_.moveTo(point_x_, point_y_, insertion_z_); // hold seat pose
+        if (test_or_age_standalone_)
+        {
+            std::fprintf(stderr,
+                         "[InsertInitial] seat ok fz=%.3f target=%.3f insertion_z=%.3f → "
+                         "TestOrAge manual (extract first)\n",
+                         fz, target, insertion_z_);
+            enterTestOrAgeAfterManualSeat();
+            return;
+        }
         unclamp_mode_ = UnclampMode::AfterSeat;
         std::fprintf(stderr,
-                     "[InsertInitial] seat ok fz=%.3f target=%.3f insertion_z=%.3f → Unclamp AfterSeat\n",
+                     "[InsertInitial] seat ok fz=%.3f target=%.3f insertion_z=%.3f → Unclamp AfterSeat "
+                     "(tare after retract)\n",
                      fz, target, insertion_z_);
-        startForceTare(ProcedurePhase::Unclamp);
+        // Do not tare under seat load — AfterSeat lifts first, then ForceTare.
+        enterPhase(ProcedurePhase::Unclamp);
         return;
     }
     if (motionSettled() || zMinBlocked())
@@ -1146,8 +1685,150 @@ void ProcedureController::handleInsertInitial()
                      "[InsertInitial] ABORT settled/zMin fz=%.3f target=%.3f pose.z=%.3f "
                      "search=%.3f\n",
                      fz, target, machine_.z(), search);
-        abortProcess("InsertInitial: no seat force");
+        abortProcess(AbortReason::InsertInitialNoSeatForce);
     }
+}
+
+void ProcedureController::enterTestOrAgeAfterManualSeat()
+{
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+    const float search = machine_.machineConfig().force.insert_search_distance;
+    cycle_iteration_ = 0;
+    cycle_leg_ = 2; // after seat: first counted motion is extract to kraftfrei
+    force_path_.reset();
+    force_path_.setIteration(0);
+    force_path_.setLeg(ForcePathRecorder::kLegExtract);
+    force_path_have_z_ = false;
+    force_path_last_z_ = 0.0f;
+    resetExtractSeek();
+    ref_insert_valid_ = false;
+    ref_extract_valid_ = false;
+    point_x_ = machine_.x();
+    point_y_ = machine_.y();
+    machine_.setCollisionContext(CollisionContext::Measure);
+    machine_.setActiveMotionProfile(motion.phase3_v_extract, motion.phase3_a, motion.phase3_corner);
+    phase_ = ProcedurePhase::TestOrAge;
+    std::fprintf(stderr,
+                 "[TestOrAgeManual] after seat → extract +Z search=%.3f from z=%.3f\n", search,
+                 machine_.z());
+    machine_.moveTo(point_x_, point_y_, machine_.z() + search);
+}
+
+void ProcedureController::resetExtractSeek()
+{
+    extract_seen_tensile_ = false;
+    extract_free_latched_ = false;
+    extract_offset_target_z_ = 0.0f;
+    insert_return_to_free_ = false;
+}
+
+void ProcedureController::startTestOrAgeInsertDive()
+{
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+    const float search = machine_.machineConfig().force.insert_search_distance;
+    insert_return_to_free_ = false;
+    insert_fine_active_ = false;
+    force_path_.setLeg(ForcePathRecorder::kLegInsert);
+    force_path_have_z_ = false;
+    machine_.setActiveMotionProfile(motion.phase3_v_insert, motion.phase3_a, motion.phase3_corner);
+    machine_.setCollisionContext(CollisionContext::Measure);
+    std::fprintf(stderr,
+                 "[TestOrAge] insert dive −Z from z=%.3f search=%.3f at v=%.3f\n", machine_.z(),
+                 search, motion.phase3_v_insert);
+    machine_.moveTo(point_x_, point_y_, machine_.z() - search);
+}
+
+void ProcedureController::beginTestOrAgeInsert()
+{
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+    const float offset_mm = machine_.machineConfig().force.extract_after_free_mm;
+    cycle_leg_ = 1;
+    machine_.setCollisionContext(CollisionContext::Measure);
+
+    // Fast return over the after-free distance back to the Ausgliederpunkt.
+    if (offset_mm > 0.0f && machine_.z() > force_free_z_ + 1.0e-3f)
+    {
+        insert_return_to_free_ = true;
+        machine_.setActiveMotionProfile(motion.extract_after_free_v, motion.phase3_a,
+                                        motion.phase3_corner);
+        std::fprintf(stderr,
+                     "[TestOrAge] return to kraftfrei z=%.3f at v=%.3f (then insert dive)\n",
+                     force_free_z_, motion.extract_after_free_v);
+        machine_.moveTo(point_x_, point_y_, force_free_z_);
+        return;
+    }
+
+    startTestOrAgeInsertDive();
+}
+
+bool ProcedureController::tickExtractSeek(float fz, float free_tol)
+{
+    const float offset_mm = machine_.machineConfig().force.extract_after_free_mm;
+
+    if (extract_free_latched_)
+    {
+        if (offset_mm <= 0.0f)
+        {
+            return true;
+        }
+        if (machine_.z() + 1.0e-3f >= extract_offset_target_z_ || motionSettled())
+        {
+            return true;
+        }
+        return false;
+    }
+
+    if (!extract_seen_tensile_)
+    {
+        if (fz < -free_tol)
+        {
+            extract_seen_tensile_ = true;
+            std::fprintf(stderr, "[TestOrAge] extract Zug armed fz=%.3f z=%.3f\n", fz, machine_.z());
+        }
+        return false;
+    }
+
+    if (std::fabs(fz) > free_tol)
+    {
+        return false;
+    }
+
+    last_extract_x_ = machine_.x();
+    last_extract_y_ = machine_.y();
+    last_extract_z_ = machine_.z();
+    extraction_z_ = last_extract_z_;
+    force_free_z_ = last_extract_z_;
+    extract_free_latched_ = true;
+    std::fprintf(stderr, "[TestOrAge] kraftfrei (after Zug) z=%.3f offset_mm=%.3f\n", force_free_z_,
+                 offset_mm);
+
+    if (offset_mm <= 0.0f)
+    {
+        return true;
+    }
+
+    extract_offset_target_z_ = force_free_z_ + offset_mm;
+    const MachineConfig::Motion& motion = machine_.machineConfig().motion;
+    machine_.setActiveMotionProfile(motion.extract_after_free_v, motion.phase3_a,
+                                    motion.phase3_corner);
+    std::fprintf(stderr,
+                 "[TestOrAge] after-free +Z to z=%.3f at v=%.3f (phase3 extract ended at kraftfrei)\n",
+                 extract_offset_target_z_, motion.extract_after_free_v);
+    machine_.moveTo(point_x_, point_y_, extract_offset_target_z_);
+    return false;
+}
+
+void ProcedureController::completeTestOrAgeManual()
+{
+    machine_.moveTo(point_x_, point_y_, machine_.z());
+    setAutomaticProcessGuards(false);
+    machine_.setCollisionContext(CollisionContext::Approach);
+    phase_ = ProcedurePhase::Completed;
+    process_state_ = ProcessState::Completed;
+    test_or_age_standalone_ = false;
+    test_or_age_await_spreader_ = false;
+    std::fprintf(stderr,
+                 "[TestOrAgeManual] Completed at z=%.3f iterations done Homed kept\n", machine_.z());
 }
 
 void ProcedureController::handleTestOrAge()
@@ -1158,11 +1839,21 @@ void ProcedureController::handleTestOrAge()
     }
 
     const bool record = machine_.testConfiguration().mode == TestMode::Test;
+    const float target_force = machine_.testConfiguration().target_force_N;
     // Leg 0 = opening extract to kraftfrei; not part of the evaluation curves.
-    if (record && cycle_leg_ != 0)
+    // Tag from cycle_leg_ at sample time: 1 = Eingliedern (−Z / Druck), 2 = Ausgliedern (+Z / Zug).
+    // Skip recording while returning from after-free offset to kraftfrei.
+    if (record && !insert_return_to_free_ && (cycle_leg_ == 1 || cycle_leg_ == 2))
     {
+        force_path_.setLeg(cycle_leg_ == 1 ? ForcePathRecorder::kLegInsert
+                                           : ForcePathRecorder::kLegExtract);
         const float z = machine_.z();
-        const float dz_gate = machine_.machineConfig().force.force_path_dz_mm;
+        const MachineConfig::Force& fcfg = machine_.machineConfig().force;
+        float dz_gate = fcfg.force_path_dz_mm;
+        if (cycle_leg_ == 1 && insert_fine_active_)
+        {
+            dz_gate = fcfg.force_path_dz_fine_mm;
+        }
         const bool take = !force_path_have_z_ || dz_gate <= 0.0f ||
                           std::fabs(z - force_path_last_z_) + 1.0e-6f >= dz_gate;
         if (take)
@@ -1179,20 +1870,15 @@ void ProcedureController::handleTestOrAge()
 
     const MachineConfig::Motion& motion = machine_.machineConfig().motion;
     const MachineConfig::Force& force_cfg = machine_.machineConfig().force;
-    const float target = machine_.testConfiguration().target_force_N;
+    const float target = target_force;
     const float free_tol = force_cfg.force_tolerance_N;
     const float fz = machine_.hostInputs().force.fz;
     const float search = force_cfg.insert_search_distance;
 
     if (cycle_leg_ == 0)
     {
-        if (std::fabs(fz) <= free_tol)
+        if (tickExtractSeek(fz, free_tol))
         {
-            force_free_z_ = machine_.z();
-            extraction_z_ = force_free_z_;
-            last_extract_x_ = machine_.x();
-            last_extract_y_ = machine_.y();
-            last_extract_z_ = machine_.z();
             if (!ref_extract_valid_)
             {
                 ref_extract_x_ = last_extract_x_;
@@ -1201,26 +1887,45 @@ void ProcedureController::handleTestOrAge()
                 ref_extract_valid_ = true;
             }
             std::fprintf(stderr,
-                         "[TestOrAge] kraftfrei z=%.3f → insert dive iter %u\n", force_free_z_,
+                         "[TestOrAge] kraftfrei z=%.3f → insert iter %u\n", force_free_z_,
                          cycle_iteration_);
-            cycle_leg_ = 1;
-            force_path_.setLeg(ForcePathRecorder::kLegInsert);
-            force_path_have_z_ = false;
-            machine_.setActiveMotionProfile(motion.phase3_v_insert, motion.phase3_a,
-                                            motion.phase3_corner);
-            machine_.setCollisionContext(CollisionContext::Contact);
-            machine_.moveTo(point_x_, point_y_, machine_.z() - search);
+            beginTestOrAgeInsert();
             return;
         }
-        if (motionSettled() || zMinBlocked())
+        if (!extract_free_latched_ && (motionSettled() || zMinBlocked()))
         {
-            abortProcess("TestOrAge: no kraftfrei on extract");
+            abortProcess(extract_seen_tensile_
+                             ? AbortReason::TestOrAgeExtractAfterZug
+                             : AbortReason::TestOrAgeNoZugOnExtract);
         }
         return;
     }
 
     if (cycle_leg_ == 1)
     {
+        if (insert_return_to_free_)
+        {
+            if (!motionSettled() && machine_.z() > force_free_z_ + 1.0e-3f)
+            {
+                return;
+            }
+            startTestOrAgeInsertDive();
+            return;
+        }
+        // Fine phase: denser Kraft-Weg gate + slower insert near Sollkraft.
+        const float near_frac = force_cfg.force_near_target_frac;
+        if (!insert_fine_active_ && near_frac > 0.0f && near_frac <= 1.0f &&
+            fz >= near_frac * target)
+        {
+            insert_fine_active_ = true;
+            // Planner picks up new v/a on the remaining insert dive.
+            machine_.setActiveMotionProfile(motion.phase3_v_insert_fine, motion.phase3_a,
+                                            motion.phase3_corner);
+            std::fprintf(stderr,
+                         "[TestOrAge] insert fine phase fz=%.3f ≥ %.0f%% target → v=%.3f dz_fine=%.4f\n",
+                         fz, near_frac * 100.0f, motion.phase3_v_insert_fine,
+                         force_cfg.force_path_dz_fine_mm);
+        }
         if (fz >= target)
         {
             last_insert_x_ = machine_.x();
@@ -1249,31 +1954,42 @@ void ProcedureController::handleTestOrAge()
                 return;
             }
             std::fprintf(stderr, "[TestOrAge] insert contact z=%.3f → extract\n", insertion_z_);
+            // Shared seat sample: close insert and open extract at the same (z, Fz)
+            // before +Z motion starts (avoids dz-gate / timing gap at the reverse point).
+            if (record)
+            {
+                force_path_.setLeg(ForcePathRecorder::kLegInsert);
+                force_path_.push(insertion_z_, fz);
+                force_path_.setLeg(ForcePathRecorder::kLegExtract);
+                force_path_.push(insertion_z_, fz);
+                force_path_have_z_ = true;
+                force_path_last_z_ = insertion_z_;
+            }
+            else
+            {
+                force_path_.setLeg(ForcePathRecorder::kLegExtract);
+                force_path_have_z_ = false;
+            }
             cycle_leg_ = 2;
-            force_path_.setLeg(ForcePathRecorder::kLegExtract);
-            force_path_have_z_ = false;
+            insert_fine_active_ = false;
+            resetExtractSeek();
             machine_.setActiveMotionProfile(motion.phase3_v_extract, motion.phase3_a,
                                             motion.phase3_corner);
-            machine_.setCollisionContext(CollisionContext::Retract);
+            machine_.setCollisionContext(CollisionContext::Measure);
             machine_.moveTo(point_x_, point_y_, machine_.z() + search);
             return;
         }
         if (motionSettled() || zMinBlocked())
         {
-            abortProcess("TestOrAge: insert without target force");
+            abortProcess(AbortReason::TestOrAgeInsertNoTarget);
         }
         return;
     }
 
     if (cycle_leg_ == 2)
     {
-        if (std::fabs(fz) <= free_tol)
+        if (tickExtractSeek(fz, free_tol))
         {
-            last_extract_x_ = machine_.x();
-            last_extract_y_ = machine_.y();
-            last_extract_z_ = machine_.z();
-            extraction_z_ = last_extract_z_;
-            force_free_z_ = last_extract_z_;
             if (!ref_extract_valid_)
             {
                 ref_extract_x_ = last_extract_x_;
@@ -1300,24 +2016,25 @@ void ProcedureController::handleTestOrAge()
                          machine_.testConfiguration().iterations);
             if (cycle_iteration_ >= machine_.testConfiguration().iterations)
             {
+                if (test_or_age_standalone_)
+                {
+                    completeTestOrAgeManual();
+                    return;
+                }
                 unclamp_mode_ = UnclampMode::AfterTest;
-                machine_.moveTo(point_x_, point_y_, machine_.z()); // hold kraftfrei
+                machine_.moveTo(point_x_, point_y_, machine_.z()); // hold end of extract
                 startForceTare(ProcedurePhase::Unclamp);
                 return;
             }
             force_path_.setIteration(static_cast<std::uint16_t>(cycle_iteration_));
-            force_path_.setLeg(ForcePathRecorder::kLegInsert);
-            force_path_have_z_ = false;
-            cycle_leg_ = 1;
-            machine_.setActiveMotionProfile(motion.phase3_v_insert, motion.phase3_a,
-                                            motion.phase3_corner);
-            machine_.setCollisionContext(CollisionContext::Contact);
-            machine_.moveTo(point_x_, point_y_, machine_.z() - search);
+            beginTestOrAgeInsert();
             return;
         }
-        if (motionSettled())
+        if (!extract_free_latched_ && motionSettled())
         {
-            abortProcess("TestOrAge: extract without kraftfrei");
+            abortProcess(extract_seen_tensile_
+                             ? AbortReason::TestOrAgeExtractAfterZug
+                             : AbortReason::TestOrAgeNoZugOnExtract);
         }
         return;
     }
@@ -1349,10 +2066,25 @@ void ProcedureController::handleUnclamp()
             {
                 return;
             }
-            machine_.setActiveMotionProfile(motion.v_unclamp, motion.a_testpoints,
-                                            motion.corner_testpoints);
-            machine_.setCollisionContext(CollisionContext::Retract);
-            commandLowerToZ(target_machine_.z + standoff);
+            const float retract_mm = machine_.machineConfig().force.after_seat_retract_mm;
+            if (retract_mm > 0.0f)
+            {
+                const float retract_z = insertion_z_ + retract_mm;
+                machine_.setActiveMotionProfile(motion.v_unclamp, motion.a_testpoints,
+                                                motion.corner_testpoints);
+                machine_.setCollisionContext(CollisionContext::Retract);
+                std::fprintf(stderr,
+                             "[Unclamp] AfterSeat lift insertion_z=%.3f + retract_mm=%.3f → z=%.3f "
+                             "(not program+standoff)\n",
+                             insertion_z_, retract_mm, retract_z);
+                commandLowerToZ(retract_z);
+            }
+            else
+            {
+                std::fprintf(stderr,
+                             "[Unclamp] AfterSeat retract_mm=0 → no lift, tare at insertion_z=%.3f\n",
+                             insertion_z_);
+            }
             cycle_leg_ = 2;
             return;
         }
@@ -1362,21 +2094,9 @@ void ProcedureController::handleUnclamp()
             {
                 return;
             }
-            machine_.setActiveMotionProfile(motion.v_fine_testpoints, motion.a_testpoints,
-                                            motion.corner_testpoints);
-            machine_.setCollisionContext(CollisionContext::Contact);
-            commandLowerToZ(target_machine_.z);
-            cycle_leg_ = 3;
-            return;
-        }
-        if (cycle_leg_ == 3)
-        {
-            if (!motionSettled())
-            {
-                return;
-            }
+            // Load-free tare at the fixed retract height, then second PreClamp here.
             point_stage_ = 1;
-            enterPhase(ProcedurePhase::PreClampXyCorrect);
+            startForceTare(ProcedurePhase::PreClampXyCorrect);
             return;
         }
         return;
@@ -1384,6 +2104,23 @@ void ProcedureController::handleUnclamp()
 
     if (cycle_leg_ == 0)
     {
+        if (insert_return_to_free_)
+        {
+            if (!motionSettled() && machine_.z() > force_free_z_ + 1.0e-3f)
+            {
+                return;
+            }
+            insert_return_to_free_ = false;
+            machine_.setActiveMotionProfile(motion.phase1_v_insert, motion.phase1_a,
+                                            motion.phase1_corner);
+            machine_.setCollisionContext(CollisionContext::Contact);
+            const float search = machine_.machineConfig().force.insert_search_distance;
+            std::fprintf(stderr,
+                         "[Unclamp] AfterTest re-seat dive from kraftfrei z=%.3f at v=%.3f\n",
+                         machine_.z(), motion.phase1_v_insert);
+            machine_.moveTo(point_x_, point_y_, machine_.z() - search);
+            return;
+        }
         if (fz >= target)
         {
             insertion_z_ = machine_.z();
@@ -1393,7 +2130,7 @@ void ProcedureController::handleUnclamp()
         }
         if (motionSettled() || zMinBlocked())
         {
-            abortProcess("Unclamp AfterTest: re-seat failed");
+            abortProcess(AbortReason::UnclampAfterTestReseatFailed);
         }
         return;
     }
@@ -1438,7 +2175,7 @@ void ProcedureController::handleUnclamp()
         }
         if (!atSafeZ())
         {
-            abortProcess("Unclamp AfterTest: Safe-Z not reached");
+            abortProcess(AbortReason::UnclampAfterTestSafeZ);
             return;
         }
         point_stage_ = 2;
@@ -1707,12 +2444,37 @@ void ProcedureController::handleProbeRemeasure(float dt)
     }
 
     const CalibrationSet& calib = machine_.calibrationSet();
-    const MachineConfig::Probe& probe = machine_.machineConfig().probe;
+    const MachineConfig& cfg = machine_.machineConfig();
+    const MachineConfig::Probe& probe = cfg.probe;
+    const MachineConfig::Motion& motion = cfg.motion;
     const TestPoint target{calib.probe_center.x - calib.tool_offset.x,
                            calib.probe_center.y - calib.tool_offset.y,
                            calib.probe_center.z - calib.tool_offset.z};
     const float standoff = probe.approach_distance;
     const float coarse_z = target.z + standoff;
+
+    if (probe_await_spreader_retract_)
+    {
+        if (!awaitSpreaderRetracted())
+        {
+            return;
+        }
+        probe_await_spreader_retract_ = false;
+        const TestPoint& now = machine_.calibrationSet().tool_offset;
+        const float dx = now.x - tool_offset_before_remeasure_.x;
+        const float dy = now.y - tool_offset_before_remeasure_.y;
+        const float dz = now.z - tool_offset_before_remeasure_.z;
+        const float delta = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const float tol = machine_.machineConfig().force.tool_offset_change_tolerance_mm;
+        std::fprintf(stderr, "[ProbeRemeasure] OffsetOnly done delta=%.3f tol=%.3f\n", delta, tol);
+        if (delta > tol)
+        {
+            raiseAnomaly(3, delta, tol);
+            return;
+        }
+        handleNextPoint();
+        return;
+    }
 
     if (probe_remeasure_calib_active_)
     {
@@ -1720,51 +2482,30 @@ void ProcedureController::handleProbeRemeasure(float dt)
         if (probe_calib_.isComplete())
         {
             probe_remeasure_calib_active_ = false;
-            const TestPoint& now = machine_.calibrationSet().tool_offset;
-            const float dx = now.x - tool_offset_before_remeasure_.x;
-            const float dy = now.y - tool_offset_before_remeasure_.y;
-            const float dz = now.z - tool_offset_before_remeasure_.z;
-            const float delta = std::sqrt(dx * dx + dy * dy + dz * dz);
-            const float tol = machine_.machineConfig().force.tool_offset_change_tolerance_mm;
-            std::fprintf(stderr, "[ProbeRemeasure] OffsetOnly done delta=%.3f tol=%.3f\n", delta, tol);
-            if (delta > tol)
-            {
-                raiseAnomaly(3, delta, tol);
-                return;
-            }
-            handleNextPoint();
+            probe_await_spreader_retract_ = true;
+            machine_.setSpreaderExtend(false);
             return;
         }
         if (probe_calib_.isError())
         {
             probe_remeasure_calib_active_ = false;
-            abortProcess("ProbeRemeasure OffsetOnly error");
+            abortProcess(AbortReason::ProbeRemeasureOffsetOnlyError);
         }
         return;
     }
 
     if (approach_leg_ == 2)
     {
-        TestPoint contact{};
-        if (machine_.consumeProbeTrigger(contact))
-        {
-            machine_.brakeToStop(probe.a_probe_brake);
-            machine_.latchFaultReason(FaultReason::ProbeApproachContact);
-            abortProcess("ProbeRemeasure: probe contact during coarse Z");
-            return;
-        }
         if (!motionSettled())
         {
             return;
         }
-        machine_.consumeProbeTrigger();
-        const TestPoint hub{machine_.x(), machine_.y(), machine_.z()};
-        if (!probe_calib_.start(machine_, hub, ProbeCalibration::StorePolicy::OffsetOnly))
+        if (machine_.spreaderBusy() || !machine_.hostOutputs().spreaderExtended)
         {
-            abortProcess("ProbeRemeasure: OffsetOnly start failed");
+            machine_.setSpreaderExtend(true);
             return;
         }
-        probe_remeasure_calib_active_ = true;
+        startForceTareBeforeProbeBore(ProbeCalibration::StorePolicy::OffsetOnly, true);
         return;
     }
 
@@ -1776,11 +2517,10 @@ void ProcedureController::handleProbeRemeasure(float dt)
     {
         if (!atSafeZ())
         {
-            abortProcess("ProbeRemeasure: not at Safe-Z");
+            abortProcess(AbortReason::ProbeRemeasureNotAtSafeZ);
             return;
         }
-        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
-                                        probe.corner_probe_transfer);
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
         commandTraverseXY(target.x, target.y);
         approach_leg_ = 1;
         return;
@@ -1791,12 +2531,10 @@ void ProcedureController::handleProbeRemeasure(float dt)
         if (std::fabs(machine_.x() - target.x) > xy_tol ||
             std::fabs(machine_.y() - target.y) > xy_tol)
         {
-            abortProcess("ProbeRemeasure: XY miss");
+            abortProcess(AbortReason::ProbeRemeasureXyMiss);
             return;
         }
-        machine_.consumeProbeTrigger();
-        machine_.setActiveMotionProfile(probe.v_approach_probe, probe.a_probe_transfer,
-                                        probe.corner_probe_transfer);
+        machine_.setActiveMotionProfile(probe.v_approach, motion.a_testpoints, motion.corner_testpoints);
         commandLowerToZ(coarse_z);
         approach_leg_ = 2;
         return;

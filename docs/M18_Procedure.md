@@ -40,10 +40,16 @@ Logical process after M18:
 
 ```text
 PointApproach → PreClamp → Clamp → SeatToForce (InsertInitial)
-  → Unclamp AfterSeat (open → standoff → redescend) → PreClamp → Clamp
+  → Unclamp AfterSeat (close → +Z by after_seat_retract_mm → tare) → PreClamp → Clamp
   → TestOrAge (force-controlled) → Unclamp AfterTest (re-seat → open → fine → Safe-Z)
   → ProbeRemeasure (OffsetOnly) → NextPoint → … → MoveSafeEnd
 ```
+
+AfterSeat lifts only by the configurable `after_seat_retract_mm` from the seat pose
+(`insertion_z_ + after_seat_retract_mm`). It does **not** raise to program-Z +
+`approach_distance`. `after_seat_retract_mm = 0` skips the lift; tare and the second
+PreClamp stay at the seat pose. Otherwise force tare runs after that short retract
+(load-free), then the second PreClamp starts at that height.
 
 Jede Ruheprobe ist eine Aufnahme, nicht zwei an derselben Stelle. Details: `docs/Force_Calibration.md`.
 
@@ -133,7 +139,10 @@ Order in `Machine::tick()` (before motion):
 1. Finite check (`std::isfinite` on Fx, Fy, Fz) **before** `fabs`.
 2. `forceSampleValid == false` → `ForceInvalidSample`.
 3. Unchanged `forceSampleSequence` ages `forceSampleAge`. Age ≥ `sample_timeout_s` → `ForceStale`.
-4. Magnitude vs SafetyLimits / collision context.
+4. Magnitude vs hard limits, then active collision context.
+   - Approach…Contact / Retract / Clamp / Unclamp: absolute N from MachineConfig.
+   - **Measure (Prüfphase / Phase 3):** percent of Prüfkraft (`target_force_N`); effective N = target × % / 100.
+     Opening extract, insert and extract legs stay on `CollisionContext::Measure`.
 
 NaN/Inf cannot pass through `fabs(NaN) >= limit`.
 
@@ -266,7 +275,7 @@ Config/spreader commands while Running → NACK `InvalidState`.
 Ring buffer, O(1) push, no heap per sample, no wait on Pi.
 
 - Test mode: separate curves per `(iteration, leg)` with `leg` = Insert / Extract (`popSameIterationAndLeg`).
-- Distance gate default `force_path_dz_mm = 0.1` (first sample of a leg always kept). Opening extract (`cycle_leg_ == 0`) is not recorded.
+- Distance gate default `force_path_dz_mm = 0.01` (first sample of a leg always kept). Opening extract (`cycle_leg_ == 0`) is not recorded.
 - Aging: no recording (force still used for safety).
 - Overflow: drop oldest, increment drop counter.
 - Streaming is opportunistic (`MsgForcePathChunk` header 13 B incl. `leg`); STM32 and simulation drain in status push. A slow Pi must not block the tick.

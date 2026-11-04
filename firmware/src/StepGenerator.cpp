@@ -12,7 +12,9 @@ extern "C" void Error_Handler(void);
 constexpr std::uint32_t kMaxHzXy = 10000u;
 constexpr std::uint32_t kMaxHzZ = 5000u;
 constexpr std::uint32_t kMinHz = 200u;
-constexpr bool kInvertDir[3] = {false, false, false};
+// X: machine +X is into the workspace (away from the homing endstop). Y/Z keep
+// machine + toward their +Max homing switches.
+constexpr bool kInvertDir[3] = {true, false, false};
 
 // One-pulse PWM mode 2: the pin stays low until CCR, then high until the
 // period ends. The rising edge is the motor step. The update event only

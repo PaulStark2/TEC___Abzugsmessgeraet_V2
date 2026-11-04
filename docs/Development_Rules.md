@@ -34,3 +34,7 @@
 16. Comment every created code line.
 
 17. Keep the architecture modular.
+
+18. HMI faults/messages: extend via `AbortReason` + `messageCatalog` and
+    document in [`docs/HMI_Messages.md`](HMI_Messages.md). Do not invent
+    parallel error channels in the GUI without going through the message store.

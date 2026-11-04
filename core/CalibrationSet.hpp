@@ -28,12 +28,12 @@ struct CalibrationSet
     TestPoint k3{0.0f, 0.0f, 0.0f};
     bool rotation_points_valid = false;
 
-    // Derived MCS home pose: +Max switch = (0,0,0), home = (-Rx,-Ry,-Rz).
+    // Derived MCS home pose: switch = (0,0,0), home = (+Rx,-Ry,-Rz).
     // Not measured. Follows MachineConfig.calibration.home_offset (retract R) so changing R
     // does not require re-defining MCS. Normal home() returns here without redefining MCS.
     TestPoint home_offset{0.0f, 0.0f, 0.0f};
 
-    // True after MCS has been defined once (origin at +max switches).
+    // True after MCS has been defined once (X at Min, Y/Z at +Max).
     // Normal home() re-applies this frame at the switches.
     bool machine_coordinate_system_valid = false;
 };

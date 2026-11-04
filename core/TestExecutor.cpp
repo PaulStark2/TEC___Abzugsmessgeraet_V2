@@ -25,6 +25,16 @@ bool TestExecutor::startPlateBoreSearch(std::uint8_t point_id)
     return controller_.startPlateBoreSearch(point_id);
 }
 
+bool TestExecutor::startApproachCalibPoint(std::uint8_t point_id)
+{
+    return controller_.startApproachCalibPoint(point_id);
+}
+
+bool TestExecutor::startTestOrAgeManual()
+{
+    return controller_.startTestOrAgeManual();
+}
+
 void TestExecutor::tick(float dt)
 {
     controller_.tick(dt);

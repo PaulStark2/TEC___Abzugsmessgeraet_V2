@@ -37,6 +37,10 @@ enum class MessageId : uint8_t
     CmdStartPlateBoreSearch = 0x5D, // u8 point_id: 1=KM, 2=K1, 3=K2, 4=K3
     CmdSetPlateYaw = 0x5E, // float32 plate_yaw_rad
     CmdProcedureDecision = 0x5F, // operator decision for procedure anomaly (stub)
+    CmdEnableFaultManual = 0x60, // empty — allow restricted jog while Fault is latched
+    CmdApproachCalibPoint = 0x61, // u8 point_id: 1=KM … 4=K3, 5=probe
+    CmdSetRotationPoints = 0x62, // 9×float32: k1.xyz, k2.xyz, k3.xyz
+    CmdStartTestOrAge = 0x63, // empty — hand-mode SeatToForce + TestOrAge iterations
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.

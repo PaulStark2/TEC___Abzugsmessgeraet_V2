@@ -7,6 +7,35 @@
 let statusCallback = null;
 let connectionCallback = null;
 let reconnectTimer = null;
+/** @type {Set<(status: object) => void>} */
+const statusListeners = new Set();
+
+function notifyStatusListeners(status) {
+  if (statusCallback) {
+    statusCallback(status);
+  }
+  for (const listener of statusListeners) {
+    try {
+      listener(status);
+    } catch {
+      // page listeners must not break the status bus
+    }
+  }
+}
+
+/**
+ * Subscribe to live machine status (WebSocket). Returns unsubscribe fn.
+ * @param {(status: object) => void} listener
+ */
+export function subscribeLiveStatus(listener) {
+  if (typeof listener !== 'function') {
+    return () => {};
+  }
+  statusListeners.add(listener);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}
 
 /**
  * @param {object} body
@@ -26,8 +55,8 @@ export async function sendCommand(body) {
   if (!response.ok || !result.ok) {
     throw new Error(result.error || `HTTP ${response.status}`);
   }
-  if (result.status && statusCallback) {
-    statusCallback(result.status);
+  if (result.status) {
+    notifyStatusListeners(result.status);
   }
   return result;
 }
@@ -167,6 +196,65 @@ export async function clearProgramSelection() {
 /**
  * Delete the currently loaded program (clears selection, keeps results).
  */
+/**
+ * List taught/saved programs on the device (gui/server/data/programs).
+ */
+export async function fetchProgramFiles() {
+  const response = await fetch('/api/program/files', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+/**
+ * Teach current TCP as a plate-frame Prüfpunkt into a new or existing program JSON.
+ * @param {{ mode: 'create'|'append', pointName: string, programName?: string, fileName?: string }} body
+ */
+export async function teachProgramPoint(body) {
+  const response = await fetch('/api/program/teach', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+/**
+ * Load a device-stored program JSON into RAM (same as upload).
+ * @param {string} fileName
+ */
+export async function loadProgramFile(fileName) {
+  const response = await fetch(`/api/program/files/${encodeURIComponent(fileName)}/load`, {
+    method: 'POST',
+  });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
 export async function deleteCurrentProgram() {
   const response = await fetch('/api/program/current', { method: 'DELETE' });
   let result;
@@ -282,11 +370,30 @@ export async function stopProcedure() {
   return result;
 }
 
+export async function resetProcedureUi() {
+  const response = await fetch('/api/procedure/reset-ui', { method: 'POST' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
 /**
  * Latest procedure results (G9).
+ * @param {number} [index] optional history index (0 = newest)
  */
-export async function fetchCurrentResults() {
-  const response = await fetch('/api/results/current', { method: 'GET' });
+export async function fetchCurrentResults(index) {
+  const q =
+    index !== undefined && index !== null && Number.isFinite(Number(index))
+      ? `?index=${encodeURIComponent(String(index))}`
+      : '';
+  const response = await fetch(`/api/results/current${q}`, { method: 'GET' });
   let result;
   try {
     result = await response.json();
@@ -295,6 +402,52 @@ export async function fetchCurrentResults() {
   }
   if (!response.ok) {
     return result;
+  }
+  return result;
+}
+
+export async function fetchResultsHistory() {
+  const response = await fetch('/api/results/history', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok) {
+    return result;
+  }
+  return result;
+}
+
+/**
+ * Seed realistic Kraft-Weg demo results (offline GUI validation, no test stand).
+ */
+export async function loadDemoResults() {
+  const response = await fetch('/api/results/demo', { method: 'POST' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+/** Clear in-memory results (demo or last run). Real runs also clear on procedure start. */
+export async function clearCurrentResults() {
+  const response = await fetch('/api/results/current', { method: 'DELETE' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Ungültige Serverantwort');
+  }
+  if (!response.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
   }
   return result;
 }
@@ -365,6 +518,14 @@ export async function setCollisionGuard(enabled) {
   return sendCommand({ command: 'setCollisionGuard', enabled: enabled === true });
 }
 
+export async function pneumaticOpen() {
+  return sendCommand({ command: 'pneumaticOpen' });
+}
+
+export async function pneumaticClose() {
+  return sendCommand({ command: 'pneumaticClose' });
+}
+
 export async function fixtureOpen() {
   return sendCommand({ command: 'fixtureOpen' });
 }
@@ -419,6 +580,19 @@ export async function setPlateOrigin(pose) {
 
 export async function startPlateBoreSearch(pointId) {
   const response = await fetch('/api/calibration/plate-bore-start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pointId }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+export async function approachCalibPoint(pointId) {
+  const response = await fetch('/api/calibration/approach-point', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pointId }),
@@ -502,7 +676,12 @@ export async function syncCalibrationFromController(options = {}) {
  * @param {(status: object) => void} onStatus
  * @param {(connected: boolean, message?: string) => void} [onConnection]
  */
-export function connectStatus(onStatus, onConnection) {
+/**
+ * @param {(status: object) => void} onStatus
+ * @param {(connected: boolean, message?: string) => void} [onConnection]
+ * @param {(evt: object) => void} [onMessageEvent]
+ */
+export function connectStatus(onStatus, onConnection, onMessageEvent) {
   statusCallback = onStatus;
   connectionCallback = onConnection;
 
@@ -523,10 +702,16 @@ export function connectStatus(onStatus, onConnection) {
     } catch {
       return;
     }
-    if (message.type !== 'status' || !statusCallback) {
+    if (message.type === 'message_event') {
+      if (typeof onMessageEvent === 'function') {
+        onMessageEvent(message);
+      }
       return;
     }
-    statusCallback(message);
+    if (message.type !== 'status') {
+      return;
+    }
+    notifyStatusListeners(message);
   });
 
   socket.addEventListener('close', () => {
@@ -538,7 +723,7 @@ export function connectStatus(onStatus, onConnection) {
     }
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
-      connectStatus(onStatus, onConnection);
+      connectStatus(onStatus, onConnection, onMessageEvent);
     }, 2000);
   });
 

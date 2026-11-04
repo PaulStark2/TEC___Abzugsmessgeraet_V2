@@ -1,0 +1,361 @@
+WIRE=337
+
+STRUCT:
+    float v_approach_testpoints;
+    float v_fine_testpoints;
+    float v_unclamp;
+    float v_homing;
+    float a_testpoints;
+    float corner_testpoints;
+    float a_homing;
+    float force_filter;
+    float xy_tolerance_N;
+    float xy_correction_step;
+    float xy_max_correction;
+    float insertion_buffer;
+    float collision_approach_N;
+    float collision_retract_N;
+    float collision_clamp_N;
+    float collision_unclamp_N;
+    float collision_contact_N;
+    float collision_measure_N;
+    float spreader_extend_time_s;
+    float spreader_retract_time_s;
+    float force_tolerance_N;
+    float v_search;
+    float home_offset_x;
+    float home_offset_y;
+    float home_offset_z;
+    float tool_offset_x;
+    float tool_offset_y;
+    float tool_offset_z;
+    float safe_z_buffer;
+    float sample_timeout_s;
+    float heartbeat_timeout_s;
+    float xy_correct_timeout_s;
+    float approach_distance;
+    float probe_v_approach = 10.0f;
+    float probe_wall_force_N = 0.5f;
+    float probe_floor_force_N = 0.5f;
+    float probe_xy_search_limit = 5.0f;
+    float probe_z_search_limit = 10.0f;
+    float probe_z_lift_mm = 2.0f;
+    float probe_bore_timeout_s = 60.0f;
+    uint8_t probe_bore_refine_passes = 0;
+    float insert_search_distance;
+    float phase1_v_extract;
+    float phase1_v_insert;
+    float phase1_a;
+    float phase1_corner;
+    float phase3_v_extract;
+    float phase3_v_insert;
+    float phase3_a;
+    float phase3_corner;
+    float probe_center_x;
+    float probe_center_y;
+    float probe_center_z;
+    float force_range_N = 30.0f;
+    float force_hard_limit_N = 30.0f;
+    float a_manual = 500.0f;
+    float force_hard_limit_x_N = 30.0f;
+    float force_hard_limit_y_N = 30.0f;
+    float collision_approach_x_N = 20.0f;
+    float collision_approach_y_N = 20.0f;
+    float collision_retract_x_N = 30.0f;
+    float collision_retract_y_N = 30.0f;
+    float collision_clamp_x_N = 20.0f;
+    float collision_clamp_y_N = 20.0f;
+    float collision_unclamp_x_N = 20.0f;
+    float collision_unclamp_y_N = 20.0f;
+    float collision_contact_x_N = 30.0f;
+    float collision_contact_y_N = 30.0f;
+    float collision_measure_x_N = 30.0f;
+    float collision_measure_y_N = 30.0f;
+    float xy_search_limit = 5.0f;
+    uint8_t preclamp_confirm = 1;
+    float v_bore_search = 1.0f;
+    uint8_t bore_refine_passes = 0;
+    float v_plate_bore_search = 1.0f;
+    float plate_wall_force_N = 0.5f;
+    float plate_floor_force_N = 0.5f;
+    float plate_xy_search_limit = 5.0f;
+    float plate_z_search_limit = 10.0f;
+    float plate_z_lift_mm = 2.0f;
+    float plate_bore_timeout_s = 60.0f;
+    uint8_t plate_bore_refine_passes = 0;
+    float coord_tolerance_mm = 0.5f;
+    float test_lateral_force_N = 5.0f;
+    float z_limit_pos_mm = 10.0f;
+    float z_limit_neg_mm = 15.0f;
+    uint8_t anomaly_skip = 0;
+    float tool_offset_change_tolerance_mm = 0.5f;
+
+ENC:
+        writeF32LE(out, capacity, offset, payload.v_approach_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.v_fine_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.v_unclamp) &&
+        writeF32LE(out, capacity, offset, payload.v_homing) &&
+        writeF32LE(out, capacity, offset, payload.a_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.corner_testpoints) &&
+        writeF32LE(out, capacity, offset, payload.a_homing) &&
+        writeF32LE(out, capacity, offset, payload.force_filter) &&
+        writeF32LE(out, capacity, offset, payload.xy_tolerance_N) &&
+        writeF32LE(out, capacity, offset, payload.xy_correction_step) &&
+        writeF32LE(out, capacity, offset, payload.xy_max_correction) &&
+        writeF32LE(out, capacity, offset, payload.insertion_buffer) &&
+        writeF32LE(out, capacity, offset, payload.collision_approach_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_retract_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_clamp_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_unclamp_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_contact_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_measure_N) &&
+        writeF32LE(out, capacity, offset, payload.spreader_extend_time_s) &&
+        writeF32LE(out, capacity, offset, payload.spreader_retract_time_s) &&
+        writeF32LE(out, capacity, offset, payload.force_tolerance_N) &&
+        writeF32LE(out, capacity, offset, payload.v_search) &&
+        writeF32LE(out, capacity, offset, payload.home_offset_x) &&
+        writeF32LE(out, capacity, offset, payload.home_offset_y) &&
+        writeF32LE(out, capacity, offset, payload.home_offset_z) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_x) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_y) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_z) &&
+        writeF32LE(out, capacity, offset, payload.safe_z_buffer) &&
+        writeF32LE(out, capacity, offset, payload.sample_timeout_s) &&
+        writeF32LE(out, capacity, offset, payload.heartbeat_timeout_s) &&
+        writeF32LE(out, capacity, offset, payload.xy_correct_timeout_s) &&
+        writeF32LE(out, capacity, offset, payload.approach_distance) &&
+        writeF32LE(out, capacity, offset, payload.probe_v_approach) &&
+        writeF32LE(out, capacity, offset, payload.probe_wall_force_N) &&
+        writeF32LE(out, capacity, offset, payload.probe_floor_force_N) &&
+        writeF32LE(out, capacity, offset, payload.probe_xy_search_limit) &&
+        writeF32LE(out, capacity, offset, payload.probe_z_search_limit) &&
+        writeF32LE(out, capacity, offset, payload.probe_z_lift_mm) &&
+        writeF32LE(out, capacity, offset, payload.probe_bore_timeout_s) &&
+        writeU8(out, capacity, offset, payload.probe_bore_refine_passes) &&
+        writeF32LE(out, capacity, offset, payload.insert_search_distance) &&
+        writeF32LE(out, capacity, offset, payload.phase1_v_extract) &&
+        writeF32LE(out, capacity, offset, payload.phase1_v_insert) &&
+        writeF32LE(out, capacity, offset, payload.phase1_a) &&
+        writeF32LE(out, capacity, offset, payload.phase1_corner) &&
+        writeF32LE(out, capacity, offset, payload.phase3_v_extract) &&
+        writeF32LE(out, capacity, offset, payload.phase3_v_insert) &&
+        writeF32LE(out, capacity, offset, payload.phase3_a) &&
+        writeF32LE(out, capacity, offset, payload.phase3_corner) &&
+        writeF32LE(out, capacity, offset, payload.probe_center_x) &&
+        writeF32LE(out, capacity, offset, payload.probe_center_y) &&
+        writeF32LE(out, capacity, offset, payload.probe_center_z) &&
+        writeF32LE(out, capacity, offset, payload.force_range_N) &&
+        writeF32LE(out, capacity, offset, payload.force_hard_limit_N) &&
+        writeF32LE(out, capacity, offset, payload.a_manual) &&
+        writeF32LE(out, capacity, offset, payload.force_hard_limit_x_N) &&
+        writeF32LE(out, capacity, offset, payload.force_hard_limit_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_approach_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_approach_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_retract_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_retract_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_clamp_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_clamp_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_unclamp_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_unclamp_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_contact_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_contact_y_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_measure_x_N) &&
+        writeF32LE(out, capacity, offset, payload.collision_measure_y_N) &&
+        writeF32LE(out, capacity, offset, payload.xy_search_limit) &&
+        writeU8(out, capacity, offset, payload.preclamp_confirm) &&
+        writeF32LE(out, capacity, offset, payload.v_bore_search) &&
+        writeU8(out, capacity, offset, payload.bore_refine_passes) &&
+        writeF32LE(out, capacity, offset, payload.v_plate_bore_search) &&
+        writeF32LE(out, capacity, offset, payload.plate_wall_force_N) &&
+        writeF32LE(out, capacity, offset, payload.plate_floor_force_N) &&
+        writeF32LE(out, capacity, offset, payload.plate_xy_search_limit) &&
+        writeF32LE(out, capacity, offset, payload.plate_z_search_limit) &&
+        writeF32LE(out, capacity, offset, payload.plate_z_lift_mm) &&
+        writeF32LE(out, capacity, offset, payload.plate_bore_timeout_s) &&
+        writeU8(out, capacity, offset, payload.plate_bore_refine_passes) &&
+        writeF32LE(out, capacity, offset, payload.coord_tolerance_mm) &&
+        writeF32LE(out, capacity, offset, payload.test_lateral_force_N) &&
+        writeF32LE(out, capacity, offset, payload.z_limit_pos_mm) &&
+        writeF32LE(out, capacity, offset, payload.z_limit_neg_mm) &&
+        writeU8(out, capacity, offset, payload.anomaly_skip) &&
+        writeF32LE(out, capacity, offset, payload.tool_offset_change_tolerance_mm)
+
+DEC:
+        readF32LE(data, length, offset, out.v_approach_testpoints, true) &&
+        readF32LE(data, length, offset, out.v_fine_testpoints, true) &&
+        readF32LE(data, length, offset, out.v_unclamp, true) &&
+        readF32LE(data, length, offset, out.v_homing, true) &&
+        readF32LE(data, length, offset, out.a_testpoints, true) &&
+        readF32LE(data, length, offset, out.corner_testpoints, true) &&
+        readF32LE(data, length, offset, out.a_homing, true) &&
+        readF32LE(data, length, offset, out.force_filter, true) &&
+        readF32LE(data, length, offset, out.xy_tolerance_N, true) &&
+        readF32LE(data, length, offset, out.xy_correction_step, true) &&
+        readF32LE(data, length, offset, out.xy_max_correction, true) &&
+        readF32LE(data, length, offset, out.insertion_buffer, true) &&
+        readF32LE(data, length, offset, out.collision_approach_N, true) &&
+        readF32LE(data, length, offset, out.collision_retract_N, true) &&
+        readF32LE(data, length, offset, out.collision_clamp_N, true) &&
+        readF32LE(data, length, offset, out.collision_unclamp_N, true) &&
+        readF32LE(data, length, offset, out.collision_contact_N, true) &&
+        readF32LE(data, length, offset, out.collision_measure_N, true) &&
+        readF32LE(data, length, offset, out.spreader_extend_time_s, true) &&
+        readF32LE(data, length, offset, out.spreader_retract_time_s, true) &&
+        readF32LE(data, length, offset, out.force_tolerance_N, true) &&
+        readF32LE(data, length, offset, out.v_search, true) &&
+        readF32LE(data, length, offset, out.home_offset_x, true) &&
+        readF32LE(data, length, offset, out.home_offset_y, true) &&
+        readF32LE(data, length, offset, out.home_offset_z, true) &&
+        readF32LE(data, length, offset, out.tool_offset_x, true) &&
+        readF32LE(data, length, offset, out.tool_offset_y, true) &&
+        readF32LE(data, length, offset, out.tool_offset_z, true) &&
+        readF32LE(data, length, offset, out.safe_z_buffer, true) &&
+        readF32LE(data, length, offset, out.sample_timeout_s, true) &&
+        readF32LE(data, length, offset, out.heartbeat_timeout_s, true) &&
+        readF32LE(data, length, offset, out.xy_correct_timeout_s, true) &&
+        readF32LE(data, length, offset, out.approach_distance, true) &&
+        readF32LE(data, length, offset, out.probe_v_approach, true) &&
+        readF32LE(data, length, offset, out.probe_wall_force_N, true) &&
+        readF32LE(data, length, offset, out.probe_floor_force_N, true) &&
+        readF32LE(data, length, offset, out.probe_xy_search_limit, true) &&
+        readF32LE(data, length, offset, out.probe_z_search_limit, true) &&
+        readF32LE(data, length, offset, out.probe_z_lift_mm, true) &&
+        readF32LE(data, length, offset, out.probe_bore_timeout_s, true) &&
+        readU8(data, length, offset, out.probe_bore_refine_passes) &&
+        readF32LE(data, length, offset, out.insert_search_distance, true) &&
+        readF32LE(data, length, offset, out.phase1_v_extract, true) &&
+        readF32LE(data, length, offset, out.phase1_v_insert, true) &&
+        readF32LE(data, length, offset, out.phase1_a, true) &&
+        readF32LE(data, length, offset, out.phase1_corner, true) &&
+        readF32LE(data, length, offset, out.phase3_v_extract, true) &&
+        readF32LE(data, length, offset, out.phase3_v_insert, true) &&
+        readF32LE(data, length, offset, out.phase3_a, true) &&
+        readF32LE(data, length, offset, out.phase3_corner, true) &&
+        readF32LE(data, length, offset, out.probe_center_x, true) &&
+        readF32LE(data, length, offset, out.probe_center_y, true) &&
+        readF32LE(data, length, offset, out.probe_center_z, true) &&
+        readF32LE(data, length, offset, out.force_range_N, true) &&
+        readF32LE(data, length, offset, out.force_hard_limit_N, true) &&
+        readF32LE(data, length, offset, out.a_manual, true) &&
+        readF32LE(data, length, offset, out.force_hard_limit_x_N, true) &&
+        readF32LE(data, length, offset, out.force_hard_limit_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_approach_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_approach_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_retract_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_retract_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_clamp_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_clamp_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_unclamp_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_unclamp_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_contact_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_contact_y_N, true) &&
+        readF32LE(data, length, offset, out.collision_measure_x_N, true) &&
+        readF32LE(data, length, offset, out.collision_measure_y_N, true) &&
+        readF32LE(data, length, offset, out.xy_search_limit, true) &&
+        readU8(data, length, offset, out.preclamp_confirm) &&
+        readF32LE(data, length, offset, out.v_bore_search, true) &&
+        readU8(data, length, offset, out.bore_refine_passes) &&
+        readF32LE(data, length, offset, out.v_plate_bore_search, true) &&
+        readF32LE(data, length, offset, out.plate_wall_force_N, true) &&
+        readF32LE(data, length, offset, out.plate_floor_force_N, true) &&
+        readF32LE(data, length, offset, out.plate_xy_search_limit, true) &&
+        readF32LE(data, length, offset, out.plate_z_search_limit, true) &&
+        readF32LE(data, length, offset, out.plate_z_lift_mm, true) &&
+        readF32LE(data, length, offset, out.plate_bore_timeout_s, true) &&
+        readU8(data, length, offset, out.plate_bore_refine_passes) &&
+        readF32LE(data, length, offset, out.coord_tolerance_mm, true) &&
+        readF32LE(data, length, offset, out.test_lateral_force_N, true) &&
+        readF32LE(data, length, offset, out.z_limit_pos_mm, true) &&
+        readF32LE(data, length, offset, out.z_limit_neg_mm, true) &&
+        readU8(data, length, offset, out.anomaly_skip) &&
+        readF32LE(data, length, offset, out.tool_offset_change_tolerance_mm, true)
+
+JS:
+  { key: 'v_approach_testpoints', type: 'f32' },
+  { key: 'v_fine_testpoints', type: 'f32' },
+  { key: 'v_unclamp', type: 'f32' },
+  { key: 'v_homing', type: 'f32' },
+  { key: 'a_testpoints', type: 'f32' },
+  { key: 'corner_testpoints', type: 'f32' },
+  { key: 'a_homing', type: 'f32' },
+  { key: 'force_filter', type: 'f32' },
+  { key: 'xy_tolerance_N', type: 'f32' },
+  { key: 'xy_correction_step', type: 'f32' },
+  { key: 'xy_max_correction', type: 'f32' },
+  { key: 'insertion_buffer', type: 'f32' },
+  { key: 'collision_approach_N', type: 'f32' },
+  { key: 'collision_retract_N', type: 'f32' },
+  { key: 'collision_clamp_N', type: 'f32' },
+  { key: 'collision_unclamp_N', type: 'f32' },
+  { key: 'collision_contact_N', type: 'f32' },
+  { key: 'collision_measure_N', type: 'f32' },
+  { key: 'spreader_extend_time_s', type: 'f32' },
+  { key: 'spreader_retract_time_s', type: 'f32' },
+  { key: 'force_tolerance_N', type: 'f32' },
+  { key: 'v_search', type: 'f32' },
+  { key: 'home_offset_x', type: 'f32' },
+  { key: 'home_offset_y', type: 'f32' },
+  { key: 'home_offset_z', type: 'f32' },
+  { key: 'tool_offset_x', type: 'f32' },
+  { key: 'tool_offset_y', type: 'f32' },
+  { key: 'tool_offset_z', type: 'f32' },
+  { key: 'safe_z_buffer', type: 'f32' },
+  { key: 'sample_timeout_s', type: 'f32' },
+  { key: 'heartbeat_timeout_s', type: 'f32' },
+  { key: 'xy_correct_timeout_s', type: 'f32' },
+  { key: 'approach_distance', type: 'f32' },
+  { key: 'probe_v_approach', type: 'f32', defaultValue: 10 },
+  { key: 'probe_wall_force_N', type: 'f32', defaultValue: 0.5 },
+  { key: 'probe_floor_force_N', type: 'f32', defaultValue: 0.5 },
+  { key: 'probe_xy_search_limit', type: 'f32', defaultValue: 5 },
+  { key: 'probe_z_search_limit', type: 'f32', defaultValue: 10 },
+  { key: 'probe_z_lift_mm', type: 'f32', defaultValue: 2 },
+  { key: 'probe_bore_timeout_s', type: 'f32', defaultValue: 60 },
+  { key: 'probe_bore_refine_passes', type: 'u8', defaultValue: 0 },
+  { key: 'insert_search_distance', type: 'f32' },
+  { key: 'phase1_v_extract', type: 'f32' },
+  { key: 'phase1_v_insert', type: 'f32' },
+  { key: 'phase1_a', type: 'f32' },
+  { key: 'phase1_corner', type: 'f32' },
+  { key: 'phase3_v_extract', type: 'f32' },
+  { key: 'phase3_v_insert', type: 'f32' },
+  { key: 'phase3_a', type: 'f32' },
+  { key: 'phase3_corner', type: 'f32' },
+  { key: 'probe_center_x', type: 'f32', optionalZero: true },
+  { key: 'probe_center_y', type: 'f32', optionalZero: true },
+  { key: 'probe_center_z', type: 'f32', optionalZero: true },
+  { key: 'force_range_N', type: 'f32', defaultValue: 30 },
+  { key: 'force_hard_limit_N', type: 'f32', defaultValue: 30 },
+  { key: 'a_manual', type: 'f32', defaultValue: 500 },
+  { key: 'force_hard_limit_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'force_hard_limit_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_approach_x_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_approach_y_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_retract_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_retract_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_clamp_x_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_clamp_y_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_unclamp_x_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_unclamp_y_N', type: 'f32', defaultValue: 20 },
+  { key: 'collision_contact_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_contact_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_measure_x_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_measure_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'xy_search_limit', type: 'f32', defaultValue: 5 },
+  { key: 'preclamp_confirm', type: 'u8', defaultValue: 1 },
+  { key: 'v_bore_search', type: 'f32', defaultValue: 1 },
+  { key: 'bore_refine_passes', type: 'u8', defaultValue: 0 },
+  { key: 'v_plate_bore_search', type: 'f32', defaultValue: 1 },
+  { key: 'plate_wall_force_N', type: 'f32', defaultValue: 0.5 },
+  { key: 'plate_floor_force_N', type: 'f32', defaultValue: 0.5 },
+  { key: 'plate_xy_search_limit', type: 'f32', defaultValue: 5 },
+  { key: 'plate_z_search_limit', type: 'f32', defaultValue: 10 },
+  { key: 'plate_z_lift_mm', type: 'f32', defaultValue: 2 },
+  { key: 'plate_bore_timeout_s', type: 'f32', defaultValue: 60 },
+  { key: 'plate_bore_refine_passes', type: 'u8', defaultValue: 0 },
+  { key: 'coord_tolerance_mm', type: 'f32', defaultValue: 0.5 },
+  { key: 'test_lateral_force_N', type: 'f32', defaultValue: 5 },
+  { key: 'z_limit_pos_mm', type: 'f32', defaultValue: 10 },
+  { key: 'z_limit_neg_mm', type: 'f32', defaultValue: 15 },
+  { key: 'anomaly_skip', type: 'u8', defaultValue: 0 },
+  { key: 'tool_offset_change_tolerance_mm', type: 'f32', defaultValue: 0.5 },

@@ -59,6 +59,9 @@ struct StatusReportPayload
     uint8_t procedure_phase; // Core ProcedurePhase ordinal
     uint8_t fault_reason; // Core FaultReason ordinal
     uint8_t spreader_state; // Core SpreaderState ordinal
+    uint8_t fault_manual; // 0/1 — restricted jog armed while Fault
+    uint16_t abort_reason; // Core AbortReason ordinal (soft procedure abort)
+    uint16_t current_iteration; // ProcedureController TestOrAge cycle index (0-based)
 };
 
 struct ProgramSummaryPayload
@@ -111,8 +114,6 @@ struct MachineConfigPayload
     float spreader_retract_time_s;
     float force_tolerance_N;
     float v_search;
-    float probe_search_distance;
-    float probe_backoff;
     float home_offset_x;
     float home_offset_y;
     float home_offset_z;
@@ -120,25 +121,20 @@ struct MachineConfigPayload
     float tool_offset_y;
     float tool_offset_z;
     float safe_z_buffer;
+    float safe_z_calib_buffer = 30.0f;
     float sample_timeout_s;
     float heartbeat_timeout_s;
     float xy_correct_timeout_s;
-    float head_diameter;
-    float measuring_head_diameter;
-    float measuring_head_thickness;
-    float tool_diameter;
-    float search_depth;
     float approach_distance;
-    float v_search_fine;
-    // Fixed reference used exclusively for legacy tool_offset definition in older builds.
-    // Must never be used as a motion/search target or durable probe position.
-    float probe_offset_reference_x;
-    float probe_offset_reference_y;
-    float probe_offset_reference_z;
-    float tool_cylindrical_height;
-    float probe_xy_search_margin;
+    float probe_v_approach = 10.0f;
+    float probe_wall_force_N = 0.5f;
+    float probe_floor_force_N = 0.5f;
+    float probe_xy_search_limit = 5.0f;
+    float probe_z_search_limit = 20.0f;
+    float probe_z_lift_mm = 2.0f;
+    float probe_bore_timeout_s = 60.0f;
+    uint8_t probe_bore_refine_passes = 0;
     float insert_search_distance;
-    uint16_t num_fine_searches;
     float phase1_v_extract;
     float phase1_v_insert;
     float phase1_a;
@@ -147,22 +143,12 @@ struct MachineConfigPayload
     float phase3_v_insert;
     float phase3_a;
     float phase3_corner;
-    float v_approach_probe;
-    float v_transfer_probe;
-    float a_probe_transfer;
-    float corner_probe_transfer;
-    float a_probe_search;
-    float a_probe_brake;
-    // Mirrored from CalibrationSet on GetMachineConfig (Install reference). Ignored on Set.
     float probe_center_x;
     float probe_center_y;
     float probe_center_z;
-    // Measuring range and watchdog hard limit [N]. Both default to 30.
     float force_range_N = 30.0f;
     float force_hard_limit_N = 30.0f;
-    // Manual jog / hold / calibration acceleration [mm/s^2]. Appended so older fields stay put.
     float a_manual = 500.0f;
-    // Per-axis hard limit and collision limits. The unsuffixed fields above are Z.
     float force_hard_limit_x_N = 30.0f;
     float force_hard_limit_y_N = 30.0f;
     float collision_approach_x_N = 20.0f;
@@ -175,31 +161,44 @@ struct MachineConfigPayload
     float collision_unclamp_y_N = 20.0f;
     float collision_contact_x_N = 30.0f;
     float collision_contact_y_N = 30.0f;
-    float collision_measure_x_N = 30.0f;
-    float collision_measure_y_N = 30.0f;
-    // Appended. Older fields stay put.
+    // Measure / Phase-3 collision as percent of Prüfkraft (historic *_N wire names).
+    float collision_measure_x_N = 150.0f;
+    float collision_measure_y_N = 150.0f;
     float xy_search_limit = 5.0f;
     uint8_t preclamp_confirm = 1;
-    // Wall-to-wall speed. Appended so the earlier fields stay put.
     float v_bore_search = 1.0f;
-    // Extra two-chord refine passes. Appended.
     uint8_t bore_refine_passes = 0;
-    // Plate bore teach (independent of PreClamp). Appended.
-    float v_plate_bore_search = 1.0f;
-    float plate_wall_force_N = 0.5f;
-    float plate_floor_force_N = 0.5f;
-    float plate_xy_search_limit = 5.0f;
-    float plate_z_search_limit = 10.0f;
-    float plate_z_lift_mm = 2.0f;
-    float plate_bore_timeout_s = 60.0f;
-    uint8_t plate_bore_refine_passes = 0;
-    // Appended: anomaly / test envelope (after plate_calib).
     float coord_tolerance_mm = 0.5f;
     float test_lateral_force_N = 5.0f;
     float z_limit_pos_mm = 10.0f;
     float z_limit_neg_mm = 15.0f;
     uint8_t anomaly_skip = 0;
     float tool_offset_change_tolerance_mm = 0.5f;
+    float fault_manual_v_max = 5.0f;
+    float fault_manual_a = 500.0f;
+    float fault_manual_hard_limit_x_N = 50.0f;
+    float fault_manual_hard_limit_y_N = 50.0f;
+    float fault_manual_hard_limit_N = 50.0f;
+    // AfterSeat fixed +Z retract from seat pose [mm]; not program-Z + standoff.
+    float after_seat_retract_mm = 2.0f;
+    // Extra +Z after extract kraftfrei (post-tensile) [mm]; 0 = stop at kraftfrei.
+    float extract_after_free_mm = 0.0f;
+    // Speed for that optional after-free +Z segment [mm/s]; independent of phase3_v_extract.
+    float extract_after_free_v = 1.0f;
+    // Reference homing: fast targeted travel toward home standoff [mm/s].
+    float v_homing_fast = 18.0f;
+    // Distance before derived home where slow endstop seek begins [mm].
+    float homing_approach_distance = 50.0f;
+    // Acceleration for that fast approach only [mm/s²]; 0 = constant velocity.
+    float a_homing_fast = 500.0f;
+    // Kraft-Weg |Δz| sample gate [mm]; 0 = every tick.
+    float force_path_dz_mm = 0.01f;
+    // Finer |Δz| gate during insert near Sollkraft [mm].
+    float force_path_dz_fine_mm = 0.005f;
+    // Enter insert fine phase when Fz >= frac · target_force_N (0…1].
+    float force_near_target_frac = 0.8f;
+    // Insert speed in fine phase [mm/s].
+    float phase3_v_insert_fine = 0.5f;
 };
 
 struct TestConfigurationPayload

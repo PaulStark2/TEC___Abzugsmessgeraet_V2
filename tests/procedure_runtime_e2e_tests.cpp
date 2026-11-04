@@ -138,17 +138,8 @@ static int testPointApproachCoarseThenFine()
         if (ph == ProcedurePhase::InsertInitial || ph == ProcedurePhase::Unclamp ||
             ph == ProcedurePhase::TestOrAge)
         {
-            // Ramp Fz with penetration below contact (sim spring model).
-            const float contact = fine_z;
-            in.force.fz = 5.0f * (contact - machine.z());
-            if (in.force.fz < 0.0f)
-            {
-                in.force.fz = 0.0f;
-            }
-            if (in.force.fz > target_force + 1.0f)
-            {
-                in.force.fz = target_force + 1.0f;
-            }
+            // Compression below contact; Zug then kraftfrei above (matches extract seek).
+            in.force.fz = syntheticProcessFz(machine.z(), fine_z, target_force);
         }
         const TestPoint disc = machine.calibrationSet().probe_center_valid
                                    ? machine.calibrationSet().probe_center
@@ -455,8 +446,15 @@ static int testForceLevelsWithStiffness5()
             MachineConfig wide = machine.machineConfig();
             wide.force.range_N = target;
             wide.force.hard_limit_N = target;
+            wide.force.hard_limit_x_N = target;
+            wide.force.hard_limit_y_N = target;
+            wide.fault_manual.hard_limit_N = target;
+            wide.fault_manual.hard_limit_x_N = target;
+            wide.fault_manual.hard_limit_y_N = target;
             wide.collision.contact_N = target;
-            wide.collision.measure_N = target;
+            wide.collision.measure_N = 150.0f; // percent of Prüfkraft
+            wide.collision.measure_x_N = 150.0f;
+            wide.collision.measure_y_N = 150.0f;
             ConfigValidationError wide_err = ConfigValidationError::Ok;
             if (!machine.trySetMachineConfig(wide, wide_err))
             {
@@ -470,7 +468,9 @@ static int testForceLevelsWithStiffness5()
         MachineConfig mcfg = machine.machineConfig();
         mcfg.force.insert_search_distance = 25.0f; // enough for 50 N at k=5 after unload
         mcfg.collision.contact_N = mcfg.force.range_N;
-        mcfg.collision.measure_N = mcfg.force.range_N;
+        mcfg.collision.measure_N = 150.0f;
+        mcfg.collision.measure_x_N = 150.0f;
+        mcfg.collision.measure_y_N = 150.0f;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
         {

@@ -10,44 +10,51 @@ Machine (MotionPlanner::x/y/z, Status, Kalibrierung)
 Plate (Programmpunkte)
 ```
 
-Achsen sind parallel und gleichsinnig: **+Machine = +Raw = Richtung +Max-Schalter**.
-Der Arbeitsraum liegt daher in **negativen** Maschinenkoordinaten.
+**+Machine = +Raw** auf jeder Achse. Soft-Blocks bleiben isotrop: `limit*Min` blockiert −, `limit*Max` blockiert +.
+
+| Achse | Homing-Schalter | Seek | Arbeitsraum vom Ursprung | Home nach Retract R |
+|-------|-----------------|------|---------------------------|---------------------|
+| **X** | `limitXMin` (physische Homing-Ecke) | **−X** | **+X** | **+R** |
+| **Y** | `limitYMax` | **+Y** | **−Y** | **−R** |
+| **Z** | `limitZMax` | **+Z** | **−Z** | **−R** |
+
+Firmware: `kInvertDir[0]=true`; physischer XP-Pin → `limitXMin`, physischer XN-Pin → `limitXMax`.
 
 | Variable | Frame | Bedeutung |
 |----------|-------|-----------|
 | `rawX/Y/Z` | Raw | Kontinuierliche Open-Loop-Integration; **kein Teleport** |
 | `x/y/z` | Machine | `raw − offset` |
-| `MachineConfig.calibration.home_offset` | Skalar **R** | Nur Retract-Distanz vom +Max-Schalter (0 → 2 mm) |
-| `CalibrationSet.home_offset` | Machine | Abgeleitet: `(-Rx, -Ry, -Rz)` — nicht eingemessen |
-| `machine_coordinate_system_valid` | Flag | MCS wurde einmal definiert (Ursprung an den +Max-Anschlägen) |
+| `MachineConfig.calibration.home_offset` | Skalar **R** | Retract-Distanz vom Homing-Schalter (0 → 2 mm) |
+| `CalibrationSet.home_offset` | Machine | Abgeleitet: `(+Rx, -Ry, -Rz)` — nicht eingemessen |
+| `machine_coordinate_system_valid` | Flag | MCS wurde einmal definiert |
 | `probe_center` / `plate_origin` / `tool_offset` | Machine | Geometrie; unverändert bei normalem `home()` |
 
-**MCS-Ursprung** ist der mechanische +Max-Anschlag: `machine = (0, 0, 0)`.
-**Homingpunkt** ist `(-R, -R, -R)`. Ein Wechsel von R in den Parametern ändert nur den Homingpunkt, nicht das MCS.
+**MCS-Ursprung** je Achse am Homing-Schalter: `machine = 0`.
+**Homingpunkt** ist `(+R, -R, -R)`. Ein Wechsel von R ändert nur den Homingpunkt, nicht das MCS.
 
 ## Drei getrennte Operationen
 
 ### 1. MCS definieren — `defineMachineCoordinateSystem()` / `CmdDefineMcs`
 
-Nur über die GUI-Funktion **„MCS und Bauplatte/Messtaster definieren und kalibrieren“** (oder explizites Protocol).
+Nur über die GUI-Funktion **„MCS und Bauplatte/Einmessbohrung definieren und kalibrieren“** (oder explizites Protocol).
 
 `CmdDefineMcs` ändert nur den **Core**. Die committed `calibration.json` wird erst bei **persistMcs / Commit** ersetzt.
 Abbruch vor Commit: Core wird aus dem committed Store zurückgespielt (`pushCommittedCalibration`).
 
 ```text
-Seek +Max (schnell) bis limit*Max == true
-→ Kriech zurück (−Achse) bis limit*Max == false
-→ Kriech vor (+Achse) bis limit*Max == true   ← steigende Flanke = Schalterbezug
+X: Seek −X bis limitXMin; Y/Z: Seek + bis limit*Max
+→ Kriech vom Schalter weg bis Bit false
+→ Kriech zum Schalter bis Bit true   ← steigende Flanke = Schalterbezug
 → referenceMachinePose: diese Achse machine := 0   (kein Raw-Teleport)
-→ Retract um R nach −R
-→ nach Z/X/Y: home_offset := (-Rx, -Ry, -Rz) aus Config
+→ Retract: X → +R; Y/Z → −R
+→ nach Z/X/Y: home_offset := (+Rx, -Ry, -Rz)
 → machine_coordinate_system_valid = true
 → plate_origin_valid / probe_center_valid = false
 → tool_offset = 0
 ```
 
-Nur das **Endschalter-Bit** — keine Plant-`+max`-Koordinaten.
-Die Kriechgeschwindigkeit ist `max(0.1·v_homing, 0.2 mm/s)`. Der Latch erfolgt an der steigenden Kriech-Flanke; Restfehler ≈ ein Kriechschritt sitzt im `reference_offset`, nicht in den Home-Zahlen.
+Nur das **Endschalter-Bit** — keine Plant-Koordinaten.
+Die Kriechgeschwindigkeit ist `max(0.1·v_homing, 0.2 mm/s)`.
 
 ### 2. Reference Homing — `home()` / `CmdHome`
 
@@ -55,17 +62,31 @@ Die Kriechgeschwindigkeit ist `max(0.1·v_homing, 0.2 mm/s)`. Der Latch erfolgt 
 
 Voraussetzung: `mcs_valid == true`, sonst Rejected.
 
+Wenn in dieser Session schon einmal erfolgreich gehomed wurde (`session_machine_frame_trusted`;
+überlebt Jog und Soft-STOP/`invalidateHoming`, anders als `isHomed` / `HomingState::Homed`):
+
 ```text
-Seek +Max → Stop (raw bleibt)
-→ reference: machine := 0 auf der aktiven Achse
-→ Retract auf (-R, …) aus aktueller Config
+pro Achse Z → X → Y:
+  Schnellanfahrt (v_homing_fast, a_homing_fast) zur Homingpose minus homing_approach_distance
+  → langsame Blind-Suche (v_homing, a_homing) bis Homing-Schalter
+  → reference: machine := 0 auf der aktiven Achse
+  → Retract auf (+R, −R, −R) mit v_homing / a_homing
 → isHomed = true
 ```
 
+Approach-Ziel je Achse: `home_axis − seek_sign · homing_approach_distance`
+(X seek − → Approach bei `+R + d`; Y/Z seek + → Approach bei `−R − d`).
+Bereits auf/jenseits der Approach-Pose → direkt langsame Suche.
+Nach Power-On / nur `CmdRestoreMcs` / Safety-Fault / HomingError → Session-Trust false → Blind-Suche.
+Soft-STOP invalidiert nur den Prozedur-Start (`NeedsHoming`), nicht die Schnellanfahrt.
+`DefineMcs` nutzt die Schnellanfahrt nie.
+
+Defaults: `v_homing_fast = 18 mm/s`, `a_homing_fast = 500 mm/s²`,
+`homing_approach_distance = 50 mm`, `v_homing = 5 mm/s`
+(in den Parametereinstellungen editierbar).
+
 `probe_center`, `plate_origin`, `tool_offset` bleiben unverändert.
 `home_offset` folgt dem aktuellen R (bereits bei `trySetMachineConfig` nachgezogen).
-
-Korrigiert Schrittverlust: Software-Pose wird am realen Schalter wieder an MCS-Ursprung 0 gebunden.
 
 ### 3. Restore nach Neustart — `restoreMachineCoordinateSystem()` / `CmdRestoreMcs`
 
@@ -78,19 +99,18 @@ Das Wire-Payload xyz wird **nicht** als Ursprung verwendet; Home wird aus dem ak
 Host speichert in `calibration.json`:
 
 - `machineCoordinateSystem.valid`
-- `machineCoordinateSystem.origin = "positiveMaxSwitches"`
-- `machineCoordinateSystem.homePosition` (abgeleitetes Snapshot `(-R,-R,-R)`, nicht die MCS-Definition)
+- `machineCoordinateSystem.origin = "xMinHomeYzMaxHome"`
+- `machineCoordinateSystem.homePosition` (Snapshot `(+R,-R,-R)`, nicht die MCS-Definition)
 - plate / probe / tool (+ Valid-Flags)
 
 Connect-Reihenfolge: Restore MCS → ggf. Plate/Probe push.
 
-Legacy-Dateien ohne `origin` (Identity-MCS, Home ≈ Plant-Max − R) → `mcs_valid = false`. MCS und Geometrie müssen neu kalibriert werden.
+Legacy ohne `origin`, Identity-MCS oder `origin = "positiveMaxSwitches"` → `mcs_valid = false`. MCS und Geometrie neu kalibrieren.
 
 ## Simulation
 
 - Gantry-TCP / Plant: **raw** (kontinuierlich, kein Teleport am Schalter).
-- Statuszahlen: **Machine** (Home ≈ −2, Anschlag ≈ 0). Der Zahlensprung am Latch ist die Frame-Definition.
-- Overlay (Home/Plate/Probe/Bahn): Machine + `reference_offset` → Raw-Szene.
-- Plant-Limits gegen raw → nur **`limit*Max` Bits** an den Core (keine numerische +Max-Ebene).
+- Statuszahlen: **Machine** (Home ≈ `(+2,-2,-2)`; X-Anschlag ≈ 0, Y/Z-Anschlag ≈ 0).
+- Overlay: Machine + `reference_offset` → Raw-Szene.
+- Plant: `limitXMin` bei `raw <= x_min` (X-Homing); `limit*Max` bei Y/Z-Homing.
 - StatusFlag `McsValid` (Bit 6).
-- DefineMcs-Kriechsuche reagiert ausschließlich auf diese Bits.

@@ -12,6 +12,7 @@ import { collectOverlayLabels } from '/js/sim/overlayLabels.js';
 import { homeMarkerPose } from '/js/sim/homeMarker.js';
 import { latchWorkspaceReferenceOffset, pickWorkspaceReferenceOffset } from '/js/sim/workspaceReferenceOffset.js';
 import {
+  DEFAULT_PHYSICAL_GEOMETRY,
   physicalGeometryFromMachineConfig,
   plantProbeDiscCenterOnly,
   probeVisualFromSources,
@@ -393,7 +394,7 @@ function updateSafeZNote(plannedVertices) {
   }
   const probePart =
     resolved.probeZPlate !== null && Number.isFinite(resolved.probeZPlate)
-      ? `Messtaster (Bauplatte): ${resolved.probeZPlate.toFixed(2)} mm · `
+      ? `Einmessbohrung (Bauplatte): ${resolved.probeZPlate.toFixed(2)} mm · `
       : '';
   let text =
     `Höchster Prüfpunkt: ${resolved.maxPointZ.toFixed(2)} mm · ` +
@@ -920,7 +921,7 @@ function bindPanel() {
   el('btn-probe-trigger').addEventListener('click', () => {
     runPlantAction(
       () => triggerPlantProbe(PROBE_PULSE_MS),
-      `Messtaster-Impuls gesendet (${PROBE_PULSE_MS} ms)`
+      `Einmessbohrung-Impuls gesendet (${PROBE_PULSE_MS} ms)`
     );
   });
 
@@ -984,10 +985,9 @@ function bindPanel() {
 
   el('btn-apply-geometry').addEventListener('click', () => {
     const geo = readGeometryInputs();
-    if (machineConfigSnapshot) {
-      geo.toolDiameter = Number(machineConfigSnapshot.tool_diameter) || 2.5;
-      geo.toolCylindricalHeight = Number(machineConfigSnapshot.tool_cylindrical_height) || 15;
-    }
+    // Tool visuals are plant-owned defaults (MachineConfig no longer has disc/tool sizes).
+    geo.toolDiameter = DEFAULT_PHYSICAL_GEOMETRY.toolDiameter;
+    geo.toolCylindricalHeight = DEFAULT_PHYSICAL_GEOMETRY.toolCylindricalHeight;
     gantry.setGeometry(geo);
     setPlantFeedback('Darstellungsgeometrie aktualisiert', false);
   });

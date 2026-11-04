@@ -7,7 +7,9 @@ const { WebSocketServer } = require('ws');
 const { createMachineClient } = require('./machineClient');
 const { validateTestProgram } = require('./program/validateTestProgram');
 const programStore = require('./program/programStore');
+const programFiles = require('./program/programFiles');
 const selectionStore = require('./program/selectionStore');
+const { toPlatePoint } = require('./coord/coordinateTransform');
 const resultsStore = require('./results/resultsStore');
 const procedureStore = require('./procedure/procedureStore');
 const { createProcedureService } = require('./procedure/procedureService');
@@ -26,10 +28,19 @@ const { MCS_REQUIRED_MESSAGE } = require('./config/mcsMessages');
 const forcePathStore = require('./results/forcePathStore');
 const { plantProbeDiscCenterOnly } = require('./coord/physicalGeometry');
 const simPlantStore = require('./config/simPlantStore');
+const messageStore = require('./messages/messageStore');
+const { ingestStatus } = require('./messages/statusIngest');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-const THREE_DIR = path.join(__dirname, '..', 'node_modules', 'three');
+const NODE_MODULES_DIR = path.join(__dirname, '..', 'node_modules');
+/** Offline vendor packages served under /vendor/<name>/ (no CDN). */
+const VENDOR_PACKAGE_ROOTS = Object.freeze({
+  three: path.join(NODE_MODULES_DIR, 'three'),
+  'chart.js': path.join(NODE_MODULES_DIR, 'chart.js'),
+  'chartjs-plugin-zoom': path.join(NODE_MODULES_DIR, 'chartjs-plugin-zoom'),
+  hammerjs: path.join(NODE_MODULES_DIR, 'hammerjs'),
+});
 const STATUS_HZ = 5;
 const STATUS_INTERVAL_MS = 1000 / STATUS_HZ;
 const TICK_HZ = 20;
@@ -58,17 +69,30 @@ function isPathInside(rootDir, candidate) {
   return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+function resolveVendorPackagePath(decoded) {
+  if (!decoded.startsWith('/vendor/')) {
+    return null;
+  }
+  const after = decoded.slice('/vendor/'.length);
+  for (const [name, root] of Object.entries(VENDOR_PACKAGE_ROOTS)) {
+    if (after === name || after.startsWith(`${name}/`)) {
+      const relative = after === name ? '/' : after.slice(name.length);
+      const absolute = path.normalize(path.join(root, relative));
+      if (!isPathInside(root, absolute) && absolute !== root) {
+        return null;
+      }
+      return absolute;
+    }
+  }
+  return null;
+}
+
 function resolvePublicPath(urlPath) {
   const decoded = decodeURIComponent(urlPath.split('?')[0]);
 
-  // Serve local npm three package offline (no CDN) under /vendor/three/
-  if (decoded === '/vendor/three' || decoded.startsWith('/vendor/three/')) {
-    const relative = decoded === '/vendor/three' ? '/' : decoded.slice('/vendor/three'.length);
-    const absolute = path.normalize(path.join(THREE_DIR, relative));
-    if (!isPathInside(THREE_DIR, absolute) && absolute !== THREE_DIR) {
-      return null;
-    }
-    return absolute;
+  const vendorPath = resolveVendorPackagePath(decoded);
+  if (vendorPath) {
+    return vendorPath;
   }
 
   // M15: /simulation is a standalone page, not a hash route of the machine HMI.
@@ -312,6 +336,29 @@ async function handleCommand(body) {
       }
       result = await machineClient.clearFault();
       break;
+    case 'enableFaultManual':
+      if (typeof machineClient.enableFaultManual !== 'function') {
+        return { ok: false, error: 'enableFaultManual not supported by client' };
+      }
+      result = await machineClient.enableFaultManual();
+      break;
+    case 'setTestConfiguration':
+      if (typeof machineClient.setTestConfiguration !== 'function') {
+        return { ok: false, error: 'setTestConfiguration not supported by client' };
+      }
+      result = await machineClient.setTestConfiguration({
+        mode: body.mode === 'aging' || body.mode === 1 ? 1 : 0,
+        target_force_N: Number(body.target_force_N ?? body.insertionForce),
+        iterations: Math.trunc(Number(body.iterations)),
+        active_point_index: Math.trunc(Number(body.active_point_index ?? 0)),
+      });
+      break;
+    case 'startTestOrAge':
+      if (typeof machineClient.startTestOrAge !== 'function') {
+        return { ok: false, error: 'startTestOrAge not supported by client' };
+      }
+      result = await machineClient.startTestOrAge();
+      break;
     default:
       return { ok: false, error: `Unknown command: ${command}` };
   }
@@ -332,6 +379,16 @@ async function handleCommand(body) {
         (result.error ? ` error=${result.error}` : '') +
         (result.status ? ` pose=(${result.status.x},${result.status.y},${result.status.z})` : '')
     );
+    if (result.ok === false && result.error) {
+      messageStore.record({
+        severity: 'error',
+        code: 'Gui.CommandRejected',
+        title: `Befehl abgelehnt: ${command}`,
+        detail: String(result.error),
+        source: 'gui',
+        context: { command },
+      });
+    }
   }
   return result;
 }
@@ -505,6 +562,88 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === 'GET' && urlPath === '/api/program/files') {
+    sendJson(res, 200, { ok: true, files: programFiles.listPrograms() });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/program/teach') {
+    try {
+      const body = await readJsonBody(req);
+      const calib = calibrationStore.load();
+      if (!calib.plateOriginValid || !calib.plateOrigin) {
+        sendJson(res, 400, {
+          ok: false,
+          error: 'Bauplatte nicht kalibriert — Prüfpunkt-Teach braucht gültigen plateOrigin.',
+        });
+        return;
+      }
+      const status = typeof machineClient.getStatus === 'function' ? machineClient.getStatus() : {};
+      const tcp = {
+        x: Number(status.x),
+        y: Number(status.y),
+        z: Number(status.z),
+      };
+      if (![tcp.x, tcp.y, tcp.z].every(Number.isFinite)) {
+        sendJson(res, 400, { ok: false, error: 'Aktuelle TCP-Position ist ungültig' });
+        return;
+      }
+      const plate = toPlatePoint(calib, tcp);
+      if (!plate) {
+        sendJson(res, 400, { ok: false, error: 'Transformation Machine→Plate fehlgeschlagen' });
+        return;
+      }
+      const result = programFiles.teachPoint({
+        mode: body.mode,
+        fileName: body.fileName,
+        programName: body.programName,
+        pointName: body.pointName,
+        plate,
+      });
+      if (!result.ok) {
+        sendJson(res, 400, result);
+        return;
+      }
+      sendJson(res, 200, {
+        ok: true,
+        mode: result.mode,
+        fileName: result.fileName,
+        point: result.point,
+        plate,
+        machine: tcp,
+        program: result.program,
+        summary: buildSummaryFromProgram(result.program),
+      });
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
+  const loadFileMatch = urlPath.match(/^\/api\/program\/files\/([^/]+)\/load$/);
+  if (req.method === 'POST' && loadFileMatch) {
+    let fileName;
+    try {
+      fileName = decodeURIComponent(loadFileMatch[1]);
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Ungültiger Dateiname' });
+      return;
+    }
+    const loaded = programFiles.readProgram(fileName);
+    if (!loaded.ok) {
+      sendJson(res, 400, loaded);
+      return;
+    }
+    programStore.setProgram(loaded.program);
+    selectionStore.clear();
+    sendJson(res, 200, {
+      ok: true,
+      fileName: loaded.fileName,
+      summary: buildSummaryFromProgram(loaded.program),
+    });
+    return;
+  }
+
   if (req.method === 'GET' && urlPath === '/api/program/current') {
     const current = programStore.getProgram();
     if (!current) {
@@ -589,6 +728,65 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && urlPath === '/api/messages') {
+    const u = new URL(req.url || '/', 'http://localhost');
+    const activeOnly = u.searchParams.get('active') === '1';
+    const limit = Number(u.searchParams.get('limit') || 200);
+    sendJson(res, 200, {
+      ok: true,
+      messages: messageStore.list({ activeOnly, limit }),
+      summary: messageStore.getSummary(),
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath.startsWith('/api/messages/')) {
+    const id = decodeURIComponent(urlPath.slice('/api/messages/'.length));
+    if (!id || id.includes('/')) {
+      sendJson(res, 400, { ok: false, error: 'Invalid id' });
+      return;
+    }
+    const row = messageStore.getById(id);
+    if (!row) {
+      sendJson(res, 404, { ok: false, error: 'Not found' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, message: row });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/messages') {
+    try {
+      const body = await readJsonBody(req);
+      const row = messageStore.record(body || {});
+      sendJson(res, 200, { ok: true, message: row, summary: messageStore.getSummary() });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: err.message || String(err) });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/messages/ack') {
+    try {
+      const body = await readJsonBody(req);
+      const row = messageStore.ack(body && body.id);
+      if (!row) {
+        sendJson(res, 404, { ok: false, error: 'Not found' });
+        return;
+      }
+      sendJson(res, 200, { ok: true, message: row, summary: messageStore.getSummary() });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: err.message || String(err) });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/messages/ack-all') {
+    const count = messageStore.ackAll();
+    sendJson(res, 200, { ok: true, count, summary: messageStore.getSummary() });
+    return;
+  }
+
   if (req.method === 'GET' && urlPath === '/api/machine') {
     const status = machineClient.getStatus();
     sendJson(res, 200, {
@@ -661,13 +859,95 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && urlPath === '/api/procedure/reset-ui') {
+    const result = procedureService.resetUi();
+    broadcastStatus();
+    sendJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/results/demo') {
+    // Offline GUI check only. Disable on the Pi with ALLOW_RESULTS_DEMO=0.
+    if (process.env.ALLOW_RESULTS_DEMO === '0') {
+      sendJson(res, 403, {
+        ok: false,
+        error: 'Demo-Testdaten sind deaktiviert (ALLOW_RESULTS_DEMO=0).',
+      });
+      return;
+    }
+    const { buildDemoResults } = require('./results/demoForcePathFixture');
+    const demo = buildDemoResults();
+    resultsStore.pushResults(demo);
+    sendJson(res, 200, { ok: true, results: demo });
+    return;
+  }
+
+  if (req.method === 'DELETE' && urlPath === '/api/results/current') {
+    resultsStore.clear();
+    forcePathStore.clear();
+    sendJson(res, 200, { ok: true, cleared: true });
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/results/history') {
+    const history = resultsStore.getHistory();
+    sendJson(res, 200, {
+      ok: true,
+      history: history.map((run, index) => ({
+        index,
+        completedAt: run.completedAt || run.finishedAt || null,
+        outcome: run.outcome || run.processState || null,
+        mode: (run.params && run.params.mode) || run.mode || null,
+        programName: run.programName || null,
+        dataCompleteness: run.dataCompleteness || null,
+        pointCount:
+          (run.analysis && run.analysis.points && run.analysis.points.length) ||
+          (Array.isArray(run.rows) ? run.rows.length : 0) ||
+          0,
+      })),
+    });
+    return;
+  }
+
   if (req.method === 'GET' && urlPath === '/api/results/current') {
-    const current = resultsStore.getResults();
+    const resultsUrl = new URL(req.url || '/', 'http://localhost');
+    const q = resultsUrl.searchParams.get('index');
+    const current =
+      q !== null && q !== undefined && q !== ''
+        ? resultsStore.getByIndex(q)
+        : resultsStore.getResults();
     if (!current) {
       sendJson(res, 404, { ok: false, error: 'No results available' });
       return;
     }
-    sendJson(res, 200, { ok: true, results: current });
+    // Re-run analysis on read so direction labels (Druck/Zug) pick up classifier fixes
+    // without requiring a new procedure run.
+    const { analyzeForcePaths } = require('./results/forcePathAnalysis');
+    const pointNames = {};
+    for (const p of (current.analysis && current.analysis.points) || []) {
+      pointNames[p.pointIndex] = p.name;
+    }
+    const rawCurves =
+      (current.analysis && current.analysis.curves) ||
+      current.curves ||
+      [];
+    // Prefer wire-tagged samples (wireLeg) when present so reclassification can correct swaps.
+    const curvesForAnalysis = rawCurves.map((c) => ({
+      ...c,
+      leg: c.wireLeg != null ? c.wireLeg : c.leg,
+    }));
+    const analysis = analyzeForcePaths(curvesForAnalysis, {
+      programName: current.programName,
+      pointNames,
+    });
+    sendJson(res, 200, {
+      ok: true,
+      results: {
+        ...current,
+        analysis,
+        curves: analysis.curves,
+      },
+    });
     return;
   }
 
@@ -899,7 +1179,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, {
           ok: false,
           error:
-            'Kein gültiges Maschinenkoordinatensystem. Bitte zuerst MCS und Bauplatte/Messtaster definieren und kalibrieren.',
+            'Kein gültiges Maschinenkoordinatensystem. Bitte zuerst MCS und Bauplatte/Einmessbohrung definieren und kalibrieren.',
         });
         return;
       }
@@ -945,6 +1225,29 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && urlPath === '/api/calibration/approach-point') {
+    try {
+      const body = await readJsonBody(req);
+      const pointId = Number(body.pointId);
+      if (!Number.isInteger(pointId) || pointId < 1 || pointId > 5) {
+        sendJson(res, 400, {
+          ok: false,
+          error: 'pointId must be 1 (KM), 2 (K1), 3 (K2), 4 (K3) or 5 (probe)',
+        });
+        return;
+      }
+      if (typeof machineClient.approachCalibPoint !== 'function') {
+        sendJson(res, 400, { ok: false, error: 'Kalibrierpunkt-Anfahrt ist auf diesem Backend nicht verfügbar' });
+        return;
+      }
+      const result = await machineClient.approachCalibPoint(pointId);
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Invalid JSON body' });
+    }
+    return;
+  }
+
   if (req.method === 'POST' && urlPath === '/api/calibration/plate-yaw') {
     try {
       const body = await readJsonBody(req);
@@ -975,6 +1278,13 @@ const server = http.createServer(async (req, res) => {
       let calibration = calibrationStore.setPlateYaw(yawRad);
       if (body.k1 && body.k2 && body.k3) {
         calibration = calibrationStore.setRotationPoints(body.k1, body.k2, body.k3, yawRad);
+        if (typeof machineClient.setRotationPoints === 'function' && status.connected) {
+          const rot = await machineClient.setRotationPoints(body.k1, body.k2, body.k3);
+          if (!rot.ok) {
+            sendJson(res, 400, { ok: false, error: rot.error || 'CmdSetRotationPoints failed' });
+            return;
+          }
+        }
       }
       sendJson(res, 200, { ok: true, calibration });
     } catch (err) {
@@ -1193,7 +1503,7 @@ const server = http.createServer(async (req, res) => {
       if (Object.keys(disc).length === 0) {
         sendJson(res, 400, {
           ok: false,
-          error: 'No probe disc position provided (x/y/z). Physical geometry is MachineConfig-only.',
+          error: 'No probe disc position provided (x/y/z). Disc size visuals are plant-owned defaults.',
         });
         return;
       }
@@ -1304,13 +1614,20 @@ function buildStatusMessage() {
   const status = machineClient.getStatus();
   const mode = machineClient.machineClientMode || process.env.MACHINE_CLIENT || 'mock';
   const implementation = machineClient.implementationName || 'Unknown';
-  return JSON.stringify({
+  const envelope = {
     type: 'status',
     ...status,
     machineClientMode: mode,
     implementation,
     hasTick: typeof machineClient.tick === 'function',
-  });
+    messageSummary: messageStore.getSummary(),
+  };
+  try {
+    ingestStatus(envelope);
+  } catch (err) {
+    console.error('[messages] ingestStatus failed', err && err.message ? err.message : err);
+  }
+  return JSON.stringify(envelope);
 }
 
 function broadcastStatus() {
@@ -1322,8 +1639,31 @@ function broadcastStatus() {
   }
 }
 
+function broadcastMessageEvent(evt) {
+  const payload = JSON.stringify({
+    type: 'message_event',
+    ...evt,
+    summary: (evt && evt.summary) || messageStore.getSummary(),
+  });
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
+      client.send(payload);
+    }
+  }
+}
+
+messageStore.setOnChange((evt) => {
+  broadcastMessageEvent(evt);
+});
+
 wss.on('connection', (socket) => {
   socket.send(buildStatusMessage());
+  socket.send(
+    JSON.stringify({
+      type: 'message_event',
+      summary: messageStore.getSummary(),
+    })
+  );
 });
 
 setInterval(() => {
@@ -1333,6 +1673,16 @@ setInterval(() => {
 }, TICK_INTERVAL_MS);
 
 setInterval(broadcastStatus, STATUS_INTERVAL_MS);
+
+// Prune message history older than 7 days (hourly).
+messageStore.pruneNow();
+setInterval(() => {
+  try {
+    messageStore.pruneNow();
+  } catch (err) {
+    console.error('[messages] prune failed', err && err.message ? err.message : err);
+  }
+}, 60 * 60 * 1000);
 
 server.on('error', (err) => {
   if (err && err.code === 'EADDRINUSE') {

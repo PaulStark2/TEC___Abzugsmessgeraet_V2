@@ -225,12 +225,6 @@ add_executable(probe_geometry_tests
 target_link_libraries(probe_geometry_tests PRIVATE core)
 add_test(NAME probe_geometry_tests COMMAND probe_geometry_tests)
 
-add_executable(probe_search_tests
-    probe_search_tests.cpp
-)
-target_link_libraries(probe_search_tests PRIVATE core)
-add_test(NAME probe_search_tests COMMAND probe_search_tests)
-
 add_executable(probe_calibration_tests
     probe_calibration_tests.cpp
 )
@@ -260,6 +254,18 @@ add_executable(procedure_insert_tests
 )
 target_link_libraries(procedure_insert_tests PRIVATE core)
 add_test(NAME procedure_insert_tests COMMAND procedure_insert_tests)
+
+add_executable(procedure_testorage_manual_tests
+    procedure_testorage_manual_tests.cpp
+)
+target_link_libraries(procedure_testorage_manual_tests PRIVATE core)
+add_test(NAME procedure_testorage_manual_tests COMMAND procedure_testorage_manual_tests)
+
+add_executable(procedure_extract_seek_tests
+    procedure_extract_seek_tests.cpp
+)
+target_link_libraries(procedure_extract_seek_tests PRIVATE core)
+add_test(NAME procedure_extract_seek_tests COMMAND procedure_extract_seek_tests)
 
 add_executable(safe_z_tests
     safe_z_tests.cpp
@@ -331,17 +337,6 @@ add_executable(coord_frame_diagnose
     coord_frame_diagnose.cpp
 )
 target_link_libraries(coord_frame_diagnose PRIVATE simulation_bridge)
-
-add_executable(m19_frame_diagnose
-    m19_frame_diagnose.cpp
-)
-target_link_libraries(m19_frame_diagnose PRIVATE simulation_bridge)
-
-add_executable(m19_trigger_frame_tests
-    m19_trigger_frame_tests.cpp
-)
-target_link_libraries(m19_trigger_frame_tests PRIVATE simulation_bridge)
-add_test(NAME m19_trigger_frame_tests COMMAND m19_trigger_frame_tests)
 
 add_executable(procedure_start_homing_regression_tests
     procedure_start_homing_regression_tests.cpp

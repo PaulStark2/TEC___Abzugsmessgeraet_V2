@@ -5,7 +5,12 @@
  * Does not stop/abort running processes.
  */
 
-const M19_PHASES = new Set(['ProbeCalibrate', 'WaitPlateCalibration']);
+const M19_PHASES = new Set([
+  'ProbeCalibrate',
+  'WaitPlateCalibration',
+  'PlateBoreSearch',
+  'CalibApproach',
+]);
 
 const PROCEDURE_PHASES = new Set([
   'Homing',
@@ -26,20 +31,22 @@ const PROCEDURE_PHASES = new Set([
 const PHASE_LABELS_DE = Object.freeze({
   Idle: 'Bereit',
   Homing: 'Homing',
-  MoveSafePose: 'Sichere Pose anfahren',
-  ProbeApproach: 'Messtaster anfahren',
-  ProbeCalibrate: 'Messtaster kalibrieren',
+  MoveSafePose: 'Zur sicheren Pose',
+  ProbeApproach: 'Einmessbohrung anfahren',
+  ProbeCalibrate: 'Einmessbohrung kalibrieren',
   WaitPlateCalibration: 'Warte auf Bauplatten-Kalibrierung',
   PointApproach: 'Prüfpunkt anfahren',
-  PreClampXyCorrect: 'Vor dem Klemmen (XY)',
-  Clamp: 'Klemmen',
-  InsertInitial: 'Einführen',
-  ProbeRemeasure: 'Nachmessen',
+  PreClampXyCorrect: 'Bohrung zentrieren',
+  Clamp: 'Spreizer aktivieren',
+  InsertInitial: 'Initiales Eingliedern auf Prüfkraft',
+  ProbeRemeasure: 'Versatz prüfen',
   TestOrAge: 'Prüfen / Altern',
-  Unclamp: 'Öffnen',
+  Unclamp: 'Spreizer deaktivieren',
   NextPoint: 'Nächster Punkt',
-  MoveSafeEnd: 'Sichere Endpose',
-  ForceTare: 'Ruheprobe',
+  MoveSafeEnd: 'Zur Endpose',
+  ForceTare: 'Zurücksetzen und Ruheprobe',
+  PlateBoreSearch: 'Bauplatten-Bohrung suchen',
+  CalibApproach: 'Kalibrierpunkt anfahren',
   Completed: 'Abgeschlossen',
   Aborted: 'Abgebrochen',
 });
@@ -93,7 +100,7 @@ function describeRunningCoreProcess(procedurePhase) {
       processLabel: 'Kalibrierung läuft',
       phaseLabel,
       startBlockedMessage:
-        'Die Messtaster-Kalibrierung läuft noch. Die Prüfprozedur kann erst gestartet werden, wenn die Kalibrierung abgeschlossen ist.',
+        'Die Einmessbohrung-Kalibrierung läuft noch. Die Prüfprozedur kann erst gestartet werden, wenn die Kalibrierung abgeschlossen ist.',
     };
   }
 

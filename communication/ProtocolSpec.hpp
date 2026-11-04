@@ -28,21 +28,22 @@ constexpr std::size_t kManualSpeedPayloadWireSize = 4; // 1 x float32 mm/s
 constexpr std::size_t kBoolPayloadWireSize = 1;
 constexpr std::size_t kAckPayloadWireSize = 2;
 constexpr std::size_t kNackPayloadWireSize = 3;
-constexpr std::size_t kStatusReportPayloadWireSize = 41;
+constexpr std::size_t kStatusReportPayloadWireSize = 46; // + abort_reason u16 + current_iteration u16
 constexpr std::size_t kProgramSummaryPayloadWireSize = 26;
 constexpr std::size_t kLoadProgramMaxPointCount = 32;
 constexpr std::size_t kLoadProgramMaxPayloadWireSize =
     1 + kLoadProgramMaxPointCount * kMoveToPayloadWireSize; // 385
-// 395-byte layout minus Phase-2 correction/motion fields (30 bytes) plus anomaly
-// fields after plate_calib (5×f32 + 1×u8 = 21) → 386.
-constexpr std::size_t kMachineConfigPayloadWireSize = 386;
+// Bore-based probe/plate teach (plate_calib removed) + safe_z_calib_buffer + fault_manual.
+constexpr std::size_t kMachineConfigPayloadWireSize = 372; // + force_path_dz / fine insert
 constexpr std::size_t kProcedureDecisionPayloadWireSize = 1; // action u8
 // type u8 + point u8 + iter u16 + 5×f32 + skip u8 + confirm u8 = 26
 constexpr std::size_t kProcedureAnomalyPayloadWireSize = 26;
 constexpr std::size_t kTestConfigurationPayloadWireSize = 8; // mode u8 + force f32 + iterations u16 + index u8
 constexpr std::size_t kPlateOriginPayloadWireSize = kMoveToPayloadWireSize;
 constexpr std::size_t kPlateYawPayloadWireSize = 4; // float32
-constexpr std::size_t kPlateBorePointIdWireSize = 1; // u8
+constexpr std::size_t kPlateBorePointIdWireSize = 1; // u8 point_id 1–4
+constexpr std::size_t kCalibPointIdWireSize = 1; // u8: 1=KM … 4=K3, 5=probe
+constexpr std::size_t kRotationPointsPayloadWireSize = 36; // 3×(x,y,z) float32
 constexpr std::size_t kForcePathChunkMaxSamples = 32;
 // point u8 + iter u16 + seq u32 + count u8 + dropped u32 + leg u8
 constexpr std::size_t kForcePathChunkHeaderWireSize = 13;

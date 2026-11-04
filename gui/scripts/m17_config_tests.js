@@ -21,10 +21,16 @@ function run() {
   assert.strictEqual(cfg.a_manual, 500);
   assert.strictEqual(cfg.corner_testpoints, 0);
   assert.strictEqual(cfg.a_homing, 0);
-  assert.strictEqual(cfg.v_search, 2);
-  assert.strictEqual(cfg.v_search_fine, 1);
-  assert.strictEqual(cfg.v_approach_probe, 10);
-  assert.strictEqual(cfg.a_probe_brake, 500);
+  assert.strictEqual(cfg.v_search, 1);
+  assert.strictEqual(cfg.probe_v_approach, 10);
+  assert.strictEqual(cfg.probe_wall_force_N, 0.5);
+  assert.strictEqual(cfg.probe_floor_force_N, 0.5);
+  assert.strictEqual(cfg.probe_xy_search_limit, 5);
+  assert.strictEqual(cfg.probe_z_search_limit, 20);
+  assert.strictEqual(cfg.probe_z_lift_mm, 2);
+  assert.strictEqual(cfg.probe_bore_timeout_s, 60);
+  assert.strictEqual(cfg.probe_bore_refine_passes, 0);
+  assert.strictEqual(cfg.approach_distance, 15);
   assert.strictEqual(cfg.phase1_a, 0);
   assert.strictEqual(cfg.phase3_corner, 0);
   assert.strictEqual(cfg.coord_tolerance_mm, 0.5);
@@ -33,11 +39,7 @@ function run() {
   assert.strictEqual(cfg.safe_z_buffer, 30);
   assert.strictEqual(cfg.jog_min_step_mm, 0.1);
   assert.strictEqual(cfg.heartbeat_timeout_s, 0.3);
-  assert.strictEqual(cfg.measuring_head_diameter, 8);
-  assert.strictEqual(cfg.tool_cylindrical_height, 15);
-  assert.strictEqual(cfg.probe_xy_search_margin, 2);
   assert.strictEqual(cfg.insert_search_distance, 10);
-  assert.strictEqual(cfg.num_fine_searches, 1);
   // Still in the M12 frame / defaults, but not shown in the parameter mask.
   const wireOnly = new Set(['xy_correction_step', 'xy_max_correction']);
   const keys = new Set(GROUPS.flatMap((g) => g.fields.map((f) => f.key)));
@@ -78,15 +80,23 @@ function run() {
     v_measure: 0.8,
     acceleration: 12,
     probe_search_speed: 3,
+    v_approach_probe: 12,
     fine_search_speed: 0.5,
+    measuring_head_diameter: 8,
+    probe_backoff: 1,
   });
   assert.strictEqual(migrated.v_approach_testpoints, 8);
   assert.strictEqual(migrated.v_fine_testpoints, 1.5);
   assert.strictEqual(migrated.v_unclamp, 0.8);
   assert.strictEqual(migrated.a_testpoints, 12);
   assert.strictEqual(migrated.v_search, 3);
-  assert.strictEqual(migrated.v_search_fine, 0.5);
+  assert.strictEqual(migrated.probe_v_approach, 12);
   assert.strictEqual(migrated.v_approach, undefined);
+  assert.strictEqual(migrated.v_approach_probe, undefined);
+  assert.strictEqual(migrated.fine_search_speed, undefined);
+  assert.strictEqual(migrated.v_search_fine, undefined);
+  assert.strictEqual(migrated.measuring_head_diameter, undefined);
+  assert.strictEqual(migrated.probe_backoff, undefined);
 
   const inconsistent = {
     ...cfg,

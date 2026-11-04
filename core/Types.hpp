@@ -124,7 +124,9 @@ enum class ProcedurePhase : uint8_t
     // Rest sample before the next process phase. Appended so older ordinals stay put.
     ForceTare = 17,
     // Standalone plate bore search (KM / K1–K3 teach). Appended.
-    PlateBoreSearch = 18
+    PlateBoreSearch = 18,
+    // Teach Anfahrt of a stored calib pose (KM/K1–K3/probe) via Safe-Z-Calib.
+    CalibApproach = 19
 };
 
 // Latched reason for MachineState::Fault (M18). None when not in Fault.
@@ -139,8 +141,8 @@ enum class FaultReason : uint8_t
     ForceStale = 6,
     CommunicationTimeout = 7,
     ProcedureAbort = 8,
-    ProbeSearchNoContact = 9,
-    // Early Messtaster contact during ProbeApproach coarse Z (stored center too low / wrong).
+    ProbeSearchNoContact = 9, // Einmess-Bohrung: timeout / wall / floor not found
+    // Legacy ordinal; no longer latched (Messtaster removed). Kept for wire stability.
     ProbeApproachContact = 10
 };
 

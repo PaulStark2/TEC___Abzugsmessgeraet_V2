@@ -12,7 +12,36 @@ const LEGACY_KEY_RENAMES = [
   ['v_measure', 'v_unclamp'],
   ['acceleration', 'a_testpoints'],
   ['probe_search_speed', 'v_search'],
-  ['fine_search_speed', 'v_search_fine'],
+  ['v_approach_probe', 'probe_v_approach'],
+];
+
+/** Removed Messtaster / disc-geometry keys (bore-based Einmessen). */
+const LEGACY_PROBE_KEYS_DROP = [
+  'v_transfer_probe',
+  'v_search_fine',
+  'a_probe_transfer',
+  'corner_probe_transfer',
+  'a_probe_search',
+  'a_probe_brake',
+  'probe_search_distance',
+  'probe_backoff',
+  'search_depth',
+  'num_fine_searches',
+  'probe_circle_fit_tol_mm',
+  'probe_contact_force_N',
+  'head_diameter',
+  'measuring_head_diameter',
+  'measuring_head_thickness',
+  'tool_diameter',
+  'tool_cylindrical_height',
+  'probe_xy_search_margin',
+  'probe_offset_reference_x',
+  'probe_offset_reference_y',
+  'probe_offset_reference_z',
+  'nominal_probe_x',
+  'nominal_probe_y',
+  'nominal_probe_z',
+  'fine_search_speed',
 ];
 
 function ensureDir() {
@@ -29,19 +58,6 @@ function migrateLegacyKeys(parsed) {
   if (!parsed || typeof parsed !== 'object') {
     return parsed;
   }
-  // Migration: nominal_probe_* -> probe_offset_reference_*
-  if (parsed.nominal_probe_x !== undefined) {
-    parsed.probe_offset_reference_x = parsed.probe_offset_reference_x ?? parsed.nominal_probe_x;
-    delete parsed.nominal_probe_x;
-  }
-  if (parsed.nominal_probe_y !== undefined) {
-    parsed.probe_offset_reference_y = parsed.probe_offset_reference_y ?? parsed.nominal_probe_y;
-    delete parsed.nominal_probe_y;
-  }
-  if (parsed.nominal_probe_z !== undefined) {
-    parsed.probe_offset_reference_z = parsed.probe_offset_reference_z ?? parsed.nominal_probe_z;
-    delete parsed.nominal_probe_z;
-  }
   // Legacy absolute machine-frame safe_z is replaced by safe_z_buffer (plate-relative).
   if (Object.prototype.hasOwnProperty.call(parsed, 'safe_z')) {
     delete parsed.safe_z;
@@ -52,6 +68,11 @@ function migrateLegacyKeys(parsed) {
         parsed[newKey] = parsed[oldKey];
       }
       delete parsed[oldKey];
+    }
+  }
+  for (const key of LEGACY_PROBE_KEYS_DROP) {
+    if (Object.prototype.hasOwnProperty.call(parsed, key)) {
+      delete parsed[key];
     }
   }
   return parsed;
@@ -112,11 +133,35 @@ function migratePerAxisLimits(parsed) {
   return changed;
 }
 
+/**
+ * Older configs stored collision_measure_* as absolute Newton (typically ≤ range_N ≤ 100).
+ * Measure is now percent of Prüfkraft (> 100). Rewrite legacy absolute values to 150 %.
+ */
+function migrateMeasurePercent(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return false;
+  }
+  const keys = ['collision_measure_N', 'collision_measure_x_N', 'collision_measure_y_N'];
+  let changed = false;
+  for (const key of keys) {
+    const value = Number(parsed[key]);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+    if (value > 0 && value <= 100) {
+      parsed[key] = 150;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function load() {
   try {
     const raw = fs.readFileSync(FILE_PATH, 'utf8');
     const parsed = migrateLegacyKeys(JSON.parse(raw));
-    const changed = migrateForceRange(parsed) || migratePerAxisLimits(parsed);
+    const changed =
+      migrateForceRange(parsed) || migratePerAxisLimits(parsed) || migrateMeasurePercent(parsed);
     const merged = { ...defaultMachineConfigPayload(), ...parsed };
     if (changed) {
       ensureDir();

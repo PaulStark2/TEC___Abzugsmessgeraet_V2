@@ -32,7 +32,12 @@ Die Z-Achse arbeitet open-loop mit typisch **200 steps/mm** (Schrittweite **0,00
 | Praktisches Rauschen nach Fenster | ca. **±0,1 N** | Streuungsabschätzung in der Kraftregelungsdoku |
 | Kraftpfad-Anzeige | Format **0,01 N** | GUI |
 
-Zug ist negativ, Druck positiv (`docs/Force_Calibration.md`). Die Spitzenkraft der Auswertung ist dennoch **max |Fz|**, damit das Ergebnis vorzeichenunabhängig und mit Zug- und Druckkontakten vergleichbar bleibt.
+Zug ist negativ, Druck positiv (`docs/Force_Calibration.md`).
+
+| Richtung | Spitzenkraft in der Auswertung |
+|----------|--------------------------------|
+| Eingliedern (Druck) | \(\max_i \lvert F_{z,i}\rvert\) |
+| Ausgliedern (Zug) | \(\max\{-F_{z,i}: F_{z,i}<0\}\) — Restdruck am Sitz zählt nicht als Ausglieder-Spitze |
 
 ### Warum nicht jedes Millisekunden-Sample?
 
@@ -44,12 +49,23 @@ Auf dem STM32 läuft der Core mit **1 kHz**. Ohne Abstandsgate würde bei 2 mm/s
 Deshalb speichert der Core standardmäßig nur, wenn
 
 ```text
-|z − z_last| ≥ force_path_dz_mm    (Default 0,1 mm)
+|z − z_last| ≥ force_path_dz_mm    (Default 0,01 mm)
 ```
 
-oder beim ersten Sample einer neuen Kurve (Leg-/Iterationswechsel). Der Parameter liegt in `MachineConfig::Force::force_path_dz_mm` (Core). Er ist bewusst noch nicht Teil des M12-`MachineConfig`-Wire-Layouts (386 Byte), damit ältere GUIs die Konfiguration weiter setzen können; die Default-Rasterung gilt hostseitig im Core.
+oder beim ersten Sample einer neuen Kurve (Leg-/Iterationswechsel / Umkehrpunkt).
 
-Dichter als **0,05 mm** zu speichern liefert unter den genannten Filterbedingungen kaum unabhängige Kraftinformation, erhöht aber UART-Last und Ringpuffer-Druck.
+Parametrierbar über MachineConfig / GUI (Phase 3):
+
+| Parameter | Default | Bedeutung |
+|-----------|---------|-----------|
+| `force_path_dz_mm` | 0,01 mm | Basis-Mindestweg zwischen Samples |
+| `force_path_dz_fine_mm` | 0,005 mm | Feineres Raster in der Insert-Feinphase |
+| `force_near_target_frac` | 0,8 | Ab `Fz ≥ frac · Sollkraft` Feinphase |
+| `phase3_v_insert_fine` | 0,5 mm/s | Reduzierte Insert-Geschwindigkeit in der Feinphase |
+
+Am Übergang Insert→Extract schreibt der Core ein gemeinsames Sitz-Sample für beide Beine (gleicher `(z, Fz)`), bevor die +Z-Ausfahrt startet.
+
+Dichter als die Kraftbandbreite (~0,05–0,1 mm) zu speichern liefert unter den Filterbedingungen kaum unabhängige Kraftinformation, erhöht aber UART-Last und Ringpuffer-Druck. Streaming muss den Ring (256 Samples) weiterhin rechtzeitig leeren.
 
 ## Aufnahme im Core
 
@@ -61,9 +77,13 @@ Der Zyklus hat die Beine:
 
 | `cycle_leg_` | Bewegung | Aufnahme |
 |--------------|----------|----------|
-| 0 | erstes Ausgliedern bis kraftfrei | **nein** (Öffnungsleg, verzerrt die Statistik nicht) |
-| 1 | Eingliedern (Kraftfrei → Sollkraft) | ja, `leg = Insert (0)` |
-| 2 | Ausgliedern (Sollkraft → Kraftfrei) | ja, `leg = Extract (1)` |
+| 0 | erstes Ausgliedern bis kraftfrei (nach Zug) | **nein** (Öffnungsleg, verzerrt die Statistik nicht) |
+| 1 | Eingliedern (−Z, Druck `Fz > 0`) | ja, `leg = Insert (0)` |
+| 2 | Ausgliedern (+Z, Zug `Fz < 0`) | ja, `leg = Extract (1)` |
+
+Das Sample-Tag kommt beim Speichern aus `cycle_leg_` (nicht aus einem verzögerten Zustandsflag). Die Host-Auswertung korrigiert die Richtung anhand der Bahngeometrie (`Δz > 0` → Ausgliedern, `Δz < 0` → Eingliedern). Nicht über `max|Fz|`: Ausglieder-Kurven starten oft noch unter Restdruck, sonst würden sie fälschlich als Eingliedern gezählt.
+
+Ausgliedern endet nicht beim ersten Durchfahren von 0 N (Druck→Zug), sondern erst nachdem Zugkraft (`Fz < −force_tolerance_N`) erkannt wurde und die Kraft erneut kraftfrei ist. Optional fährt `extract_after_free_mm` danach noch weiter (+Z) und die Messung läuft mit; `0` = Stopp am Kraftfrei-Punkt. Nachlauf und Rückfahrt zum Ausgliederpunkt nutzen `extract_after_free_v` (nicht `phase3_v_extract` / `phase3_v_insert`).
 
 Nach abgeschlossener Iteration wird `iteration` erhöht und erneut Eingliedern gestartet.
 
@@ -105,11 +125,19 @@ Modul `gui/server/results/forcePathAnalysis.js`.
 
 ### Spitzenkraft einer Kurve
 
-Für die Samplefolge einer Kurve \((z_i, F_{z,i})\):
+Eingliedern:
 
 \[
-F_{\mathrm{peak}} = \max_i \lvert F_{z,i}\rvert
+F_{\mathrm{peak}}^{\mathrm{in}} = \max_i \lvert F_{z,i}\rvert
 \]
+
+Ausgliedern (nur Zugbereich):
+
+\[
+F_{\mathrm{peak}}^{\mathrm{ex}} = \max\{-F_{z,i}: F_{z,i}<0\}
+\]
+
+ohne Zugsamples bleibt die Spitze undefiniert (Kurve trotzdem im Diagramm).
 
 ### Mittelwert und Standardabweichung über Iterationen
 
@@ -127,28 +155,39 @@ s = \sqrt{\frac{1}{n-1}\sum_{k=1}^{n}(F_{\mathrm{peak},k}-\bar F)^2}
 s = \text{undefiniert bei } n < 2
 \]
 
-### Relativer Weg
+### Normierter Weg (gemeinsamer Hubrahmen)
 
-Für die Anzeige und den PDF-Vergleich gilt
+Pro Prüfpunkt und Iteration teilen Ein- und Ausgliedern denselben Bezug \(z_{\mathrm{free}}\) (kraftfrei / Ausgliederpunkt):
 
 \[
-z_{\mathrm{rel},i} = z_i - z_0
+z_{\mathrm{rel},i} = z_i - z_{\mathrm{free}}
 \]
 
-mit \(z_0\) = erstes Sample der jeweiligen Kurve. Die CSV enthält zusätzlich \(z\) absolut.
+- \(z_{\mathrm{rel}} = 0\): kraftfrei
+- \(z_{\mathrm{rel}} < 0\): Richtung Sitz (Eingliederpunkt)
+
+Damit liegen beide Beine übereinander. \(z_{\mathrm{free}}\) kommt bevorzugt vom ersten Insert-Sample, sonst vom letzten Extract-Sample. Die CSV enthält zusätzlich \(z\) absolut.
 
 ## GUI
 
 Seite „Prüfergebnisse“ (`gui/public/js/pages/results.js`):
 
 1. Prüfpunktwahl
-2. Kraft-Weg-Diagramm: alle Kurven überlagert; Farbe = Iteration (Hue); hell = Eingliedern, dunkel = Ausgliedern
-3. Ein-/Ausschalten einzelner Kurven
-4. Kennwerte: Mittelwert und Standardabweichung der Spitzenkräfte für Ein- und Ausgliedern
-5. Umschaltbare Tabelle der Messpaare; Klick markiert den Punkt im Diagramm
+2. Kraft-Weg-Diagramm mit **Chart.js 4** (lokal unter `/vendor/chart.js`, Zoom-Plugin + Hammer.js, kein CDN): dunkler Plot-Hintergrund, Overlay aller Kurven, Grid, formatierte Achsen, Tooltips, LTTB-Decimation, Zoom/Pan (Doppelklick = Reset). PDF-Export bleibt hell.
+3. Ein-/Ausschalten einzelner Kurven (Checkboxen und Chart-Legende)
+4. Kennwerte: Mittelwert und Standardabweichung; Einzelspitzen je Iteration hinter aufklappbarem „Einzelspitzen“ (scrollbar)
+5. Umschaltbare, scrollbar begrenzte Tabelle der Messpaare; Klick markiert den Punkt im Diagramm und umgekehrt
 6. Download als ZIP
 
+Farblogik: Iteration = Hue; hell = Eingliedern (Druck), dunkel = Ausgliedern (Zug). Kurven-Sichtbarkeit nur über die kompakte scrollbar Toggle-Liste (keine Chart.js-Legende). Implementierung: `gui/public/js/pages/forcePathChart.js`.
+
 Ergebnisse entstehen erst nach `ProcessState::Completed` oder `Aborted` (beobachteter Lauf). Vorher liefert `/api/results/current` 404.
+
+Offline ohne Prüfstand: `POST /api/results/demo` (Button „Demo-Testdaten laden“ nur wenn keine Ergebnisse vorliegen) schreibt Fixture-Kurven in den In-Memory-Store. Kennzeichnung `backend: demo`. Abschalten:
+
+- Button **„Demo-Daten löschen“** → `DELETE /api/results/current`
+- Start einer echten Prüfung leert den Store automatisch
+- Auf dem Pi dauerhaft sperren: `ALLOW_RESULTS_DEMO=0` (dann 403 auf den Demo-Endpoint)
 
 ## Export
 
@@ -156,9 +195,9 @@ Ergebnisse entstehen erst nach `ProcessState::Completed` oder `Aborted` (beobach
 
 | Datei | Inhalt |
 |-------|--------|
-| `*_samples.csv` | alle Messpaare: Punkt, Iteration, Leg, \(z\), \(z_{\mathrm{rel}}\), \(F_z\) |
-| `*_summary.csv` | je Punkt und Leg: Anzahl, Mittel, StdAbw der Spitzen |
-| `*_<Punkt>.pdf` | Diagramm-Overlay, Auftragsname, Punktbezeichnung, Kennwerte |
+| `*_samples.csv` | Messpaare, Excel-DE: UTF-8-BOM, `;`, Dezimal `,` |
+| `*_summary.csv` | je Punkt/Richtung: Anzahl, Mittel, StdAbw, Spaltenliste `Spitzen_N` |
+| `*_<Punkt>.pdf` | Kraft-Weg mit Achsen `F [N]` / `z (relativ) [mm]`, Ticks, Gitter, Null-Linien |
 
 PDF-Erzeugung mit `pdfkit` (Vektorpfade, ohne Browser-Engine). Farblogik identisch zur GUI.
 
@@ -172,6 +211,6 @@ PDF-Erzeugung mit `pdfkit` (Vektorpfade, ohne Browser-Engine). Farblogik identis
 ## Annahmen und Grenzen
 
 - Keine Encoder-Rückführung: Weg = kommandierte / integrierte Schrittposition.
-- Spitze = max |Fz|; eine vorzeichenbehaftete „nur Zug“-Definition wäre eine Konfigurationsoption, nicht der Default.
+- Ausglieder-Spitze = nur Zug (\(F_z < 0\)); Eingliedern bleibt max |Fz|.
 - Leg 0 (Öffnen bis kraftfrei) geht nicht in die Auswertung ein.
 - In-Memory-Ergebnisse: nur der letzte Lauf; kein persistentes Messarchiv.

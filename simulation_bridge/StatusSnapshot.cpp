@@ -99,6 +99,9 @@ tecomm::StatusReportPayload buildStatusReport(const Machine& machine, const Test
     status.procedure_phase = static_cast<uint8_t>(executor.procedurePhase());
     status.fault_reason = static_cast<uint8_t>(machine.lastFaultReason());
     status.spreader_state = static_cast<uint8_t>(machine.spreaderState());
+    status.fault_manual = machine.faultManualActive() ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0);
+    status.abort_reason = static_cast<uint16_t>(machine.lastAbortReason());
+    status.current_iteration = static_cast<uint16_t>(executor.procedure().testIteration());
 
     if (executor.processState() == ProcessState::Running)
     {

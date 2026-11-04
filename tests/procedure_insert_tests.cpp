@@ -53,16 +53,14 @@ static bool runUntilPhase(TestExecutor& ex, Machine& machine, ProcedurePhase pha
     return ex.procedurePhase() == phase;
 }
 
-static bool runInsertInitialAndGetInsertionZ(float probe_search_distance, float insert_search_distance,
-                                              float target_force_N, float& insertion_z_out)
+static bool runInsertInitialAndGetInsertionZ(float insert_search_distance, float target_force_N,
+                                              float& insertion_z_out)
 {
     Machine machine;
     seedPlate(machine);
 
-    // Configure only the two parameters under test.
     {
         MachineConfig mcfg = machine.machineConfig();
-        mcfg.probe.search_distance = probe_search_distance;
         mcfg.force.insert_search_distance = insert_search_distance;
         ConfigValidationError err = ConfigValidationError::Ok;
         if (!machine.trySetMachineConfig(mcfg, err))
@@ -198,36 +196,16 @@ int main()
         }
     }
 
-    // Regression: probe.search_distance must not affect InsertInitial depth
-    // (insert depth is force.insert_search_distance).
-    {
-        const float target_force = 5.0f;
-        float ins_a = 0.0f;
-        float ins_b = 0.0f;
-        if (!runInsertInitialAndGetInsertionZ(5.0f, 10.0f, target_force, ins_a))
-        {
-            return 500;
-        }
-        if (!runInsertInitialAndGetInsertionZ(25.0f, 10.0f, target_force, ins_b))
-        {
-            return 501;
-        }
-        if (!nearEqual(ins_a, ins_b, 0.05f))
-        {
-            return 502;
-        }
-    }
-
     // Regression: insert_search_distance must affect InsertInitial depth.
     {
         const float target_force = 5.0f;
         float ins_a = 0.0f;
         float ins_b = 0.0f;
-        if (!runInsertInitialAndGetInsertionZ(20.0f, 10.0f, target_force, ins_a))
+        if (!runInsertInitialAndGetInsertionZ(10.0f, target_force, ins_a))
         {
             return 510;
         }
-        if (!runInsertInitialAndGetInsertionZ(20.0f, 12.0f, target_force, ins_b))
+        if (!runInsertInitialAndGetInsertionZ(12.0f, target_force, ins_b))
         {
             return 511;
         }
@@ -490,7 +468,8 @@ int main()
         program.add(TestPoint{1.0f, 0.0f, 0.0f});
         ex.setProgram(program);
         ex.start();
-        for (int i = 0; i < 12000 && ex.processState() == ProcessState::Running; ++i)
+        // Install + OffsetOnly bore searches + aging cycles + ProbeRemeasure + end home.
+        for (int i = 0; i < 30000 && ex.processState() == ProcessState::Running; ++i)
         {
             machine.setHostInputs(withProcessForce(ex, machine));
             ex.tick(0.05f);

@@ -25,7 +25,11 @@ const machineConfigStore = require('../config/machineConfigStore');
 const { syncCalibrationFromController } = require('../config/syncCalibrationFromController');
 const { validateProcedureStartPreconditions } = require('./startPreconditions');
 const { validateCoreNotRunningForProcedureStart } = require('./coreProcessGuard');
-const { derivePointProgress } = require('./procedureProgress');
+const {
+  derivePointProgress,
+  estimateIntraPhaseFill,
+  trackPhaseHints,
+} = require('./procedureProgress');
 const { isFinitePose } = require('../coord/workspaceReferenceOffset');
 
 function referenceOffsetFromPoses(plantPose, machinePose) {
@@ -83,6 +87,7 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
   let lastProcedurePhase = null;
   let toolOffsetSyncInFlight = false;
   let toolOffsetSyncedForRun = false;
+  let phaseHints = {};
 
   function capabilities() {
     return {
@@ -300,11 +305,35 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     // Only treat Core Completed as procedure completion after this start saw Running.
     const progressProcessState =
       processState === 'Completed' && !seenRunningSinceStart ? 'Idle' : processState;
+
+    if (seenRunningSinceStart && processState === 'Running') {
+      phaseHints = trackPhaseHints(phaseHints, machineStatus.procedurePhase);
+    }
+
+    const totalIterations = params && params.iterations ? params.iterations : 1;
+    const currentIteration = Number.isFinite(Number(machineStatus.currentIteration))
+      ? Number(machineStatus.currentIteration)
+      : 0;
+    const targetForce = params && Number.isFinite(Number(params.insertionForce))
+      ? Number(params.insertionForce)
+      : 0;
+    const intraFill = estimateIntraPhaseFill({
+      procedurePhase: machineStatus.procedurePhase,
+      machine: machineStatus,
+      targetForce,
+      motionState: machineStatus.motionState,
+    });
     const derived = derivePointProgress({
       totalPoints,
       index0Based: currentPointIndex,
       processState: progressProcessState,
       procedureState: nextProcedureState,
+      iterationIndex: currentIteration,
+      totalIterations,
+      procedurePhase: machineStatus.procedurePhase,
+      mode: params && params.mode === 'aging' ? 'aging' : 'test',
+      phaseHints,
+      intraFill,
     });
 
     let nextState = mapGuiState(processState, connected);
@@ -333,15 +362,24 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
       processState,
       state: nextState,
       progress: {
-        currentIteration: 0,
-        totalIterations: params && params.iterations ? params.iterations : 1,
+        currentIteration,
+        totalIterations,
         currentPointIndex: derived.currentPointIndex,
         pointsDone: derived.pointsDone,
         totalPoints: derived.totalPoints,
         percent: derived.percent,
         isComplete: derived.isComplete,
         procedurePhase: machineStatus.procedurePhase || null,
+        phasePrev: derived.phasePrev,
+        phaseCurrent: derived.phaseCurrent,
+        phaseNext: derived.phaseNext,
+        phasePercent: derived.phasePercent,
+        milestoneIndex: derived.milestoneIndex,
+        milestoneCount: derived.milestoneCount,
+        milestoneLabels: derived.milestoneLabels,
+        scope: derived.scope,
         machineState: machineStatus.machineState || null,
+        motionState: machineStatus.motionState || null,
         faultReason: machineStatus.faultReason || null,
         spreaderState: machineStatus.spreaderState || null,
         isHomed: machineStatus.isHomed === true,
@@ -361,19 +399,23 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
       prev.state !== 'completed'
     ) {
       clearPoll();
-      resultsStore.setResults(buildResultsFromObserved('Completed'));
+      resultsStore.pushResults(buildResultsFromObserved('Completed'));
       procedureStore.patch({
         state: 'completed',
         completedAt: new Date().toISOString(),
         error: null,
         progress: {
-          currentIteration: params && params.iterations ? params.iterations : 1,
-          totalIterations: params && params.iterations ? params.iterations : 1,
+          currentIteration: totalIterations,
+          totalIterations,
           currentPointIndex: totalPoints,
           pointsDone: totalPoints,
           totalPoints,
           percent: 100,
           isComplete: true,
+          phasePrev: 'Zur Endpose',
+          phaseCurrent: 'Abgeschlossen',
+          phaseNext: '—',
+          phasePercent: 100,
         },
       });
     }
@@ -386,7 +428,7 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
       prev.state !== 'idle'
     ) {
       clearPoll();
-      resultsStore.setResults(buildResultsFromObserved('Aborted'));
+      resultsStore.pushResults(buildResultsFromObserved('Aborted'));
       procedureStore.patch({
         state: 'stopped',
         completedAt: new Date().toISOString(),
@@ -533,7 +575,8 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     params = { mode, insertionForce, iterations };
     observedRows = [];
     lastPointIndex = null;
-    resultsStore.clear();
+    phaseHints = {};
+    // Keep last-run history; only clear live force-path buffer for the new run.
     forcePathStore.clear();
 
     console.log('[ProcedureStart] begin chain', {
@@ -653,6 +696,7 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     lastProcedurePhase = null;
     toolOffsetSyncedForRun = false;
     toolOffsetSyncInFlight = false;
+    phaseHints = {};
     procedureStore.patch({
       state: 'running',
       backend: 'protocol',
@@ -672,6 +716,10 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
         totalPoints: points.length,
         percent: 0,
         isComplete: false,
+        phasePrev: '—',
+        phaseCurrent: '—',
+        phaseNext: '—',
+        phasePercent: 0,
       },
     });
 
@@ -764,6 +812,51 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     return procedureStore.getStatus();
   }
 
+  function resetUi() {
+    const current = procedureStore.getStatus();
+    if (current.state === 'running' || current.state === 'paused') {
+      return {
+        ok: false,
+        error: 'Prozedur läuft noch — bitte zuerst stoppen.',
+        status: current,
+      };
+    }
+    clearPoll();
+    const keptParams = current.params;
+    const keptCaps = current.capabilities;
+    procedureStore.reset();
+    procedureStore.patch({
+      backend: 'protocol',
+      capabilities: keptCaps || capabilities(),
+      params: keptParams,
+      state: 'idle',
+      processState: null,
+      connected: isLive(),
+      error: null,
+      startedAt: null,
+      completedAt: null,
+      progress: {
+        currentIteration: 0,
+        totalIterations: keptParams && keptParams.iterations ? keptParams.iterations : 0,
+        currentPointIndex: 0,
+        pointsDone: 0,
+        totalPoints: 0,
+        percent: 0,
+        isComplete: false,
+        phasePrev: '—',
+        phaseCurrent: '—',
+        phaseNext: '—',
+        phasePercent: 0,
+      },
+      notes: [],
+    });
+    phaseHints = {};
+    seenRunningSinceStart = false;
+    lastProcedurePhase = null;
+    lastPointIndex = null;
+    return { ok: true, status: procedureStore.getStatus() };
+  }
+
   function dispose() {
     clearPoll();
   }
@@ -774,6 +867,7 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
     pause,
     resume,
     stop,
+    resetUi,
     applyProcedureDecision,
     getStatus,
     dispose,

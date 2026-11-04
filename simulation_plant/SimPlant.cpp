@@ -1,7 +1,5 @@
 #include "SimPlant.hpp"
 
-#include "ProbeGeometry.hpp"
-
 #include <cmath>
 
 namespace simplant
@@ -123,11 +121,11 @@ void SimPlant::advance(float dt)
     }
 }
 
-bool SimPlant::geometryContact(float x, float y, float z) const
+bool SimPlant::geometryContact(float /*x*/, float /*y*/, float /*z*/) const
 {
-    return toolContactsProbeDisc(x, y, z, probe_.center.x, probe_.center.y, probe_.center.z,
-                                 probe_.diameter, probe_.thickness, probe_.tool_diameter,
-                                 probe_.tool_cylindrical_height);
+    // Probe-disc geometry helper was removed with Messtaster bore-search; plant
+    // contact is pulse-only via triggerProbe() until a replacement model exists.
+    return false;
 }
 
 HostInputs SimPlant::sample(float x, float y, float z) const

@@ -2,6 +2,7 @@
 #include "HostInputs.hpp"
 #include "Machine.hpp"
 #include "SafetyLimits.hpp"
+#include "TestConfiguration.hpp"
 #include "Types.hpp"
 
 int main()
@@ -47,45 +48,62 @@ int main()
         }
     }
 
-    // Measure context allows a higher Fz than Approach.
+    // Measure uses percent of Prüfkraft; with target set, 150% keeps mid-range Fz OK.
     {
         Machine m;
+        TestConfiguration run{};
+        run.target_force_N = 20.0f; // effective measure limit = 30 N at 150%
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!m.trySetTestConfiguration(run, err))
+        {
+            return 12;
+        }
         m.setCollisionContext(CollisionContext::Measure);
         m.moveTo(0.0f, 0.0f, -2.0f);
         HostInputs in{};
-        in.force.fz = 25.0f; // < default measure 30 N, > approach 20 N
+        in.force.fz = 25.0f; // < 30 N measure effective, > approach 20 N
+        in.forceSampleValid = true;
         m.setHostInputs(in);
         m.tick(0.05f);
         if (m.machineState() == MachineState::Fault)
         {
-            return 12;
+            return 13;
         }
         m.setCollisionContext(CollisionContext::Approach);
         m.tick(0.05f);
         if (m.machineState() != MachineState::Fault)
         {
-            return 13;
+            return 16;
         }
     }
 
-    // Calibration can drop the phase threshold. The hard limit still trips.
+    // Calibration (phase off): configured hard limits are ignored; typo-brake remains.
     {
         Machine m;
         m.setCollisionPhaseEnabled(false);
         HostInputs in{};
-        in.force.fz = 25.0f;
+        in.forceSampleValid = true;
+        in.force.fz = 25.0f; // above default hard 30? no — below; and above approach
         m.setHostInputs(in);
         m.tick(0.05f);
         if (m.machineState() == MachineState::Fault || m.collisionPhaseEnabled())
         {
             return 20;
         }
+        // Configured hard is 30 N; with phase off this must NOT Fault.
+        in.force.fz = 40.0f;
+        m.setHostInputs(in);
+        m.tick(0.05f);
+        if (m.machineState() == MachineState::Fault)
+        {
+            return 21;
+        }
         in.force.fz = SafetyLimits::kMaxFzAbs_N + 0.1f;
         m.setHostInputs(in);
         m.tick(0.05f);
         if (m.machineState() != MachineState::Fault || m.lastForceWatchdogTrip() != ForceWatchdogTrip::HardLimit)
         {
-            return 21;
+            return 22;
         }
     }
 

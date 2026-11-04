@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('assert');
-const { toMachinePoint, toMachinePoints } = require('./coordinateTransform');
+const { toMachinePoint, toMachinePoints, toPlatePoint } = require('./coordinateTransform');
 
 function testRejectWithoutPlateOrigin() {
   assert.strictEqual(toMachinePoint({ plateOriginValid: false }, { x: 1, y: 2, z: 3 }), null);
@@ -58,9 +58,32 @@ function testBatchNullIfInvalid() {
   );
 }
 
+function testToPlatePointRoundtrip() {
+  const calib = {
+    plateOriginValid: true,
+    plateOrigin: { x: 10, y: 20, z: 5 },
+    toolOffset: { x: 0.5, y: -1, z: 2 },
+    plateYawRad: 0.3,
+  };
+  const plate = { x: 12.5, y: -4.25, z: 7.0 };
+  const machine = toMachinePoint(calib, plate);
+  assert.ok(machine);
+  const back = toPlatePoint(calib, machine);
+  assert.ok(back);
+  assert.ok(Math.abs(back.x - plate.x) < 1e-9);
+  assert.ok(Math.abs(back.y - plate.y) < 1e-9);
+  assert.ok(Math.abs(back.z - plate.z) < 1e-9);
+}
+
+function testToPlatePointRejectsWithoutOrigin() {
+  assert.strictEqual(toPlatePoint({ plateOriginValid: false }, { x: 1, y: 2, z: 3 }), null);
+}
+
 testRejectWithoutPlateOrigin();
 testTransformMatchesCore();
 testInstallZeroToolOffset();
 testOffsetOnlyTransform();
 testBatchNullIfInvalid();
+testToPlatePointRoundtrip();
+testToPlatePointRejectsWithoutOrigin();
 console.log('coordinateTransform.test.js: PASS');

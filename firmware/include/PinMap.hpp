@@ -48,7 +48,10 @@
 #define PIN_PROBE_PORT GPIOA
 #define PIN_PROBE_PIN GPIO_PIN_5
 
-// Limit switches: High = triggered. +Max is homing reference.
+// Limit switches: High = triggered.
+// Physical XP (PA6) is the X homing endstop → software limitXMin after X remap
+// (machine +X = into workspace). Physical XN (PA10) → software limitXMax.
+// Y/Z: +Max pins remain the homing reference.
 #define PIN_LIM_XP_PORT GPIOA
 #define PIN_LIM_XP_PIN GPIO_PIN_6
 #define PIN_LIM_YP_PORT GPIOA

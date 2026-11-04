@@ -95,7 +95,7 @@ function createMockProcedureAdapter(machineClient) {
     clearTimer();
     phase = 'idle';
     const program = programStore.getProgram();
-    resultsStore.setResults({
+    resultsStore.pushResults({
       programName: program ? program.programName : null,
       mode: params.mode,
       completedAt: new Date().toISOString(),
@@ -221,7 +221,12 @@ function createMockProcedureAdapter(machineClient) {
     pointIndex = 0;
     phase = 'idle';
     params = { mode, insertionForce, iterations };
-    resultsStore.clear();
+    // Keep result history; only clear live force-path buffer if present.
+    try {
+      require('../results/forcePathStore').clear();
+    } catch {
+      // optional in mock
+    }
 
     procedureStore.patch({
       state: 'running',

@@ -68,4 +68,11 @@ struct SafetyLimits
     static constexpr float kMaxNominalAbs = 500.0f;
     static constexpr float kMaxToolCylindricalHeight = 100.0f;
     static constexpr float kMaxXySearchMargin = 50.0f;
+
+    // Measure-phase collision as percent of Prüfkraft (must exceed 100%).
+    static constexpr float kMinMeasureCollisionPercent = 100.0f; // exclusive lower bound
+    static constexpr float kMaxMeasureCollisionPercent = 500.0f;
+
+    // Max single jog step while fault-manual is active [mm] (GUI/server clamp).
+    static constexpr float kMaxFaultManualStep_mm = 10.0f;
 };

@@ -8,6 +8,7 @@ const MENU_ITEMS = [
   { route: 'procedure', label: 'Prüf-/Alterungsprozedur' },
   { route: 'results', label: 'Prüfergebnisse' },
   { route: 'manual', label: 'Handmodus' },
+  { route: 'faults', label: 'Fehler & Meldungen' },
   { route: 'plate', label: 'Bauplatte wechseln' },
   { route: 'calibrate', label: 'Kalibrieren' },
   { route: 'parameters', label: 'Parametereinstellungen' },
@@ -18,7 +19,7 @@ export function renderMenu(container) {
   panel.className = 'panel page-panel';
   panel.innerHTML = `
     <h2>Hauptmenü</h2>
-    <p class="placeholder-note">Wählen Sie einen Bereich. Status und 3D-Ansicht bleiben sichtbar.</p>
+    <p class="placeholder-note">Wählen Sie einen Bereich. Der Maschinenstatus bleibt sichtbar.</p>
     <nav class="menu-nav" aria-label="Hauptmenü"></nav>
   `;
 

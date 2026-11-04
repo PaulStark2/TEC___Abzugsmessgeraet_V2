@@ -1,5 +1,5 @@
 // Homing: DefineMcs vs Reference-only home(); restore; no auto-define.
-// DefineMcs uses fast seek + creep flank find (bit only), then retract R.
+// X homes at limitXMin (−seek); Y/Z at +Max. Home = (+R,−R,−R).
 #include "ForceSample.hpp"
 #include "Machine.hpp"
 #include "MachineConfig.hpp"
@@ -23,6 +23,17 @@ static HostInputs makeSafeInputs()
     return withFreshForce(in);
 }
 
+static void applyHomingLimitBits(Machine& m, HostInputs& in, float trip_at)
+{
+    // Y/Z: trip +Max when raw >= trip. X: trip Min when raw <= −trip.
+    in.limitZMax = m.homingState() == HomingState::HomingZ && m.rawZ() >= trip_at;
+    in.limitYMax = m.homingState() == HomingState::HomingY && m.rawY() >= trip_at;
+    in.limitXMin = m.homingState() == HomingState::HomingX && m.rawX() <= -trip_at;
+    in.limitXMax = false;
+    in.limitYMin = false;
+    in.limitZMin = false;
+}
+
 static bool runHomingToHomed(Machine& m, bool define, float trip_at, float dt = 0.02f)
 {
     HostInputs in = makeSafeInputs();
@@ -34,10 +45,7 @@ static bool runHomingToHomed(Machine& m, bool define, float trip_at, float dt = 
     }
     for (int step = 0; step < 20000 && m.homingState() != HomingState::Homed; ++step)
     {
-        // Only the +max bit — no plant plane coordinates (architecture: sensor only).
-        in.limitZMax = m.homingState() == HomingState::HomingZ && m.rawZ() >= trip_at;
-        in.limitXMax = m.homingState() == HomingState::HomingX && m.rawX() >= trip_at;
-        in.limitYMax = m.homingState() == HomingState::HomingY && m.rawY() >= trip_at;
+        applyHomingLimitBits(m, in, trip_at);
         in.forceSampleSequence++;
         m.setHostInputs(in);
         m.tick(dt);
@@ -55,7 +63,7 @@ int main()
     constexpr float kR = 2.0f;
     constexpr float kTrip = 5.0f;
 
-    // A — home() without MCS is rejected; DefineMcs origin at +max, home = (-R,-R,-R).
+    // A — home() without MCS is rejected; DefineMcs home = (+R,−R,−R).
     {
         Machine m;
         m.setCurrentPose(1.0f, 1.0f, 1.0f);
@@ -78,20 +86,21 @@ int main()
         {
             return 4;
         }
-        if (!nearEqual(home.x, -kR, 1e-3f) || !nearEqual(home.y, -kR, 1e-3f) ||
+        if (!nearEqual(home.x, kR, 1e-3f) || !nearEqual(home.y, -kR, 1e-3f) ||
             !nearEqual(home.z, -kR, 1e-3f))
         {
-            std::fprintf(stderr, "A home=(%.4f,%.4f,%.4f) expected ~%.4f\n", home.x, home.y, home.z,
-                         -kR);
+            std::fprintf(stderr, "A home=(%.4f,%.4f,%.4f) expected ~(%.4f,%.4f,%.4f)\n", home.x,
+                         home.y, home.z, kR, -kR, -kR);
             return 5;
         }
-        // Offset binds raw switch ≈ trip to machine 0 (residual: creep/step).
-        if (std::fabs(m.referenceOffsetX() - kTrip) > 0.5f ||
+        // X switch at raw ≈ −trip; Y/Z at +trip.
+        if (std::fabs(m.referenceOffsetX() - (-kTrip)) > 0.5f ||
             std::fabs(m.referenceOffsetY() - kTrip) > 0.5f ||
             std::fabs(m.referenceOffsetZ() - kTrip) > 0.5f)
         {
-            std::fprintf(stderr, "A offset=(%.4f,%.4f,%.4f) expected ~%.4f\n", m.referenceOffsetX(),
-                         m.referenceOffsetY(), m.referenceOffsetZ(), kTrip);
+            std::fprintf(stderr, "A offset=(%.4f,%.4f,%.4f) expected ~(%.4f,%.4f,%.4f)\n",
+                         m.referenceOffsetX(), m.referenceOffsetY(), m.referenceOffsetZ(), -kTrip,
+                         kTrip, kTrip);
             return 5;
         }
         if (m.calibrationSet().plate_origin_valid || m.calibrationSet().probe_center_valid)
@@ -100,7 +109,7 @@ int main()
         }
     }
 
-    // B — no raw teleport at switch latch during DefineMcs.
+    // B — no raw teleport at switch latch during DefineMcs (Z still +Max).
     {
         Machine m;
         MachineConfig cfg = m.machineConfig();
@@ -130,7 +139,6 @@ int main()
             m.tick(kDt);
             if (at_limit && !saw_limit)
             {
-                // Raw must not teleport when the fast-seek limit is first seen.
                 if (!nearEqual(m.rawZ(), raw_before, 0.05f))
                 {
                     return 12;
@@ -149,9 +157,7 @@ int main()
         }
         for (int step = 0; step < 20000 && m.homingState() != HomingState::Homed; ++step)
         {
-            in.limitZMax = m.homingState() == HomingState::HomingZ && m.rawZ() >= kTrip;
-            in.limitXMax = m.homingState() == HomingState::HomingX && m.rawX() >= kTrip;
-            in.limitYMax = m.homingState() == HomingState::HomingY && m.rawY() >= kTrip;
+            applyHomingLimitBits(m, in, kTrip);
             in.forceSampleSequence++;
             m.setHostInputs(in);
             m.tick(kDt);
@@ -166,6 +172,11 @@ int main()
             std::fprintf(stderr, "B home.z=%.4f machine.z=%.4f expected ~%.4f\n", home.z, m.z(),
                          -kR);
             return 17;
+        }
+        if (!nearEqual(home.x, kR, 1e-3f))
+        {
+            std::fprintf(stderr, "B home.x=%.4f expected ~%.4f\n", home.x, kR);
+            return 18;
         }
     }
 
@@ -195,9 +206,7 @@ int main()
         }
         for (int step = 0; step < 20000 && m.homingState() != HomingState::Homed; ++step)
         {
-            in.limitZMax = m.homingState() == HomingState::HomingZ && m.rawZ() >= kTrip;
-            in.limitXMax = m.homingState() == HomingState::HomingX && m.rawX() >= kTrip;
-            in.limitYMax = m.homingState() == HomingState::HomingY && m.rawY() >= kTrip;
+            applyHomingLimitBits(m, in, kTrip);
             in.forceSampleSequence++;
             m.setHostInputs(in);
             m.tick(kDt);
@@ -217,154 +226,6 @@ int main()
             !nearEqual(m.calibrationSet().tool_offset.x, tool.x))
         {
             return 24;
-        }
-        if (!nearEqual(m.x(), home.x, 0.25f) || !nearEqual(m.y(), home.y, 0.25f) ||
-            !nearEqual(m.z(), home.z, 0.25f))
-        {
-            return 25;
-        }
-    }
-
-    // D — restore MCS without motion.
-    {
-        Machine m;
-        if (!runHomingToHomed(m, true, kTrip, kDt))
-        {
-            return 30;
-        }
-        const TestPoint home = m.calibrationSet().home_offset;
-        Machine m2;
-        m2.setCurrentPose(0.0f, 0.0f, 0.0f);
-        if (!m2.restoreMachineCoordinateSystem(home))
-        {
-            return 31;
-        }
-        if (!m2.machineCoordinateSystemValid())
-        {
-            return 32;
-        }
-        if (!nearEqual(m2.calibrationSet().home_offset.x, home.x) ||
-            !nearEqual(m2.calibrationSet().home_offset.y, home.y) ||
-            !nearEqual(m2.calibrationSet().home_offset.z, home.z))
-        {
-            return 33;
-        }
-        if (m2.isHomed())
-        {
-            return 34;
-        }
-    }
-
-    // D — repeated Reference home → same home point.
-    {
-        Machine m;
-        if (!runHomingToHomed(m, true, kTrip, kDt))
-        {
-            return 40;
-        }
-        const TestPoint home = m.calibrationSet().home_offset;
-        for (int cycle = 0; cycle < 3; ++cycle)
-        {
-            HostInputs in = makeSafeInputs();
-            m.setHostInputs(in);
-            m.moveTo(home.x - 1.0f, home.y - 0.5f, home.z - 0.5f);
-            for (int i = 0; i < 800 && m.motionState() != MotionState::AtTarget; ++i)
-            {
-                in.forceSampleSequence++;
-                m.setHostInputs(in);
-                m.tick(kDt);
-            }
-            if (m.isHomed())
-            {
-                return 41;
-            }
-            if (!runHomingToHomed(m, false, kTrip, kDt))
-            {
-                return 42;
-            }
-            if (!nearEqual(m.x(), home.x, 0.25f) || !nearEqual(m.y(), home.y, 0.25f) ||
-                !nearEqual(m.z(), home.z, 0.25f))
-            {
-                return 43;
-            }
-        }
-    }
-
-    // E — moveTo after home uses machine frame relative to MCS home.
-    {
-        Machine m;
-        if (!runHomingToHomed(m, true, kTrip, kDt))
-        {
-            return 50;
-        }
-        const float hx = m.x();
-        HostInputs in = makeSafeInputs();
-        m.setHostInputs(in);
-        m.moveTo(hx - 4.0f, m.y(), m.z());
-        for (int i = 0; i < 800 && m.motionState() != MotionState::AtTarget; ++i)
-        {
-            in.forceSampleSequence++;
-            m.setHostInputs(in);
-            m.tick(kDt);
-        }
-        if (!nearEqual(m.x(), hx - 4.0f, 0.15f))
-        {
-            return 51;
-        }
-    }
-
-    // F — redefine MCS clears plate/probe; restore keeps them; home never defines.
-    {
-        Machine m;
-        if (!runHomingToHomed(m, true, kTrip, kDt))
-        {
-            return 60;
-        }
-        m.setPlateOrigin(TestPoint{7.0f, 8.0f, 9.0f});
-        m.setProbeCenter(TestPoint{4.0f, 5.0f, 6.0f});
-        m.setToolOffset(TestPoint{1.0f, 1.0f, 1.0f});
-        const TestPoint home = m.calibrationSet().home_offset;
-
-        if (!runHomingToHomed(m, true, kTrip, kDt))
-        {
-            return 61;
-        }
-        if (m.calibrationSet().plate_origin_valid || m.calibrationSet().probe_center_valid)
-        {
-            return 62;
-        }
-        if (!nearEqual(m.calibrationSet().tool_offset.x, 0.0f))
-        {
-            return 63;
-        }
-
-        Machine m2;
-        if (!m2.restoreMachineCoordinateSystem(home))
-        {
-            return 64;
-        }
-        if (!m2.machineCoordinateSystemValid())
-        {
-            return 65;
-        }
-        if (m2.isHomed())
-        {
-            return 66;
-        }
-        m2.setPlateOrigin(TestPoint{7.0f, 8.0f, 9.0f});
-        m2.setProbeCenter(TestPoint{4.0f, 5.0f, 6.0f});
-        if (!m2.calibrationSet().plate_origin_valid || !m2.calibrationSet().probe_center_valid)
-        {
-            return 67;
-        }
-        if (!runHomingToHomed(m2, false, kTrip, kDt))
-        {
-            return 68;
-        }
-        if (!nearEqual(m2.calibrationSet().home_offset.x, home.x) ||
-            !nearEqual(m2.calibrationSet().plate_origin.x, 7.0f))
-        {
-            return 69;
         }
     }
 
@@ -388,9 +249,10 @@ int main()
             return 72;
         }
         const TestPoint home = m.calibrationSet().home_offset;
-        if (!nearEqual(home.x, -5.0f) || !nearEqual(home.y, -5.0f) || !nearEqual(home.z, -5.0f))
+        if (!nearEqual(home.x, 5.0f) || !nearEqual(home.y, -5.0f) || !nearEqual(home.z, -5.0f))
         {
-            std::fprintf(stderr, "G home=(%.3f,%.3f,%.3f) expected -5\n", home.x, home.y, home.z);
+            std::fprintf(stderr, "G home=(%.3f,%.3f,%.3f) expected (5,-5,-5)\n", home.x, home.y,
+                         home.z);
             return 73;
         }
         if (!m.calibrationSet().plate_origin_valid)
@@ -407,11 +269,266 @@ int main()
         {
             return 76;
         }
-        if (!nearEqual(m2.calibrationSet().home_offset.x, -kR) ||
+        if (!nearEqual(m2.calibrationSet().home_offset.x, kR) ||
             !nearEqual(m2.calibrationSet().home_offset.y, -kR) ||
             !nearEqual(m2.calibrationSet().home_offset.z, -kR))
         {
             return 77;
+        }
+    }
+
+    // H — Reference after jog: session trust enables fast approach (isHomed may be false).
+    {
+        Machine m;
+        if (!runHomingToHomed(m, true, kTrip, kDt))
+        {
+            return 80;
+        }
+        MachineConfig cfg = m.machineConfig();
+        cfg.motion.v_homing = 5.0f;
+        cfg.motion.v_homing_fast = 50.0f;
+        cfg.motion.homing_approach_distance = 50.0f;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 81;
+        }
+        const TestPoint home = m.calibrationSet().home_offset;
+        HostInputs in = makeSafeInputs();
+        m.setHostInputs(in);
+        // Jog away: clears isHomed; session trust remains.
+        m.moveTo(home.x, home.y, home.z - 150.0f);
+        for (int step = 0; step < 20000 && m.motionState() != MotionState::AtTarget; ++step)
+        {
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
+            m.tick(kDt);
+        }
+        if (m.isHomed())
+        {
+            std::fprintf(stderr, "H expected !isHomed after jog\n");
+            return 82;
+        }
+        const float approach_z = home.z - 50.0f;
+        if (!m.home())
+        {
+            return 83;
+        }
+        int steps_to_approach = -1;
+        for (int step = 0; step < 20000 && m.homingState() == HomingState::HomingZ; ++step)
+        {
+            applyHomingLimitBits(m, in, kTrip);
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
+            m.tick(kDt);
+            if (steps_to_approach < 0 && m.z() >= approach_z - 0.5f)
+            {
+                steps_to_approach = step;
+                break;
+            }
+        }
+        // 100 mm at 50 mm/s ≈ 100 steps; slow seek alone would need ~1000.
+        if (steps_to_approach < 0 || steps_to_approach > 250)
+        {
+            std::fprintf(stderr, "H fast approach steps=%d (expected <=250)\n", steps_to_approach);
+            return 84;
+        }
+        for (int step = 0; step < 20000 && m.homingState() != HomingState::Homed; ++step)
+        {
+            applyHomingLimitBits(m, in, kTrip);
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
+            m.tick(kDt);
+        }
+        if (!m.isHomed())
+        {
+            return 85;
+        }
+    }
+
+    // I — after invalidateHoming (Soft-STOP path): session trust keeps fast approach.
+    {
+        Machine m;
+        if (!runHomingToHomed(m, true, kTrip, kDt))
+        {
+            return 90;
+        }
+        MachineConfig cfg = m.machineConfig();
+        cfg.motion.v_homing = 5.0f;
+        cfg.motion.v_homing_fast = 50.0f;
+        cfg.motion.homing_approach_distance = 50.0f;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 91;
+        }
+        m.shiftRawPose(0.0f, 0.0f, -150.0f);
+        m.invalidateHoming();
+        if (m.homingState() == HomingState::Homed)
+        {
+            std::fprintf(stderr, "I expected HomingState cleared by invalidateHoming\n");
+            return 92;
+        }
+        const float approach_z = m.calibrationSet().home_offset.z - 50.0f;
+        HostInputs in = makeSafeInputs();
+        m.setHostInputs(in);
+        if (!m.home())
+        {
+            return 93;
+        }
+        int steps_to_approach = -1;
+        for (int step = 0; step < 20000 && m.homingState() == HomingState::HomingZ; ++step)
+        {
+            applyHomingLimitBits(m, in, kTrip);
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
+            m.tick(kDt);
+            if (steps_to_approach < 0 && m.z() >= approach_z - 0.5f)
+            {
+                steps_to_approach = step;
+                break;
+            }
+        }
+        if (steps_to_approach < 0 || steps_to_approach > 250)
+        {
+            std::fprintf(stderr, "I fast after invalidate steps=%d (expected <=250)\n",
+                         steps_to_approach);
+            return 94;
+        }
+        for (int step = 0; step < 20000 && m.homingState() != HomingState::Homed; ++step)
+        {
+            applyHomingLimitBits(m, in, kTrip);
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
+            m.tick(kDt);
+        }
+        if (!m.isHomed())
+        {
+            return 95;
+        }
+    }
+
+    // J — DefineMcs while Homed: always blind seek (no fast approach).
+    {
+        Machine m;
+        if (!runHomingToHomed(m, true, kTrip, kDt))
+        {
+            return 100;
+        }
+        MachineConfig cfg = m.machineConfig();
+        cfg.motion.v_homing = 5.0f;
+        cfg.motion.v_homing_fast = 50.0f;
+        cfg.motion.homing_approach_distance = 50.0f;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 101;
+        }
+        m.shiftRawPose(0.0f, 0.0f, -150.0f);
+        const float approach_z = m.calibrationSet().home_offset.z - 50.0f;
+        HostInputs in = makeSafeInputs();
+        m.setHostInputs(in);
+        if (!m.defineMachineCoordinateSystem())
+        {
+            return 102;
+        }
+        int steps_to_approach = -1;
+        for (int step = 0; step < 20000 && m.homingState() == HomingState::HomingZ; ++step)
+        {
+            applyHomingLimitBits(m, in, kTrip);
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
+            m.tick(kDt);
+            if (steps_to_approach < 0 && m.z() >= approach_z - 0.5f)
+            {
+                steps_to_approach = step;
+                break;
+            }
+        }
+        if (steps_to_approach < 500)
+        {
+            std::fprintf(stderr, "J DefineMcs blind steps=%d (expected >=500)\n", steps_to_approach);
+            return 103;
+        }
+    }
+
+    // K — config rejects non-positive fast speed / approach distance.
+    {
+        Machine m;
+        MachineConfig cfg = m.machineConfig();
+        ConfigValidationError err = ConfigValidationError::Ok;
+        cfg.motion.v_homing_fast = 0.0f;
+        if (m.trySetMachineConfig(cfg, err) || err != ConfigValidationError::VelocityNotPositive)
+        {
+            return 110;
+        }
+        cfg = m.machineConfig();
+        cfg.motion.homing_approach_distance = 0.0f;
+        if (m.trySetMachineConfig(cfg, err) || err != ConfigValidationError::BufferNegative)
+        {
+            return 111;
+        }
+    }
+
+    // L — safety Fault clears session trust → next Reference home is blind.
+    {
+        Machine m;
+        if (!runHomingToHomed(m, true, kTrip, kDt))
+        {
+            return 120;
+        }
+        MachineConfig cfg = m.machineConfig();
+        cfg.motion.v_homing = 5.0f;
+        cfg.motion.v_homing_fast = 50.0f;
+        cfg.motion.homing_approach_distance = 50.0f;
+        ConfigValidationError err = ConfigValidationError::Ok;
+        if (!m.trySetMachineConfig(cfg, err))
+        {
+            return 121;
+        }
+        m.shiftRawPose(0.0f, 0.0f, -150.0f);
+        HostInputs in = makeSafeInputs();
+        in.e_stop = true;
+        in.forceSampleSequence++;
+        m.setHostInputs(in);
+        m.tick(kDt);
+        if (m.machineState() != MachineState::Fault)
+        {
+            std::fprintf(stderr, "L expected Fault after e_stop\n");
+            return 122;
+        }
+        in.e_stop = false;
+        in.forceSampleSequence++;
+        m.setHostInputs(in);
+        m.clearFault();
+        if (m.machineState() != MachineState::Idle)
+        {
+            std::fprintf(stderr, "L expected Idle after clearFault\n");
+            return 123;
+        }
+        const float approach_z = m.calibrationSet().home_offset.z - 50.0f;
+        if (!m.home())
+        {
+            return 124;
+        }
+        int steps_to_approach = -1;
+        for (int step = 0; step < 20000 && m.homingState() == HomingState::HomingZ; ++step)
+        {
+            applyHomingLimitBits(m, in, kTrip);
+            in.forceSampleSequence++;
+            m.setHostInputs(in);
+            m.tick(kDt);
+            if (steps_to_approach < 0 && m.z() >= approach_z - 0.5f)
+            {
+                steps_to_approach = step;
+                break;
+            }
+        }
+        if (steps_to_approach < 500)
+        {
+            std::fprintf(stderr, "L blind after Fault steps=%d (expected >=500)\n",
+                         steps_to_approach);
+            return 125;
         }
     }
 

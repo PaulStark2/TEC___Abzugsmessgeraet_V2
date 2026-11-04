@@ -22,6 +22,10 @@ node_modules/
 
 # GUI runtime config (written by Parametereinstellungen)
 gui/server/data/*.json
+# Taught / saved test programs on device
+gui/server/data/programs/*.json
+# HMI message history (7-day JSONL)
+gui/server/data/*.jsonl
 
 # STM32 firmware out-of-tree build
 build-firmware/

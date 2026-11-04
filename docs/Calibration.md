@@ -1,10 +1,10 @@
-# Kalibrierung (MCS, Bauplatte, Messtaster)
+# Kalibrierung (MCS, Bauplatte, Einmessbohrung)
 
 ## GUI-Funktionen unter „Kalibrieren“
 
 | Funktion | Semantik |
 |----------|----------|
-| **Geometrische Kalibrierung** | Eigenes Untermenü: MCS und Bauplatte/Messtaster neu, nur Bauplatte/Messtaster bei bestehendem MCS, oder **Kalibrierkennwerte** |
+| **Geometrische Kalibrierung** | Eigenes Untermenü: MCS und Bauplatte/Einmessbohrung neu, nur Bauplatte/Einmessbohrung bei bestehendem MCS, oder **Kalibrierkennwerte** |
 | **Kalibrierkennwerte (Geometrie)** | Anzeige der gespeicherten MCS-/Plate-/Yaw-/K1–K3-/Probe-/ToolOffset-Posen plus Live-TCP zum Abgleich |
 | **Kraftkalibrierung der Kraftmessdose** | Eigenes Untermenü: Kalibrierprozess starten oder Kalibrierkennwerte |
 | **Kalibrierprozess starten** | Z-Regression, siehe [Force_Calibration.md](Force_Calibration.md) |
@@ -29,19 +29,20 @@ Abort nach Commit     → neues MCS bleibt; Geometrie unvollständig
 | **KM** | Kalibrierpunkt Bauplattenmitte = `plateOrigin` nach Bohrungsantastung |
 | **K1 / K2 / K3** | Optionale Rotationskalibrierung: L mit 55 mm Kanten, Winkel bei K2 |
 | **plateYaw** | Z-Drehung des Plattenrahmens relativ zur Maschine |
-| **Probe Calibration** | M19: Install setzt dauerhaftes `probeCenter` + `toolOffset=0`; Procedure-OffsetOnly aktualisiert nur `toolOffset` |
+| **Probe Calibration** | M19: Install setzt dauerhaftes `probeCenter` + `toolOffset=0`; Procedure-OffsetOnly aktualisiert nur `toolOffset` (kraftbasierte Einmess-Bohrung, siehe [M19_ProbeCalibration.md](M19_ProbeCalibration.md)) |
 
-## Bauplatten-Kalibrierung (Bohrungsantastung)
+## Bauplatten-Kalibrierung (Einmessprotokoll)
 
-Nicht mehr: Jog → sofort speichern. Stattdessen:
+Nicht mehr: Jog → sofort speichern / eintauchen + XY-first-Suche. Stattdessen:
 
-1. Grob in die Bohrung joggen und eintauchen.
-2. `CmdStartPlateBoreSearch` mit Punkt-ID (`1=KM`, `2=K1`, `3=K2`, `4=K3`).
-3. Core führt dieselbe Zwei-Sehnen-Mittelpunktsuche wie PreClamp aus (`core/BoreSearch`), danach Bodenantastung −Z und Lift (`plate_z_lift_mm`, Default 2 mm).
-4. GUI: „Kalibrierpunkt ausgerichtet! Soll der Kalibrierpunkt gespeichert werden?“ → Ja / Nein / Wiederholen.
-5. Bei Ja für KM: `CmdSetPlateOrigin` mit dem Suchergebnis (nicht der Roh-Jog-Pose).
+1. Optional: **Alten Kalibrierpunkt anfahren** (`CmdApproachCalibPoint`) — Raise auf Safe-Z-Calib → XY → Lower auf `target.z + approach_distance` (siehe [Safe_Z.md](Safe_Z.md)).
+2. Position ggf. per Jog nachkorrigieren (Hub **über** der Bohrung, nicht eingetaucht).
+3. **Einmessprotokoll starten** → `CmdStartPlateBoreSearch` mit Punkt-ID (`1=KM`, `2=K1`, `3=K2`, `4=K3`).
+4. Core: Spreizer offen → Ruheprobe → `BoreSearch` mit **`z_first`** und Parametern aus `MachineConfig.probe` (Floor → Lift → XY Zwei-Sehnen). Ergebnis-Z = Bodenkontakt.
+5. GUI: „Kalibrierpunkt ausgerichtet! Soll der Kalibrierpunkt gespeichert werden?“ → Ja / Nein / Wiederholen.
+6. Bei Ja für KM: `CmdSetPlateOrigin` mit dem Suchergebnis (nicht der Roh-Jog-Pose).
 
-Suchparameter liegen in `MachineConfig.plate_calib` und sind **unabhängig** von den PreClamp-`force.*`-Parametern (Parametermenü „Bauplatten-Bohrungskalibrierung“).
+PreClamp bleibt bei eigenen `force.*`-Parametern und XY-only (kein Floor).
 
 ### Rotationskalibrierung K1–K2–K3
 
@@ -69,6 +70,18 @@ machine.z  = plateOrigin.z  + platePoint.z + toolOffset.z
 
 Z-Differenzen zwischen den Punkten dienen nur als Verkippungs-Hinweis (kein Rx/Ry).
 
+## Einmessbohrung (Probe Calibration)
+
+Kraftbasierte Bohrungssuche (`BoreSearch` z_first), kein Messtaster. Details:
+[M19_ProbeCalibration.md](M19_ProbeCalibration.md).
+
+1. Spreizer **offen** (`setSpreaderExtend` vor der Suche) — gilt für geometrische Kalibrierung und Procedure-OffsetOnly.
+2. Hub oberhalb der Einmessbohrung: optional `CmdApproachCalibPoint` (`point_id=5`) bei gültigem `probeCenter`, sonst Jog; Automatic weiterhin ProbeApproach (Program-Safe-Z).
+3. Floor → Lift → XY Zwei-Sehnen → Mittelpunkt.
+4. `CmdStartProbeCalib` (`0x54`) = **Install** (`probeCenter` + `toolOffset=0`).
+
+Parameter: `MachineConfig.probe` — gemeinsam mit Plate-Teach; unabhängig von PreClamp `force.*`.
+
 ## Invariante
 
 > Einmal definiertes MCS (Ursprung an den +Max-Anschlägen) bleibt bei normalem Homing und bei Änderung von R unverändert. Nur die explizite Full-Kalibrierung darf das MCS neu definieren.
@@ -80,17 +93,20 @@ Z-Differenzen zwischen den Punkten dienen nur als Verkippungs-Hinweis (kein Rx/R
 |---------|-----|---------|
 | `CmdHome` | `0x15` | Reference Home (Rejected ohne MCS) |
 | `CmdSetPlateOrigin` | `0x53` | KM speichern (xyz) |
-| `CmdStartProbeCalib` | `0x54` | Messtaster-Install |
+| `CmdStartProbeCalib` | `0x54` | Einmessbohrung-Install |
 | `CmdDefineMcs` | `0x56` | MCS neu definieren (nur Core bis Commit) |
 | `CmdRestoreMcs` | `0x57` | Persistiertes MCS laden (xyz ignoriert; Home aus R) |
-| `CmdStartPlateBoreSearch` | `0x5D` | Bohrungssuche + Floor; Payload u8 Punkt-ID |
+| `CmdStartPlateBoreSearch` | `0x5D` | Plate-Teach Einmessprotokoll (`z_first`); Payload u8 Punkt-ID |
 | `CmdSetPlateYaw` | `0x5E` | `plate_yaw_rad` setzen |
+| `CmdApproachCalibPoint` | `0x61` | Alten Punkt anfahren; u8 `1=KM`…`4=K3`, `5=probe` |
+| `CmdSetRotationPoints` | `0x62` | K1–K3 in Core (9×f32); Connect-Push |
 | `MsgBoreCenter` | `0xA6` | Ergebnis (inkl. `cz`, `point_id`) |
 
 ## Connect
 
 ```text
-load calibration.json → CmdRestoreMcs → SetPlate → SetPlateYaw → SetProbe (wenn gültig)
+load calibration.json → CmdRestoreMcs → SetPlate → SetPlateYaw
+  → SetRotationPoints (wenn gültig) → SetProbe (wenn gültig)
 ```
 
 Legacy-Dateien ohne MCS-Block oder ohne `origin=positiveMaxSwitches`: `mcs_valid = false` (kein Identity-MCS).
@@ -98,24 +114,12 @@ Fehlendes `plateYawRad` → 0 (Translation-only, wie früher).
 
 ## Hand-Jog (Kalibrier-Wizard)
 
-Bauplatte-/Messtaster-Schritte nutzen dieselbe Jog-UI wie der Handmodus
+Bauplatte-/Einmessbohrung-Schritte nutzen dieselbe Jog-UI wie der Handmodus
 (`jogPanel` → `jogControls`): Einzelschritt / Dauerhalt und eintippbare
 Schrittweite mit Raster `jog_min_step_mm` (Host-Parameter, siehe `gui/README.md` G7).
 
-## Messtaster / Probe Calibration am STM32
+## Soft-STOP / Abbruch im Teach
 
-Das Einmessprotokoll (`CmdStartProbeCalib` / FullCalib) braucht denselben
-Host-Vertrag wie die Simulation — siehe
-[M19_ProbeCalibration.md](M19_ProbeCalibration.md) Abschnitt **Host contract**.
-
-Kurz:
-
-- Hardware: **NC**, Ruhe High, Kontakt Low an `PA5`
-- GPIO-Low allein reicht **nicht**: Firmware muss an der Kontaktflanke
-  Maschinenpose + `probeTriggerSequence` in `HostInputs` legen
-  (`FirmwareHost`, 1 kHz). Fehlt das, „erkennt“ Core den Taster nicht.
-- Details und Nucleo-LD2-Hinweis: [firmware/README.md](../firmware/README.md)
-- Wenn die Achsen „fertig“ wirken, die GUI aber **abgebrochen** meldet: oft
-  **Kreis-Fit** am Ende (Radius ≠ Soll) oder **CommunicationTimeout** — siehe
-  Failure-modes in [M19_ProbeCalibration.md](M19_ProbeCalibration.md); Statusleiste
-  `Fault` / Phase beachten.
+Standalone Install und Plate-Bore-Teach behalten `Homed` — Wiederholen ohne
+erneutes Homing. Failure-modes: [M19_ProbeCalibration.md](M19_ProbeCalibration.md).
+Core Einmessen nutzt keinen Messtaster-GPIO (`PA5` / `probeTriggered`).

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AbortReason.hpp"
 #include "BorePoint.hpp"
 #include "BoreSearch.hpp"
 #include "CoordinateTransform.hpp"
@@ -22,6 +23,8 @@ public:
     void setProgram(const TestProgram& program);
     bool start();
     bool startProbeCalibration();
+    // Handmodus: tare → SeatToForce → TestOrAge iterations from current pose (no PreClamp/program).
+    bool startTestOrAgeManual();
     void tick(float dt);
     bool pause();
     void resume();
@@ -63,8 +66,11 @@ public:
     const BoreReport& boreReport() const;
     void consumeBoreReport();
 
-    // Standalone plate bore teach (XY chords + floor + lift). point_id: 1=KM … 4=K3.
+    // Standalone plate bore teach (z_first Einmess protocol). point_id: 1=KM … 4=K3.
     bool startPlateBoreSearch(std::uint8_t point_id);
+
+    // Teach Anfahrt of a stored calib pose. point_id: 1=KM … 4=K3, 5=probe.
+    bool startApproachCalibPoint(std::uint8_t point_id);
 
     // Procedure anomaly (CoordDrift / LateralForce / ZTravelLimit / TcpHang).
     struct AnomalyReport
@@ -104,17 +110,22 @@ private:
     bool motionSettled() const;
     bool zMinBlocked() const;
     bool atSafeZ() const;
+    bool atCalibSafeZ() const;
     bool resolveCurrentMachinePoint();
     bool resolveSafeZMachine(float& out_safe_z_machine) const;
+    bool resolveCalibApproachTarget(std::uint8_t point_id, TestPoint& out) const;
     bool programPointsBelowSafeZ() const;
     void enterPhase(ProcedurePhase phase);
     void commandRaiseSafeZ();
+    void commandRaiseCalibSafeZ();
+    void commandTraverseCalibSafeXY(float x, float y);
     void commandTraverseXY(float x, float y);
     void commandLowerToZ(float z);
-    void abortProcess(const char* reason = "unspecified");
+    void abortProcess(AbortReason reason = AbortReason::Unspecified);
     void setAutomaticProcessGuards(bool active);
     void handleMoveSafePose();
     void handleProbeApproach();
+    void handleCalibApproach();
     void handleProbeCalibrate(float dt);
     void handleProbeRemeasure(float dt);
     void handlePointApproach();
@@ -124,11 +135,26 @@ private:
     void handleClamp();
     void handleInsertInitial();
     void handleTestOrAge();
+    void enterTestOrAgeAfterManualSeat();
+    void completeTestOrAgeManual();
+    void resetExtractSeek();
+    // Extract leg: arm on Zug (Fz < -tol), then kraftfrei, then optional +Z offset.
+    // Returns true when the extract leg is complete.
+    bool tickExtractSeek(float fz, float free_tol);
+    // Start insert after extract: optional fast return to force_free_z_ at
+    // extract_after_free_v, then dive at phase3_v_insert.
+    void beginTestOrAgeInsert();
+    void startTestOrAgeInsertDive();
     void handleUnclamp();
     void handleNextPoint();
     void handleMoveSafeEnd();
     void startForceTare(ProcedurePhase next);
     void startForceTareBeforeFineApproach();
+    void startForceTareBeforeProbeBore(ProbeCalibration::StorePolicy policy, bool remeasure);
+    void startForceTareBeforePlateBore();
+    void startProbeBoreAfterTare();
+    void startPlateBoreAfterTare();
+    bool awaitSpreaderRetracted();
     void commandFineApproach();
     void handleForceTare();
 
@@ -158,14 +184,26 @@ private:
     float end_x_;
     float end_y_;
     bool probe_calib_standalone_;
+    bool probe_await_spreader_ = false; // open spreader before Install/OffsetOnly bore
+    bool probe_await_spreader_retract_ = false; // retract after Einmessen before continuing
+    bool preclamp_await_spreader_retracted_ = false; // close/deactivate before PreClamp wall search
     ProcedurePhase tare_next_;
     // Coarse Z has stopped. After ForceTare, resume PointApproach leg 3
     // instead of enterPhase(tare_next_), which would restart the approach.
     bool fine_approach_after_tare_;
+    // Coarse Z / hub above Einmess-Bohrung. After ForceTare start z_first BoreSearch.
+    bool probe_bore_after_tare_ = false;
+    bool plate_bore_after_tare_ = false;
+    ProbeCalibration::StorePolicy probe_bore_policy_ = ProbeCalibration::StorePolicy::Install;
+    bool probe_bore_remeasure_ = false;
 
     BoreSearch bore_search_{};
     bool preclamp_await_confirm_ = false;
     bool plate_bore_standalone_ = false;
+    bool plate_await_spreader_ = false;
+    bool calib_approach_standalone_ = false;
+    bool test_or_age_standalone_ = false;
+    bool test_or_age_await_spreader_ = false;
     std::uint8_t plate_bore_point_id_ = 0;
     BoreReport bore_report_{};
 
@@ -199,4 +237,13 @@ private:
     // Kraft-Weg distance gate (TestOrAge). Reset on leg/iteration change.
     bool force_path_have_z_ = false;
     float force_path_last_z_ = 0.0f;
+    // Insert fine phase: slower v + finer dz near Sollkraft.
+    bool insert_fine_active_ = false;
+
+    // Extract seek (TestOrAge legs 0/2): ignore first 0 N (Druck→Zug), end after Zug→0.
+    bool extract_seen_tensile_ = false;
+    bool extract_free_latched_ = false;
+    float extract_offset_target_z_ = 0.0f;
+    // Insert: returning from after-free offset down to force_free_z_ (not yet measuring).
+    bool insert_return_to_free_ = false;
 };

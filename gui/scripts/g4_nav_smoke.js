@@ -17,7 +17,6 @@ const ASSETS = [
   '/js/router.js',
   '/js/api.js',
   '/js/statusBar.js',
-  '/js/tcpView.js',
   '/js/pages/menu.js',
   '/js/pages/manual.js',
 ];
@@ -45,9 +44,6 @@ async function run() {
   const html = await request('/');
   if (!html.body.includes('id="page-root"')) {
     throw new Error('Shell page-root missing');
-  }
-  if (!html.body.includes('id="tcp-canvas"')) {
-    throw new Error('Persistent tcp-canvas missing');
   }
   if (!html.body.includes('btn-stop-global')) {
     throw new Error('Global STOP missing');

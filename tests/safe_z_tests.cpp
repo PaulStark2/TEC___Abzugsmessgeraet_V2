@@ -34,6 +34,41 @@ static void prepare(Machine& machine)
 
 int main()
 {
+    // Safe-Z-Calib: max machine-Z of stored calib poses + buffer (no program).
+    {
+        CalibrationSet calib{};
+        float max_z = 0.0f;
+        float safe = 0.0f;
+        if (computeMaxCalibZMachine(calib, max_z) || resolveCalibSafeZMachine(calib, 30.0f, safe))
+        {
+            return 50;
+        }
+        calib.plate_origin = TestPoint{10.0f, 20.0f, 5.0f};
+        calib.plate_origin_valid = true;
+        calib.probe_center = TestPoint{1.0f, 2.0f, 12.0f};
+        calib.probe_center_valid = true;
+        if (!computeMaxCalibZMachine(calib, max_z) || !nearEqual(max_z, 12.0f))
+        {
+            return 51;
+        }
+        if (!resolveCalibSafeZMachine(calib, 30.0f, safe) || !nearEqual(safe, 42.0f))
+        {
+            return 52;
+        }
+        calib.k1 = TestPoint{0.0f, 0.0f, 50.0f};
+        calib.k2 = TestPoint{0.0f, 0.0f, 8.0f};
+        calib.k3 = TestPoint{0.0f, 0.0f, 9.0f};
+        calib.rotation_points_valid = true;
+        if (!computeMaxCalibZMachine(calib, max_z) || !nearEqual(max_z, 50.0f))
+        {
+            return 53;
+        }
+        if (!resolveCalibSafeZMachine(calib, 10.0f, safe) || !nearEqual(safe, 60.0f))
+        {
+            return 54;
+        }
+    }
+
     // Test A — simple: max(0,5,10) + 30 = 40
     {
         TestProgram program;

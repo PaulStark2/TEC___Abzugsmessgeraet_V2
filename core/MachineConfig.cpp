@@ -1,5 +1,4 @@
 #include "MachineConfig.hpp"
-#include "ProbeGeometry.hpp"
 
 #include <cmath>
 
@@ -85,20 +84,25 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
 {
     if (!velocityOk(config.motion.v_approach_testpoints) || !velocityOk(config.motion.v_fine_testpoints) ||
         !velocityOk(config.motion.v_bore_search) ||
-        !velocityOk(config.plate_calib.v_plate_bore_search) ||
         !velocityOk(config.motion.v_unclamp) || !velocityOk(config.motion.v_homing) ||
+        !velocityOk(config.motion.v_homing_fast) ||
         !velocityOk(config.motion.phase1_v_extract) || !velocityOk(config.motion.phase1_v_insert) ||
         !velocityOk(config.motion.phase3_v_extract) || !velocityOk(config.motion.phase3_v_insert) ||
-        !velocityOk(config.probe.v_approach_probe) || !velocityOk(config.probe.v_transfer_probe) ||
-        !velocityOk(config.probe.v_search) || !velocityOk(config.probe.v_search_fine))
+        !velocityOk(config.motion.phase3_v_insert_fine) ||
+        !velocityOk(config.motion.extract_after_free_v) ||
+        !velocityOk(config.probe.v_approach) || !velocityOk(config.probe.v_search) ||
+        !velocityOk(config.fault_manual.v_max))
     {
         if (config.motion.v_approach_testpoints <= 0.0f || config.motion.v_fine_testpoints <= 0.0f ||
-            config.motion.v_bore_search <= 0.0f || config.plate_calib.v_plate_bore_search <= 0.0f ||
+            config.motion.v_bore_search <= 0.0f ||
             config.motion.v_unclamp <= 0.0f || config.motion.v_homing <= 0.0f ||
+            config.motion.v_homing_fast <= 0.0f ||
             config.motion.phase1_v_extract <= 0.0f || config.motion.phase1_v_insert <= 0.0f ||
             config.motion.phase3_v_extract <= 0.0f || config.motion.phase3_v_insert <= 0.0f ||
-            config.probe.v_approach_probe <= 0.0f || config.probe.v_transfer_probe <= 0.0f ||
-            config.probe.v_search <= 0.0f || config.probe.v_search_fine <= 0.0f)
+            config.motion.phase3_v_insert_fine <= 0.0f ||
+            config.motion.extract_after_free_v <= 0.0f ||
+            config.probe.v_approach <= 0.0f || config.probe.v_search <= 0.0f ||
+            config.fault_manual.v_max <= 0.0f)
         {
             return ConfigValidationError::VelocityNotPositive;
         }
@@ -106,14 +110,12 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     }
 
     if (!accelerationOk(config.motion.a_testpoints) || !accelerationOk(config.motion.a_homing) ||
-        !accelerationOk(config.motion.phase1_a) || !accelerationOk(config.motion.phase3_a) ||
-        !accelerationOk(config.probe.a_probe_transfer) || !accelerationOk(config.probe.a_probe_search) ||
-        !accelerationOk(config.probe.a_probe_brake))
+        !accelerationOk(config.motion.a_homing_fast) ||
+        !accelerationOk(config.motion.phase1_a) || !accelerationOk(config.motion.phase3_a))
     {
         if (config.motion.a_testpoints < 0.0f || config.motion.a_homing < 0.0f ||
-            config.motion.phase1_a < 0.0f || config.motion.phase3_a < 0.0f ||
-            config.probe.a_probe_transfer < 0.0f || config.probe.a_probe_search < 0.0f ||
-            config.probe.a_probe_brake < 0.0f)
+            config.motion.a_homing_fast < 0.0f ||
+            config.motion.phase1_a < 0.0f || config.motion.phase3_a < 0.0f)
         {
             return ConfigValidationError::AccelerationNegative;
         }
@@ -121,9 +123,10 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     }
 
     // Manual jog must be able to ramp. 0 would be an instant velocity step.
-    if (!(config.motion.a_manual > 0.0f) || config.motion.a_manual > SafetyLimits::kMaxAcceleration)
+    if (!(config.motion.a_manual > 0.0f) || config.motion.a_manual > SafetyLimits::kMaxAcceleration ||
+        !(config.fault_manual.a > 0.0f) || config.fault_manual.a > SafetyLimits::kMaxAcceleration)
     {
-        if (!(config.motion.a_manual > 0.0f))
+        if (!(config.motion.a_manual > 0.0f) || !(config.fault_manual.a > 0.0f))
         {
             return ConfigValidationError::AccelerationNegative;
         }
@@ -131,33 +134,36 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     }
 
     if (!cornerOk(config.motion.corner_testpoints) || !cornerOk(config.motion.phase1_corner) ||
-        !cornerOk(config.motion.phase3_corner) || !cornerOk(config.probe.corner_probe_transfer))
+        !cornerOk(config.motion.phase3_corner))
     {
         if (config.motion.corner_testpoints < 0.0f || config.motion.phase1_corner < 0.0f ||
-            config.motion.phase3_corner < 0.0f || config.probe.corner_probe_transfer < 0.0f)
+            config.motion.phase3_corner < 0.0f)
         {
             return ConfigValidationError::CornerNegative;
         }
         return ConfigValidationError::CornerExceedsSafety;
     }
 
-    // Use the higher of insert/extract speed per phase for corner consistency.
+    // Use the higher of insert/extract/(after-free) speed per phase for corner consistency.
     const float phase1_v =
         (config.motion.phase1_v_extract > config.motion.phase1_v_insert) ? config.motion.phase1_v_extract
                                                                          : config.motion.phase1_v_insert;
-    const float phase3_v =
+    float phase3_v =
         (config.motion.phase3_v_extract > config.motion.phase3_v_insert) ? config.motion.phase3_v_extract
                                                                          : config.motion.phase3_v_insert;
-    const float probe_transfer_v = (config.probe.v_approach_probe > config.probe.v_transfer_probe)
-                                       ? config.probe.v_approach_probe
-                                       : config.probe.v_transfer_probe;
+    if (config.motion.extract_after_free_v > phase3_v)
+    {
+        phase3_v = config.motion.extract_after_free_v;
+    }
+    if (config.motion.phase3_v_insert_fine > phase3_v)
+    {
+        phase3_v = config.motion.phase3_v_insert_fine;
+    }
 
     if (!blendProfileOk(config.motion.v_approach_testpoints, config.motion.a_testpoints,
                         config.motion.corner_testpoints) ||
         !blendProfileOk(phase1_v, config.motion.phase1_a, config.motion.phase1_corner) ||
-        !blendProfileOk(phase3_v, config.motion.phase3_a, config.motion.phase3_corner) ||
-        !blendProfileOk(probe_transfer_v, config.probe.a_probe_transfer,
-                        config.probe.corner_probe_transfer))
+        !blendProfileOk(phase3_v, config.motion.phase3_a, config.motion.phase3_corner))
     {
         return ConfigValidationError::CornerInconsistent;
     }
@@ -165,6 +171,12 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     // Buffer must be strictly positive so every plate point stays below safe_z_plate.
     if (!std::isfinite(config.motion.safe_z_buffer) || !(config.motion.safe_z_buffer > 0.0f) ||
         config.motion.safe_z_buffer > SafetyLimits::kMaxAbsSafeZ)
+    {
+        return ConfigValidationError::SafeZInvalid;
+    }
+    if (!std::isfinite(config.motion.safe_z_calib_buffer) ||
+        !(config.motion.safe_z_calib_buffer > 0.0f) ||
+        config.motion.safe_z_calib_buffer > SafetyLimits::kMaxAbsSafeZ)
     {
         return ConfigValidationError::SafeZInvalid;
     }
@@ -177,6 +189,16 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     // 0 = every tick; upper bound keeps a single stroke from collapsing to one sample.
     if (!std::isfinite(config.force.force_path_dz_mm) || config.force.force_path_dz_mm < 0.0f ||
         config.force.force_path_dz_mm > 5.0f)
+    {
+        return ConfigValidationError::FilterInvalid;
+    }
+    if (!std::isfinite(config.force.force_path_dz_fine_mm) ||
+        config.force.force_path_dz_fine_mm < 0.0f || config.force.force_path_dz_fine_mm > 5.0f)
+    {
+        return ConfigValidationError::FilterInvalid;
+    }
+    if (!std::isfinite(config.force.force_near_target_frac) ||
+        config.force.force_near_target_frac <= 0.0f || config.force.force_near_target_frac > 1.0f)
     {
         return ConfigValidationError::FilterInvalid;
     }
@@ -211,10 +233,7 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
         !forceAbsOk(config.collision.unclamp_N, config.force.range_N) ||
         !forceAbsOk(config.collision.contact_x_N, config.force.range_N) ||
         !forceAbsOk(config.collision.contact_y_N, config.force.range_N) ||
-        !forceAbsOk(config.collision.contact_N, config.force.range_N) ||
-        !forceAbsOk(config.collision.measure_x_N, config.force.range_N) ||
-        !forceAbsOk(config.collision.measure_y_N, config.force.range_N) ||
-        !forceAbsOk(config.collision.measure_N, config.force.range_N))
+        !forceAbsOk(config.collision.contact_N, config.force.range_N))
     {
         if (config.force.xy_tolerance_N <= 0.0f || config.force.force_tolerance_N <= 0.0f ||
             config.force.test_lateral_force_N <= 0.0f || config.collision.approach_x_N <= 0.0f ||
@@ -224,9 +243,34 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
             config.collision.clamp_y_N <= 0.0f || config.collision.clamp_N <= 0.0f ||
             config.collision.unclamp_x_N <= 0.0f || config.collision.unclamp_y_N <= 0.0f ||
             config.collision.unclamp_N <= 0.0f || config.collision.contact_x_N <= 0.0f ||
-            config.collision.contact_y_N <= 0.0f || config.collision.contact_N <= 0.0f ||
-            config.collision.measure_x_N <= 0.0f || config.collision.measure_y_N <= 0.0f ||
-            config.collision.measure_N <= 0.0f)
+            config.collision.contact_y_N <= 0.0f || config.collision.contact_N <= 0.0f)
+        {
+            return ConfigValidationError::ForceNotPositive;
+        }
+        return ConfigValidationError::ForceExceedsSafety;
+    }
+
+    // Measure collision is percent of Prüfkraft (exclusive > 100%, up to SafetyLimits).
+    const auto measurePctOk = [](float pct) {
+        return std::isfinite(pct) && pct > SafetyLimits::kMinMeasureCollisionPercent &&
+               pct <= SafetyLimits::kMaxMeasureCollisionPercent;
+    };
+    if (!measurePctOk(config.collision.measure_x_N) || !measurePctOk(config.collision.measure_y_N) ||
+        !measurePctOk(config.collision.measure_N))
+    {
+        return ConfigValidationError::ForceExceedsSafety;
+    }
+
+    // Fault-manual recovery hard limits may exceed the measuring range but not the typo brake.
+    if (!forceAbsOk(config.fault_manual.hard_limit_x_N, SafetyLimits::kMaxFxAbs_N) ||
+        !forceAbsOk(config.fault_manual.hard_limit_y_N, SafetyLimits::kMaxFyAbs_N) ||
+        !forceAbsOk(config.fault_manual.hard_limit_N, SafetyLimits::kMaxFzAbs_N) ||
+        config.fault_manual.hard_limit_x_N < config.force.hard_limit_x_N ||
+        config.fault_manual.hard_limit_y_N < config.force.hard_limit_y_N ||
+        config.fault_manual.hard_limit_N < config.force.hard_limit_N)
+    {
+        if (!(config.fault_manual.hard_limit_x_N > 0.0f) || !(config.fault_manual.hard_limit_y_N > 0.0f) ||
+            !(config.fault_manual.hard_limit_N > 0.0f))
         {
             return ConfigValidationError::ForceNotPositive;
         }
@@ -247,8 +291,7 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     }
 
     if (config.force.xy_correction_step <= 0.0f || config.force.xy_max_correction <= 0.0f ||
-        config.force.insert_search_distance <= 0.0f || config.probe.search_distance <= 0.0f ||
-        config.probe.backoff < 0.0f)
+        config.force.insert_search_distance <= 0.0f)
     {
         return ConfigValidationError::BufferNegative;
     }
@@ -273,6 +316,24 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     {
         return ConfigValidationError::BufferExceedsSafety;
     }
+    // 0 = no AfterSeat retract (tare / second PreClamp at seat pose).
+    if (config.force.after_seat_retract_mm < 0.0f)
+    {
+        return ConfigValidationError::BufferNegative;
+    }
+    if (config.force.after_seat_retract_mm > SafetyLimits::kMaxInsertionBuffer)
+    {
+        return ConfigValidationError::BufferExceedsSafety;
+    }
+    // 0 = stop extract at kraftfrei after tensile arming.
+    if (config.force.extract_after_free_mm < 0.0f)
+    {
+        return ConfigValidationError::BufferNegative;
+    }
+    if (config.force.extract_after_free_mm > SafetyLimits::kMaxInsertionBuffer)
+    {
+        return ConfigValidationError::BufferExceedsSafety;
+    }
 
     if (!(config.force.sample_timeout_s >= SafetyLimits::kMinForceSampleTimeout_s))
     {
@@ -292,37 +353,6 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
         return ConfigValidationError::TimeExceedsSafety;
     }
     if (config.force.bore_refine_passes > SafetyLimits::kMaxBoreRefinePasses)
-    {
-        return ConfigValidationError::IterationsZero;
-    }
-    if (!(config.plate_calib.wall_force_N > 0.0f) || !(config.plate_calib.floor_force_N > 0.0f))
-    {
-        return ConfigValidationError::ForceNotPositive;
-    }
-    if (config.plate_calib.wall_force_N > SafetyLimits::kMaxFxAbs_N ||
-        config.plate_calib.floor_force_N > SafetyLimits::kMaxFzAbs_N)
-    {
-        return ConfigValidationError::ForceExceedsSafety;
-    }
-    if (!(config.plate_calib.xy_search_limit > 0.0f) || !(config.plate_calib.z_search_limit > 0.0f) ||
-        !(config.plate_calib.z_lift_mm >= 0.0f))
-    {
-        return ConfigValidationError::BufferNegative;
-    }
-    if (config.plate_calib.xy_search_limit > SafetyLimits::kMaxXyCorrection ||
-        config.plate_calib.z_search_limit > SafetyLimits::kMaxPlateZSearch ||
-        config.plate_calib.z_lift_mm > SafetyLimits::kMaxPlateZLift)
-    {
-        return ConfigValidationError::BufferExceedsSafety;
-    }
-    if (!(config.plate_calib.timeout_s >= SafetyLimits::kMinPreClampTimeout_s) ||
-        config.plate_calib.timeout_s > SafetyLimits::kMaxPreClampTimeout_s)
-    {
-        return config.plate_calib.timeout_s < SafetyLimits::kMinPreClampTimeout_s
-                   ? ConfigValidationError::TimeNotPositive
-                   : ConfigValidationError::TimeExceedsSafety;
-    }
-    if (config.plate_calib.refine_passes > SafetyLimits::kMaxBoreRefinePasses)
     {
         return ConfigValidationError::IterationsZero;
     }
@@ -352,43 +382,45 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
         return ConfigValidationError::TimeExceedsSafety;
     }
 
-    if (config.probe.search_depth <= 0.0f || config.probe.approach_distance <= 0.0f ||
-        config.probe.head_diameter < 0.0f || config.probe.measuring_head_diameter <= 0.0f ||
-        config.probe.measuring_head_thickness <= 0.0f || config.probe.tool_diameter <= 0.0f ||
-        config.probe.tool_cylindrical_height <= 0.0f || config.probe.xy_search_margin < 0.0f)
-    {
-        return ConfigValidationError::BufferNegative;
-    }
-    if (config.probe.search_depth > SafetyLimits::kMaxSearchDepth ||
-        config.probe.approach_distance > SafetyLimits::kMaxApproachDistance ||
-        config.probe.search_distance > SafetyLimits::kMaxApproachDistance ||
-        config.force.insert_search_distance > SafetyLimits::kMaxApproachDistance ||
-        config.probe.backoff > SafetyLimits::kMaxApproachDistance ||
-        config.probe.head_diameter > SafetyLimits::kMaxProbeDiameter ||
-        config.probe.measuring_head_diameter > SafetyLimits::kMaxProbeDiameter ||
-        config.probe.measuring_head_thickness > SafetyLimits::kMaxProbeThickness ||
-        config.probe.tool_diameter > SafetyLimits::kMaxProbeDiameter ||
-        config.probe.tool_cylindrical_height > SafetyLimits::kMaxToolCylindricalHeight ||
-        config.probe.xy_search_margin > SafetyLimits::kMaxXySearchMargin)
+    if (config.force.insert_search_distance > SafetyLimits::kMaxApproachDistance)
     {
         return ConfigValidationError::BufferExceedsSafety;
     }
-    if (!(xySearchInnerRadius(config.probe.measuring_head_diameter, config.probe.xy_search_margin) > 0.0f))
+
+    // Einmess-Bohrung / plate bore teach (shared probe params).
+    if (!(config.probe.wall_force_N > 0.0f) || !(config.probe.floor_force_N > 0.0f))
+    {
+        return ConfigValidationError::ForceNotPositive;
+    }
+    if (config.probe.wall_force_N > SafetyLimits::kMaxFxAbs_N ||
+        config.probe.floor_force_N > SafetyLimits::kMaxFzAbs_N)
+    {
+        return ConfigValidationError::ForceExceedsSafety;
+    }
+    if (!(config.probe.xy_search_limit > 0.0f) || !(config.probe.z_search_limit > 0.0f) ||
+        !(config.probe.z_lift_mm >= 0.0f) || !(config.probe.approach_distance > 0.0f) ||
+        !(config.motion.homing_approach_distance > 0.0f))
     {
         return ConfigValidationError::BufferNegative;
     }
-    if (config.probe.num_fine_searches > SafetyLimits::kMaxIterations)
+    if (config.probe.xy_search_limit > SafetyLimits::kMaxXyCorrection ||
+        config.probe.z_search_limit > SafetyLimits::kMaxPlateZSearch ||
+        config.probe.z_lift_mm > SafetyLimits::kMaxPlateZLift ||
+        config.probe.approach_distance > SafetyLimits::kMaxApproachDistance ||
+        config.motion.homing_approach_distance > SafetyLimits::kMaxApproachDistance)
+    {
+        return ConfigValidationError::BufferExceedsSafety;
+    }
+    if (!(config.probe.timeout_s >= SafetyLimits::kMinPreClampTimeout_s) ||
+        config.probe.timeout_s > SafetyLimits::kMaxPreClampTimeout_s)
+    {
+        return config.probe.timeout_s < SafetyLimits::kMinPreClampTimeout_s
+                   ? ConfigValidationError::TimeNotPositive
+                   : ConfigValidationError::TimeExceedsSafety;
+    }
+    if (config.probe.refine_passes > SafetyLimits::kMaxBoreRefinePasses)
     {
         return ConfigValidationError::IterationsZero;
-    }
-    if (!std::isfinite(config.probe.probe_offset_reference.x) ||
-        !std::isfinite(config.probe.probe_offset_reference.y) ||
-        !std::isfinite(config.probe.probe_offset_reference.z) ||
-        std::fabs(config.probe.probe_offset_reference.x) > SafetyLimits::kMaxNominalAbs ||
-        std::fabs(config.probe.probe_offset_reference.y) > SafetyLimits::kMaxNominalAbs ||
-        std::fabs(config.probe.probe_offset_reference.z) > SafetyLimits::kMaxNominalAbs)
-    {
-        return ConfigValidationError::SafeZInvalid;
     }
 
     return ConfigValidationError::Ok;

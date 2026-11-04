@@ -124,6 +124,23 @@ async function pushCommittedCalibration(machineClient, calibOverride) {
   }
 
   if (
+    calib.rotationPointsValid &&
+    calib.k1 &&
+    calib.k2 &&
+    calib.k3 &&
+    typeof machineClient.setRotationPoints === 'function'
+  ) {
+    const rot = await machineClient.setRotationPoints(calib.k1, calib.k2, calib.k3);
+    if (!rot || !rot.ok) {
+      return {
+        ok: false,
+        error: (rot && rot.error) || 'CmdSetRotationPoints failed',
+        calibration: calib,
+      };
+    }
+  }
+
+  if (
     calib.probeCenterValid &&
     calib.probeCenter &&
     typeof machineClient.setProbeCenter === 'function'

@@ -63,7 +63,7 @@ function computeProbeZPlate(calibration) {
     return {
       ok: false,
       code: 'probe_center',
-      error: 'Messtaster-Zentrum.z ist ungültig — Safe-Z kann nicht berechnet werden.',
+      error: 'Einmessbohrung-Zentrum.z ist ungültig — Safe-Z kann nicht berechnet werden.',
     };
   }
   return { ok: true, probeZPlate: pz - oz - tz };

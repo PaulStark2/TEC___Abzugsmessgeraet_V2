@@ -29,13 +29,10 @@ int main()
         {
             return 3;
         }
-        if (!nearEqual(cfg.probe.measuring_head_diameter, 8.0f) ||
-            !nearEqual(cfg.probe.measuring_head_thickness, 3.0f) ||
-            !nearEqual(cfg.probe.tool_diameter, 2.5f) ||
-            !nearEqual(cfg.probe.tool_cylindrical_height, 15.0f) ||
-            !nearEqual(cfg.probe.xy_search_margin, 2.0f) ||
-            !nearEqual(cfg.force.insert_search_distance, 10.0f) ||
-            !nearEqual(cfg.probe.search_distance, 10.0f) || !nearEqual(cfg.probe.search_depth, 5.0f))
+        if (!nearEqual(cfg.probe.wall_force_N, 0.5f) || !nearEqual(cfg.probe.floor_force_N, 0.5f) ||
+            !nearEqual(cfg.probe.xy_search_limit, 5.0f) || !nearEqual(cfg.probe.z_search_limit, 20.0f) ||
+            !nearEqual(cfg.probe.z_lift_mm, 2.0f) || !nearEqual(cfg.probe.approach_distance, 15.0f) ||
+            !nearEqual(cfg.force.insert_search_distance, 10.0f) || !nearEqual(cfg.probe.v_search, 1.0f))
         {
             return 5;
         }
@@ -293,7 +290,7 @@ int main()
         }
         MachineConfig defaults{};
         if (defaults.force.range_N != 30.0f || defaults.force.hard_limit_N != 30.0f ||
-            defaults.collision.measure_N != 30.0f)
+            defaults.collision.measure_N != 150.0f)
         {
             return 51;
         }
@@ -306,9 +303,14 @@ int main()
         MachineConfig raised{};
         raised.force.range_N = 100.0f;
         raised.force.hard_limit_N = 80.0f;
+        raised.force.hard_limit_x_N = 80.0f;
+        raised.force.hard_limit_y_N = 80.0f;
+        raised.fault_manual.hard_limit_N = 80.0f;
+        raised.fault_manual.hard_limit_x_N = 80.0f;
+        raised.fault_manual.hard_limit_y_N = 80.0f;
         raised.collision.retract_N = 90.0f;
         raised.collision.contact_N = 90.0f;
-        raised.collision.measure_N = 90.0f;
+        raised.collision.measure_N = 150.0f;
         if (validateMachineConfig(raised) != ConfigValidationError::Ok)
         {
             return 53;
@@ -340,22 +342,67 @@ int main()
         }
     }
 
-    // Probe XY search margin must stay below the probe radius (inner stop > 0).
+    // AfterSeat retract: 0 = no lift; negative rejected.
     {
         MachineConfig incoming{};
-        incoming.probe.xy_search_margin = 4.0f;
+        incoming.force.after_seat_retract_mm = 0.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::Ok)
+        {
+            return 49;
+        }
+        incoming.force.after_seat_retract_mm = -1.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::BufferNegative)
+        {
+            return 50;
+        }
+    }
+
+    // Extract after-free offset: 0 allowed; negative rejected.
+    {
+        MachineConfig incoming{};
+        incoming.force.extract_after_free_mm = 0.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::Ok)
+        {
+            return 70;
+        }
+        incoming.force.extract_after_free_mm = -0.5f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::BufferNegative)
+        {
+            return 71;
+        }
+    }
+
+    // Extract after-free speed must be strictly positive.
+    {
+        MachineConfig incoming{};
+        incoming.motion.extract_after_free_v = 0.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::VelocityNotPositive)
+        {
+            return 72;
+        }
+        incoming.motion.extract_after_free_v = 1.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::Ok)
+        {
+            return 73;
+        }
+    }
+
+    // Einmess-Bohrung params must stay positive / inside safety caps.
+    {
+        MachineConfig incoming{};
+        incoming.probe.xy_search_limit = 0.0f;
         if (validateMachineConfig(incoming) != ConfigValidationError::BufferNegative)
         {
             return 51;
         }
-        incoming.probe.xy_search_margin = 2.0f;
-        incoming.probe.tool_cylindrical_height = 0.0f;
-        if (validateMachineConfig(incoming) != ConfigValidationError::BufferNegative)
+        incoming = MachineConfig{};
+        incoming.probe.wall_force_N = 0.0f;
+        if (validateMachineConfig(incoming) != ConfigValidationError::ForceNotPositive)
         {
             return 52;
         }
         incoming = MachineConfig{};
-        incoming.probe.tool_cylindrical_height = SafetyLimits::kMaxToolCylindricalHeight + 1.0f;
+        incoming.probe.z_search_limit = SafetyLimits::kMaxPlateZSearch + 1.0f;
         if (validateMachineConfig(incoming) != ConfigValidationError::BufferExceedsSafety)
         {
             return 53;

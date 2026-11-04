@@ -34,7 +34,7 @@ function testM19RunningBlocksWithMessage() {
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.code, 'core_process_running');
   assert.strictEqual(r.kind, 'probe_calib');
-  assert.ok(r.error.includes('Messtaster-Kalibrierung'));
+  assert.ok(r.error.includes('Einmessbohrung-Kalibrierung'));
   assert.ok(!r.error.toLowerCase().includes('invalid state'));
 }
 
@@ -86,12 +86,16 @@ function testLabels() {
   assert.strictEqual(isCoreProcessRunning('Running'), true);
   assert.strictEqual(isCoreProcessRunning('Completed'), false);
   assert.strictEqual(classifyRunningPhase('ProbeCalibrate'), 'probe_calib');
+  assert.strictEqual(classifyRunningPhase('PlateBoreSearch'), 'probe_calib');
+  assert.strictEqual(classifyRunningPhase('CalibApproach'), 'probe_calib');
   assert.strictEqual(classifyRunningPhase('PointApproach'), 'procedure');
-  assert.strictEqual(formatProcedurePhaseLabel('ProbeCalibrate'), 'Messtaster kalibrieren');
+  assert.strictEqual(formatProcedurePhaseLabel('ProbeCalibrate'), 'Einmessbohrung kalibrieren');
+  assert.strictEqual(formatProcedurePhaseLabel('CalibApproach'), 'Kalibrierpunkt anfahren');
   assert.strictEqual(
     describeRunningCoreProcess('ProbeCalibrate').processLabel,
     'Kalibrierung läuft'
   );
+  assert.strictEqual(describeRunningCoreProcess('CalibApproach').processLabel, 'Kalibrierung läuft');
   assert.strictEqual(describeRunningCoreProcess('ProbeApproach').processLabel, 'Prüfprozedur läuft');
 }
 

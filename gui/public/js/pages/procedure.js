@@ -10,16 +10,20 @@ import {
   pauseProcedure,
   resumeProcedure,
   stopProcedure,
+  resetProcedureUi,
   sendProcedureDecision,
   sendCommand,
+  subscribeLiveStatus,
 } from '../api.js';
 import { runWithHomingGate } from '../homingGate.js';
+import { reportCommandError } from '../messageBus.js';
 import {
   describeRunningCoreProcess,
   formatProcedurePhaseLabel,
   isCoreProcessRunning,
   isProcedureStartButtonDisabled,
 } from '../coreProcessStatus.js';
+import { createGgDiagram, createVelocityEstimator } from './ggDiagram.js';
 
 function escapeHtml(str) {
   return String(str)
@@ -30,9 +34,21 @@ function escapeHtml(str) {
     .replaceAll("'", '&#039;');
 }
 
+function fmtNum(v, digits = 2) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(digits) : '—';
+}
+
+function spreaderChip(state) {
+  if (state === 'Extended' || state === 'Extending') return { text: 'Spreizer aktiv', on: true };
+  if (state === 'Retracting') return { text: 'Spreizer fährt ein', on: false };
+  if (state === 'SafeDeenergized') return { text: 'Spreizer sicher', on: false };
+  return { text: 'Spreizer inaktiv', on: false };
+}
+
 export function renderProcedure(container) {
   container.innerHTML = `
-    <section class="panel page-panel">
+    <section class="panel page-panel procedure-dash">
       <h2>Prüf-/Alterungsprozedur</h2>
       <p id="procedure-feedback" class="command-feedback" aria-live="polite"></p>
       <div id="procedure-content"></div>
@@ -41,13 +57,26 @@ export function renderProcedure(container) {
 
   const feedbackEl = container.querySelector('#procedure-feedback');
   const contentEl = container.querySelector('#procedure-content');
+
   let pollTimer = null;
+  let rafId = 0;
   let latestStatus = null;
   let latestMachine = null;
+  let programMeta = null;
+  let selectionMeta = null;
+  let mounted = false;
+  let startBusy = false;
+  let forceGg = null;
+  let velGg = null;
+  // Higher alpha keeps ~0.01 mm/s fine motion visible (less EMA lag).
+  let velEst = createVelocityEstimator(0.55);
+  let unsubLive = null;
+  let lastLiveMachine = null;
 
   function setFeedback(text, isError) {
     feedbackEl.textContent = text || '';
     feedbackEl.classList.toggle('command-feedback--error', Boolean(isError));
+    if (isError && text) reportCommandError(text);
   }
 
   function clearPoll() {
@@ -57,242 +86,698 @@ export function renderProcedure(container) {
     }
   }
 
-  function renderCapabilityNotes(status) {
+  function ensurePolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => {
+      refreshStore().catch(() => {});
+    }, 500);
+  }
+
+  function conditionalHints(status) {
+    const hints = [];
     const caps = status.capabilities || {};
-    const notes = status.notes || [];
-    const unsupported = [];
-    if (!caps.modeSupported) unsupported.push('Modus Prüfen/Altern');
-    if (!caps.insertionForceSupported) unsupported.push('Eingliederungskraft');
-    if (!caps.iterationsSupported) unsupported.push('Iterationen');
+    const params = status.params || {};
+    const force = Number(params.insertionForce);
+    const iters = Number(params.iterations);
+    if (Number.isFinite(force) && (force < 1 || force > 50)) {
+      hints.push('Prüfkraft außerhalb 1–50 N — fachlich ungünstig.');
+    }
+    if (Number.isFinite(iters) && iters < 1) {
+      hints.push('Iterationen müssen ≥ 1 sein.');
+    }
+    if (caps.modeSupported === false) {
+      hints.push('Aktuelles Backend unterstützt den Modus nicht vollständig.');
+    }
+    return hints;
+  }
 
-    return `
-      <div class="capability-card">
-        <h3>Backend: ${escapeHtml(status.backend || '—')}</h3>
-        <p class="placeholder-note">
-          Controller-Status:
-          <b>${escapeHtml(status.connected === false ? 'offline' : status.connected === true ? 'online' : '—')}</b>
-          · Prozess: <b>${escapeHtml(status.processState || '—')}</b>
-          · Zustand: <b>${escapeHtml(status.state || '—')}</b>
-        </p>
-        ${
-          unsupported.length
-            ? `<p class="placeholder-note capability-warn">
-                Folgende Parameter werden vom aktuellen Core/Protocol <b>nicht</b> ausgeführt
-                (nur GUI-seitig gespeichert): ${unsupported.map(escapeHtml).join(', ')}.
-              </p>`
-            : `<p class="placeholder-note">Parameter werden an den Core gesendet (TestConfiguration / ProcedureController).</p>`
-        }
-        ${
-          notes.length
-            ? `<ul class="capability-notes">${notes
-                .map((n) => `<li>${escapeHtml(n)}</li>`)
-                .join('')}</ul>`
-            : ''
-        }
+  function mountDashboard() {
+    contentEl.innerHTML = `
+      <p class="procedure-meta" id="proc-meta"></p>
+      <div id="proc-warnings" class="procedure-warnings" hidden></div>
+      <div id="proc-core-banner" class="progress-card" hidden></div>
+
+      <form id="procedure-form" class="control-form procedure-form procedure-settings">
+        <label>
+          Modus
+          <select id="procedure-mode">
+            <option value="test">Prüfen</option>
+            <option value="aging">Altern</option>
+          </select>
+        </label>
+        <label>
+          Prüfkraft [N]
+          <input id="procedure-force" type="number" min="1" max="50" step="any" value="5" />
+        </label>
+        <label>
+          Iterationen
+          <input id="procedure-iterations" type="number" min="1" step="1" value="1" />
+        </label>
+      </form>
+
+      <div class="procedure-actions control-actions page-actions">
+        <button type="button" id="btn-proc-start">Starten</button>
+        <button type="button" id="btn-proc-pause" disabled>Pausieren</button>
+        <button type="button" id="btn-proc-resume" disabled>Fortsetzen</button>
+        <button type="button" id="btn-proc-stop" disabled>Stoppen</button>
+        <button type="button" id="btn-proc-reset">Zurücksetzen</button>
+        <button type="button" id="btn-proc-results" hidden>Ergebnisse</button>
+        <button type="button" class="btn-back" data-route="menu">Zurück</button>
       </div>
-    `;
-  }
 
-  function renderCoreProcessBanner(machine) {
-    if (!machine || !isCoreProcessRunning(machine.processState)) {
-      return '';
-    }
-    const described = describeRunningCoreProcess(machine.procedurePhase);
-    return `
-      <div class="progress-card" role="status">
-        <h3>Maschinenstatus</h3>
-        <p class="placeholder-note">
-          ● <b>${escapeHtml(described.processLabel)}</b><br/>
-          Phase: <b>${escapeHtml(described.phaseLabel)}</b>
-        </p>
-        <p class="placeholder-note">
-          Die Prüfprozedur kann erst gestartet werden, wenn dieser Prozess beendet ist.
-        </p>
-      </div>
-    `;
-  }
+      <div class="status-chips" id="proc-chips" aria-live="polite"></div>
 
-  function fmtNum(v, digits = 2) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n.toFixed(digits) : '—';
-  }
-
-
-  function anomalyTypeLabel(type) {
-    switch (Number(type)) {
-      case 0:
-        return 'Koordinaten-Drift';
-      case 1:
-        return 'Lateralkraft';
-      case 2:
-        return 'Z-Weglimit';
-      case 3:
-        return 'TCP-Hänger (Offset)';
-      default:
-        return `Anomalie ${type}`;
-    }
-  }
-
-  function renderProcedureAnomaly(machine) {
-    const a = machine && machine.procedureAnomaly;
-    if (!a) {
-      return '';
-    }
-    if (a.skipApplied === true || machine.procedureAnomalySkipApplied === true) {
-      return `
-      <div class="progress-card progress-card--error" role="status" aria-label="Prozedur-Anomalie">
-        <h3>Anomalie — Punkt übersprungen</h3>
-        <p class="placeholder-note">
-          ${escapeHtml(anomalyTypeLabel(a.type))}: gemessen
-          <b>${escapeHtml(fmtNum(a.measured, 3))}</b>, Limit
-          <b>${escapeHtml(fmtNum(a.limit, 3))}</b>
-          (Punkt ${escapeHtml(String(a.pointIndex ?? '—'))}, Iter
-          ${escapeHtml(String(a.iteration ?? '—'))}).
-          anomalySkip ist aktiv — nächster Punkt wird angefahren.
-        </p>
-      </div>`;
-    }
-    if (a.confirmPending !== true && machine.procedureAnomalyConfirmPending !== true) {
-      return '';
-    }
-    return `
-      <div class="progress-card progress-card--error" role="dialog" aria-label="Prozedur-Anomalie">
-        <h3>Prozedur-Anomalie</h3>
-        <p class="placeholder-note">
-          ${escapeHtml(anomalyTypeLabel(a.type))}<br/>
-          Gemessen <b>${escapeHtml(fmtNum(a.measured, 3))}</b>
-          · Limit <b>${escapeHtml(fmtNum(a.limit, 3))}</b><br/>
-          Z=<b>${escapeHtml(fmtNum(a.z, 3))}</b>
-          · Fx=<b>${escapeHtml(fmtNum(a.fx, 3))}</b>
-          · Fy=<b>${escapeHtml(fmtNum(a.fy, 3))}</b> N<br/>
-          Punkt ${escapeHtml(String(a.pointIndex ?? '—'))}
-          · Iteration ${escapeHtml(String(a.iteration ?? '—'))}
-        </p>
-        <div class="control-actions">
-          <button type="button" id="btn-anom-stop">Stopp</button>
-          <button type="button" id="btn-anom-continue">Weiter</button>
-          <button type="button" id="btn-anom-next">Nächster Punkt</button>
-          <button type="button" id="btn-anom-repeat">Punkt wiederholen</button>
+      <div class="progress-stack">
+        <div class="progress-block">
+          <div class="progress-block__head">
+            <span>Prüfpunkte</span>
+            <b id="proc-points-label">—</b>
+          </div>
+          <div class="progress-bar progress-bar--green" aria-hidden="true">
+            <div class="progress-bar__fill" id="proc-bar-green" style="width:0%"></div>
+          </div>
+          <div class="progress-milestones" id="proc-point-milestones"></div>
+        </div>
+        <div class="progress-block">
+          <div class="progress-block__head">
+            <span>Phase</span>
+            <b id="proc-phase-pct">—</b>
+          </div>
+          <div class="phase-strip" id="proc-phase-strip">
+            <span class="phase-strip__prev" id="proc-phase-prev">—</span>
+            <span class="phase-strip__current" id="proc-phase-current">—</span>
+            <span class="phase-strip__next" id="proc-phase-next">—</span>
+          </div>
+          <div class="progress-bar progress-bar--blue" aria-hidden="true">
+            <div class="progress-bar__fill" id="proc-bar-blue" style="width:0%"></div>
+          </div>
+          <div class="progress-milestones" id="proc-phase-milestones"></div>
+        </div>
+        <div class="progress-block" id="proc-iter-block" hidden>
+          <div class="progress-block__head">
+            <span>Iterationen</span>
+            <b id="proc-iter-label">—</b>
+          </div>
+          <div class="progress-bar progress-bar--iter" aria-hidden="true">
+            <div class="progress-bar__fill" id="proc-bar-iter" style="width:0%"></div>
+          </div>
         </div>
       </div>
-    `;
-  }
 
-  function renderBoreConfirm(machine) {
-    if (!machine || machine.boreConfirmPending !== true) {
-      return '';
-    }
-    return `
-      <div class="progress-card progress-card--error" role="dialog" aria-label="Bohrungsmitte">
-        <h3>Bohrungsmitte prüfen</h3>
-        <p class="placeholder-note">
-          Am Sehnenmittelpunkt liegt noch Kraft über der Schwelle.
-          Weiter fährt mit Clamp fort. Stopp bricht die Prozedur ab.<br/>
-          Mitte X=<b>${escapeHtml(fmtNum(machine.boreCx, 3))}</b>
-          Y=<b>${escapeHtml(fmtNum(machine.boreCy, 3))}</b>
-          · Radius <b>${escapeHtml(fmtNum(machine.boreRadius, 3))}</b> mm<br/>
-          Fx=<b>${escapeHtml(fmtNum(machine.boreFx, 3))}</b> N
-          · Fy=<b>${escapeHtml(fmtNum(machine.boreFy, 3))}</b> N
-        </p>
-        <div class="control-actions">
-          <button type="button" id="btn-bore-continue">Weiter</button>
-          <button type="button" id="btn-bore-stop">Stopp</button>
-        </div>
+      <div class="gg-grid">
+        <section class="gg-panel">
+          <h3>Kräfte</h3>
+          <div class="gg-layout">
+            <canvas id="gg-force-xy" class="gg-canvas" width="320" height="320"></canvas>
+            <canvas id="gg-force-z" class="gg-strip" width="72" height="320"></canvas>
+          </div>
+          <div class="gg-read" id="gg-force-read"></div>
+        </section>
+        <section class="gg-panel">
+          <h3>Geschwindigkeit</h3>
+          <div class="gg-layout">
+            <canvas id="gg-vel-xy" class="gg-canvas" width="320" height="320"></canvas>
+            <canvas id="gg-vel-z" class="gg-strip" width="72" height="320"></canvas>
+          </div>
+          <div class="gg-read" id="gg-vel-read"></div>
+        </section>
       </div>
+
+      <div id="proc-dialogs"></div>
     `;
+
+    forceGg = createGgDiagram({
+      xyCanvas: contentEl.querySelector('#gg-force-xy'),
+      zCanvas: contentEl.querySelector('#gg-force-z'),
+      readEl: contentEl.querySelector('#gg-force-read'),
+      readLabels: ['Fx', 'Fy', '|Fxy|'],
+      axisLabels: ['+Fy', '−Fy', '−Fx', '+Fx'],
+      zLabel: 'Fz',
+      unit: 'N',
+      autoScale: true,
+      // Floor ~0.05 N bore-search steps; ceiling for seat/test peaks.
+      minScaleXy: 0.05,
+      minScaleZ: 0.05,
+      maxScaleXy: 50,
+      maxScaleZ: 50,
+      initialScaleXy: 0.05,
+      initialScaleZ: 0.05,
+    });
+    velGg = createGgDiagram({
+      xyCanvas: contentEl.querySelector('#gg-vel-xy'),
+      zCanvas: contentEl.querySelector('#gg-vel-z'),
+      readEl: contentEl.querySelector('#gg-vel-read'),
+      readLabels: ['vx', 'vy', '|vxy|'],
+      axisLabels: ['+vy', '−vy', '−vx', '+vx'],
+      zLabel: 'vz',
+      unit: 'mm/s',
+      autoScale: true,
+      // Floor for ~0.01 mm/s fine motion; ceiling for approach moves.
+      minScaleXy: 0.01,
+      minScaleZ: 0.01,
+      maxScaleXy: 40,
+      maxScaleZ: 40,
+      initialScaleXy: 0.01,
+      initialScaleZ: 0.01,
+    });
+
+    contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
+    wireActions();
+    mounted = true;
+    startRaf();
   }
 
-  function renderToolOffsetAnomaly(status) {
-    const a = status && status.toolOffsetAnomaly;
-    if (!a || a.active !== true) {
-      return '';
+  function wireActions() {
+    contentEl.querySelector('#btn-proc-start').addEventListener('click', onStart);
+    contentEl.querySelector('#btn-proc-pause').addEventListener('click', async () => {
+      try {
+        await pauseProcedure();
+        setFeedback('Prozedur pausiert.', false);
+        await refreshStore();
+      } catch (err) {
+        setFeedback(err.message || String(err), true);
+      }
+    });
+    contentEl.querySelector('#btn-proc-resume').addEventListener('click', async () => {
+      try {
+        await resumeProcedure();
+        setFeedback('Prozedur fortgesetzt.', false);
+        await refreshStore();
+        ensurePolling();
+      } catch (err) {
+        setFeedback(err.message || String(err), true);
+      }
+    });
+    contentEl.querySelector('#btn-proc-stop').addEventListener('click', async () => {
+      try {
+        await stopProcedure();
+        setFeedback('Prozedur gestoppt.', false);
+        await refreshStore();
+      } catch (err) {
+        setFeedback(err.message || String(err), true);
+        await refreshStore();
+      }
+    });
+    contentEl.querySelector('#btn-proc-reset').addEventListener('click', async () => {
+      try {
+        await resetProcedureUi();
+        if (forceGg) forceGg.clear();
+        if (velGg) velGg.clear();
+        velEst.reset();
+        setFeedback('Dashboard zurückgesetzt (Messergebnisse bleiben erhalten).', false);
+        await refreshStore();
+      } catch (err) {
+        setFeedback(err.message || String(err), true);
+      }
+    });
+    contentEl.querySelector('#btn-proc-results').addEventListener('click', () => navigate('results'));
+  }
+
+  async function onStart() {
+    if (startBusy) return;
+    startBusy = true;
+    updateControls();
+    setFeedback('Start wird vorbereitet…', false);
+    try {
+      const mode = contentEl.querySelector('#procedure-mode').value;
+      const insertionForce = Number(contentEl.querySelector('#procedure-force').value);
+      const iterations = Number(contentEl.querySelector('#procedure-iterations').value);
+
+      const machine = await fetchMachineStatus();
+      const gate = await runWithHomingGate({
+        status: {
+          connected: machine.connected !== false,
+          isHomed: machine.isHomed === true,
+          mcsValid: machine.mcsValid === true,
+        },
+        startHoming: () => sendCommand({ command: 'home' }),
+        getStatus: async () => {
+          const st = await fetchMachineStatus();
+          return {
+            connected: st.connected !== false,
+            isHomed: st.isHomed === true,
+            mcsValid: st.mcsValid === true,
+            homingState: st.homingState,
+            machineState: st.machineState,
+            eStop: st.eStop === true,
+          };
+        },
+        onHomingStarted: () => {
+          setFeedback('Homing gestartet — warte auf erfolgreichen Abschluss…', false);
+        },
+        action: () => startProcedure({ mode, insertionForce, iterations }),
+      });
+
+      if (gate.result === 'mcs_required') {
+        setFeedback(
+          'Kein gültiges Maschinenkoordinatensystem — bitte unter Kalibrieren MCS/Bauplatte definieren.',
+          true
+        );
+        return;
+      }
+      if (gate.result === 'cancelled') {
+        setFeedback('Start abgebrochen — Homing erforderlich.', false);
+        return;
+      }
+      if (gate.result === 'failed') {
+        setFeedback('Homing fehlgeschlagen — Prüfprozedur nicht gestartet.', true);
+        return;
+      }
+      if (gate.result === 'timeout') {
+        setFeedback('Homing-Timeout — Prüfprozedur nicht gestartet.', true);
+        return;
+      }
+
+      if (forceGg) forceGg.clear();
+      if (velGg) velGg.clear();
+      velEst.reset();
+      // Dynamic autoscale from mins; optional Z ceiling hint from Prüfkraft.
+      const fTarget = Number.isFinite(insertionForce) ? insertionForce : 5;
+      if (forceGg) {
+        forceGg.setScale({
+          minXy: 0.05,
+          minZ: 0.05,
+          maxXy: 50,
+          maxZ: Math.min(50, Math.max(10, fTarget * 2)),
+          xy: 0.05,
+          z: 0.05,
+        });
+      }
+      if (velGg) {
+        velGg.setScale({
+          minXy: 0.01,
+          minZ: 0.01,
+          maxXy: 40,
+          maxZ: 40,
+          xy: 0.01,
+          z: 0.01,
+        });
+      }
+      setFeedback('Prozedur gestartet.', false);
+      await refreshStore();
+      ensurePolling();
+    } catch (err) {
+      setFeedback(err.message || String(err), true);
+      await refreshStore();
+    } finally {
+      startBusy = false;
+      updateControls();
     }
-    const prev = a.previous || {};
-    const cur = a.current || {};
-    return `
-      <div class="progress-card progress-card--error" role="status" aria-label="Werkzeugoffset-Anomalie">
-        <h3>Werkzeugoffset-Anomalie</h3>
-        <p class="placeholder-note">
-          Der toolOffset hat sich beim Einmessen um
-          <b>${escapeHtml(fmtNum(a.deltaMm, 3))}</b> mm geändert
-          (Toleranz <b>${escapeHtml(fmtNum(a.toleranceMm, 3))}</b> mm).
-          Vermutlich wurde das Werkzeug gewechselt oder neu montiert.
-          Der neue Offset wurde übernommen; die Prozedur läuft weiter.<br/>
-          Vorher: X=${escapeHtml(fmtNum(prev.x, 3))}
-          Y=${escapeHtml(fmtNum(prev.y, 3))}
-          Z=${escapeHtml(fmtNum(prev.z, 3))} mm<br/>
-          Neu: X=${escapeHtml(fmtNum(cur.x, 3))}
-          Y=${escapeHtml(fmtNum(cur.y, 3))}
-          Z=${escapeHtml(fmtNum(cur.z, 3))} mm
-        </p>
-      </div>
-    `;
   }
 
-  function renderProgress(status, machine) {
+  function renderMilestones(el, labels, activeIndex) {
+    if (!el) return;
+    if (!labels || !labels.length) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = labels
+      .map((label, i) => {
+        const cls =
+          i === activeIndex
+            ? 'milestone milestone--active'
+            : i < activeIndex
+              ? 'milestone milestone--done'
+              : 'milestone';
+        return `<span class="${cls}" title="${escapeHtml(label)}">${i + 1}</span>`;
+      })
+      .join('');
+  }
+
+  function updateControls() {
+    const status = latestStatus || {};
+    const machine = latestMachine || {};
+    const active = status.state === 'running' || status.state === 'paused';
+    const completed = status.state === 'completed';
+    const coreRunning = isCoreProcessRunning(machine.processState);
+    const startDisabled =
+      startBusy ||
+      isProcedureStartButtonDisabled({
+        procedureState: status.state,
+        coreProcessState: machine.processState,
+      });
+
+    const modeEl = contentEl.querySelector('#procedure-mode');
+    const forceEl = contentEl.querySelector('#procedure-force');
+    const iterEl = contentEl.querySelector('#procedure-iterations');
+    if (modeEl && forceEl && iterEl && status.params && !active && !startBusy) {
+      // keep user edits while idle unless params just loaded
+    }
+    if (modeEl) modeEl.disabled = active || coreRunning || startBusy;
+    if (forceEl) forceEl.disabled = active || coreRunning || startBusy;
+    if (iterEl) iterEl.disabled = active || coreRunning || startBusy;
+
+    const startBtn = contentEl.querySelector('#btn-proc-start');
+    const pauseBtn = contentEl.querySelector('#btn-proc-pause');
+    const resumeBtn = contentEl.querySelector('#btn-proc-resume');
+    const stopBtn = contentEl.querySelector('#btn-proc-stop');
+    const resetBtn = contentEl.querySelector('#btn-proc-reset');
+    const resultsBtn = contentEl.querySelector('#btn-proc-results');
+
+    if (startBtn) {
+      startBtn.disabled = startDisabled;
+      startBtn.title =
+        coreRunning && !active
+          ? describeRunningCoreProcess(machine.procedurePhase).startBlockedMessage
+          : startBusy
+            ? 'Start wird vorbereitet…'
+            : '';
+      startBtn.textContent = startBusy ? 'Starten…' : 'Starten';
+    }
+    if (pauseBtn) pauseBtn.disabled = status.state !== 'running';
+    if (resumeBtn) resumeBtn.disabled = status.state !== 'paused';
+    if (stopBtn) stopBtn.disabled = !(active || status.state === 'unavailable');
+    if (resetBtn) resetBtn.disabled = active || startBusy;
+    if (resultsBtn) {
+      resultsBtn.hidden = !(completed || status.state === 'stopped');
+    }
+  }
+
+  function updateProgressUi() {
+    const status = latestStatus || {};
     const p = status.progress || {};
-    const m = machine || {};
     const active = status.state === 'running' || status.state === 'paused';
     const complete = status.state === 'completed';
-    const stopped = status.state === 'stopped';
-    const rawPhase =
-      (active && m.procedurePhase) ||
-      p.procedurePhase ||
-      status.procedurePhase ||
-      m.procedurePhase ||
-      '';
-    const phaseLabel = formatProcedurePhaseLabel(rawPhase);
-    const processLabel = active
-      ? describeRunningCoreProcess(rawPhase).processLabel
-      : complete
-        ? 'Letzte Prozedur abgeschlossen'
-        : stopped
-          ? 'Prozedur abgebrochen / gestoppt'
-          : 'Bereit — keine Prozedur aktiv';
-    const fault =
-      m.faultReason && m.faultReason !== 'None'
-        ? m.faultReason
-        : p.faultReason && p.faultReason !== 'None'
-          ? p.faultReason
-          : null;
-    const percent = active ? Number(p.percent) || 0 : complete ? 100 : 0;
+    const green = active || complete ? Number(p.percent) || 0 : complete ? 100 : Number(p.percent) || 0;
+    const blue = Number(p.phasePercent) || 0;
+    const totalIter = Math.max(1, Number(p.totalIterations) || 1);
+    const curIter = Number(p.currentIteration) || 0;
+    const showIter = totalIter > 1 || (latestMachine && latestMachine.procedurePhase === 'TestOrAge');
 
-    return `
-      <div class="progress-card${complete ? ' progress-card--complete' : ''}${
-        stopped ? ' progress-card--error' : ''
-      }">
-        <h3>Fortschritt</h3>
-        <p class="procedure-complete-banner" role="status">${escapeHtml(processLabel)}</p>
-        <p class="placeholder-note">
-          Core-Prozess: <b>${escapeHtml(m.processState || status.processState || '—')}</b>
-          · Maschinenstatus: <b>${escapeHtml(m.machineState || p.machineState || '—')}</b><br/>
-          Phase: <b>${escapeHtml(phaseLabel)}</b>
-          ${fault ? `<br/>Fault: <b>${escapeHtml(fault)}</b>` : ''}<br/>
-          Punkt: <b>${escapeHtml(p.pointsDone ?? p.currentPointIndex ?? '—')}</b> /
-          <b>${escapeHtml(p.totalPoints ?? '—')}</b>
-          · Iteration: <b>${escapeHtml(p.currentIteration ?? '—')}</b> /
-          <b>${escapeHtml(p.totalIterations ?? '—')}</b><br/>
-          Fortschritt: <b>${escapeHtml(percent)}%</b>
-        </p>
-        <div class="progress-bar" aria-hidden="true">
-          <div class="progress-bar__fill" style="width:${percent}%"></div>
-        </div>
-        <h4 style="margin:12px 0 4px;">Live-Signale</h4>
-        <p class="placeholder-note">
-          Pose TCP: X=<b>${escapeHtml(fmtNum(m.x))}</b>
-          Y=<b>${escapeHtml(fmtNum(m.y))}</b>
-          Z=<b>${escapeHtml(fmtNum(m.z))}</b> mm<br/>
-          Kraft: Fx=<b>${escapeHtml(fmtNum(m.fx))}</b>
-          Fy=<b>${escapeHtml(fmtNum(m.fy))}</b>
-          Fz=<b>${escapeHtml(fmtNum(m.fz))}</b> N<br/>
-          Spreizer: <b>${escapeHtml(m.spreaderState || p.spreaderState || '—')}</b>
-          · Homed: <b>${m.isHomed === true ? 'ja' : m.isHomed === false ? 'nein' : '—'}</b>
-        </p>
-      </div>
-    `;
+    const greenEl = contentEl.querySelector('#proc-bar-green');
+    const blueEl = contentEl.querySelector('#proc-bar-blue');
+    const iterEl = contentEl.querySelector('#proc-bar-iter');
+    if (greenEl) greenEl.style.width = `${Math.max(0, Math.min(100, green))}%`;
+    if (blueEl) blueEl.style.width = `${Math.max(0, Math.min(100, blue))}%`;
+    if (iterEl) {
+      const iterPct =
+        totalIter <= 1 ? (showIter ? Math.min(99, (curIter / totalIter) * 100) : 0) : Math.min(100, (curIter / totalIter) * 100);
+      iterEl.style.width = `${iterPct}%`;
+    }
+
+    const pointsLabel = contentEl.querySelector('#proc-points-label');
+    if (pointsLabel) {
+      pointsLabel.textContent = `${p.pointsDone ?? '—'} / ${p.totalPoints ?? '—'}${
+        complete ? ' · fertig' : ''
+      }`;
+    }
+    const phasePct = contentEl.querySelector('#proc-phase-pct');
+    if (phasePct) phasePct.textContent = `${Math.round(blue)}%`;
+
+    contentEl.querySelector('#proc-phase-prev').textContent = p.phasePrev || '—';
+    contentEl.querySelector('#proc-phase-current').textContent = p.phaseCurrent || '—';
+    contentEl.querySelector('#proc-phase-next').textContent = p.phaseNext || '—';
+
+    const iterBlock = contentEl.querySelector('#proc-iter-block');
+    if (iterBlock) iterBlock.hidden = !showIter;
+    const iterLabel = contentEl.querySelector('#proc-iter-label');
+    if (iterLabel) iterLabel.textContent = `${curIter} / ${totalIter}`;
+
+    const totalPoints = Number(p.totalPoints) || 0;
+    const pointLabels = [];
+    pointLabels.push('Vorbereitung');
+    for (let i = 1; i <= totalPoints; i += 1) pointLabels.push(`Punkt ${i}`);
+    pointLabels.push('Abschluss');
+    let pointActive = 0;
+    if (p.scope === 'setup') pointActive = 0;
+    else if (p.scope === 'end' || complete) pointActive = pointLabels.length - 1;
+    else pointActive = Math.min(totalPoints, (Number(p.pointsDone) || 0) + 1);
+    renderMilestones(contentEl.querySelector('#proc-point-milestones'), pointLabels, pointActive);
+    renderMilestones(
+      contentEl.querySelector('#proc-phase-milestones'),
+      p.milestoneLabels || [],
+      Number.isFinite(Number(p.milestoneIndex)) ? Number(p.milestoneIndex) : -1
+    );
   }
 
-  async function refresh() {
+  function updateChips() {
+    const m = lastLiveMachine || latestMachine || {};
+    const status = latestStatus || {};
+    const p = status.progress || {};
+    const spr = spreaderChip(m.spreaderState || p.spreaderState);
+    const moving = m.motionState === 'Moving';
+    const chips = [
+      { label: status.state || 'idle', on: status.state === 'running' || status.state === 'paused' },
+      {
+        label: formatProcedurePhaseLabel(m.procedurePhase || p.procedurePhase) || '—',
+        on: true,
+      },
+      { label: spr.text, on: spr.on },
+      { label: moving ? 'Achsen aktiv' : 'Achsen still', on: moving },
+      { label: m.isHomed ? 'Gehomed' : 'Nicht gehomed', on: m.isHomed === true },
+      {
+        label:
+          m.faultReason && m.faultReason !== 'None'
+            ? `Fault: ${m.faultReason}`
+            : m.eStop
+              ? 'E-Stop'
+              : 'OK',
+        on: !(m.faultReason && m.faultReason !== 'None') && !m.eStop,
+        bad: (m.faultReason && m.faultReason !== 'None') || m.eStop,
+      },
+      {
+        label: m.forceSampleFresh === false ? 'Kraft alt' : 'Kraft frisch',
+        on: m.forceSampleFresh !== false,
+      },
+    ];
+    const el = contentEl.querySelector('#proc-chips');
+    if (!el) return;
+    el.innerHTML = chips
+      .map((c) => {
+        const cls = c.bad ? 'status-chip status-chip--bad' : c.on ? 'status-chip status-chip--on' : 'status-chip';
+        return `<span class="${cls}">${escapeHtml(c.label)}</span>`;
+      })
+      .join('');
+  }
+
+  function anomalyTypeLabel(type) {
+    const map = {
+      CoordDrift: 'Koordinatenabweichung',
+      LateralForce: 'Laterale Kraft',
+      ZTravelLimit: 'Z-Weglimit',
+      TcpHang: 'TCP hängt',
+    };
+    return map[type] || type || 'Anomalie';
+  }
+
+  function updateDialogs() {
+    const status = latestStatus || {};
+    const machine = latestMachine || {};
+    const host = contentEl.querySelector('#proc-dialogs');
+    if (!host) return;
+
+    let html = '';
+    const anom = status.toolOffsetAnomaly;
+    if (anom && anom.active) {
+      html += `
+        <div class="progress-card progress-card--error" role="alertdialog">
+          <h3>Werkzeugversatz-Anomalie</h3>
+          <p class="placeholder-note">
+            Δ=${escapeHtml(fmtNum(anom.deltaMm, 3))} mm
+            (Toleranz ${escapeHtml(fmtNum(anom.toleranceMm, 3))} mm)
+          </p>
+        </div>`;
+    }
+    const pa = machine.procedureAnomaly;
+    if (pa) {
+      if (pa.skipApplied === true || machine.procedureAnomalySkipApplied === true) {
+        html += `
+          <div class="progress-card progress-card--error" role="status">
+            <h3>Anomalie — Punkt übersprungen</h3>
+            <p class="placeholder-note">
+              ${escapeHtml(anomalyTypeLabel(pa.type))}: gemessen
+              <b>${escapeHtml(fmtNum(pa.measured, 3))}</b>, Limit
+              <b>${escapeHtml(fmtNum(pa.limit, 3))}</b>
+            </p>
+          </div>`;
+      } else if (pa.confirmPending === true || machine.procedureAnomalyConfirmPending === true) {
+        html += `
+          <div class="progress-card progress-card--error" role="dialog">
+            <h3>Prozedur-Anomalie</h3>
+            <p class="placeholder-note">
+              ${escapeHtml(anomalyTypeLabel(pa.type))}<br/>
+              Gemessen <b>${escapeHtml(fmtNum(pa.measured, 3))}</b>
+              · Limit <b>${escapeHtml(fmtNum(pa.limit, 3))}</b>
+            </p>
+            <div class="control-actions">
+              <button type="button" id="btn-anom-continue">Weiter</button>
+              <button type="button" id="btn-anom-next">Nächster Punkt</button>
+              <button type="button" id="btn-anom-repeat">Punkt wiederholen</button>
+              <button type="button" id="btn-anom-stop">Stop</button>
+            </div>
+          </div>`;
+      }
+    }
+    if (machine.boreConfirmPending === true) {
+      html += `
+        <div class="progress-card progress-card--error" role="dialog">
+          <h3>Bohrungsmitte prüfen</h3>
+          <p class="placeholder-note">
+            Am Sehnenmittelpunkt liegt noch Kraft über der Schwelle.
+            Weiter fährt mit Clamp fort. Stopp bricht die Prozedur ab.
+          </p>
+          <div class="control-actions">
+            <button type="button" id="btn-bore-continue">Fortsetzen</button>
+            <button type="button" id="btn-bore-stop">Stop</button>
+          </div>
+        </div>`;
+    }
+    host.innerHTML = html;
+
+    const decide = async (action, label) => {
+      try {
+        await sendProcedureDecision(action);
+        setFeedback(label, false);
+        await refreshStore();
+        ensurePolling();
+      } catch (err) {
+        setFeedback(err.message || String(err), true);
+      }
+    };
+    const anomContinue = host.querySelector('#btn-anom-continue');
+    if (anomContinue) anomContinue.addEventListener('click', () => decide(0, 'Anomalie: Weiter'));
+    const anomNext = host.querySelector('#btn-anom-next');
+    if (anomNext) anomNext.addEventListener('click', () => decide(1, 'Anomalie: Nächster Punkt'));
+    const anomRepeat = host.querySelector('#btn-anom-repeat');
+    if (anomRepeat) anomRepeat.addEventListener('click', () => decide(2, 'Anomalie: Punkt wiederholen'));
+    const anomStop = host.querySelector('#btn-anom-stop');
+    if (anomStop) {
+      anomStop.addEventListener('click', async () => {
+        try {
+          await stopProcedure();
+          setFeedback('Prozedur gestoppt.', false);
+          await refreshStore();
+        } catch (err) {
+          setFeedback(err.message || String(err), true);
+        }
+      });
+    }
+    const boreContinue = host.querySelector('#btn-bore-continue');
+    if (boreContinue) {
+      boreContinue.addEventListener('click', async () => {
+        try {
+          await resumeProcedure();
+          setFeedback('Bohrungsmitte bestätigt — Prozedur fortgesetzt.', false);
+          await refreshStore();
+          ensurePolling();
+        } catch (err) {
+          setFeedback(err.message || String(err), true);
+        }
+      });
+    }
+    const boreStop = host.querySelector('#btn-bore-stop');
+    if (boreStop) {
+      boreStop.addEventListener('click', async () => {
+        try {
+          await stopProcedure();
+          setFeedback('Prozedur gestoppt.', false);
+          await refreshStore();
+        } catch (err) {
+          setFeedback(err.message || String(err), true);
+        }
+      });
+    }
+  }
+
+  function applyLiveTelemetry(machine) {
+    if (!machine || !forceGg || !velGg) return;
+    lastLiveMachine = machine;
+    forceGg.pushSample(machine.fx, machine.fy, machine.fz);
+    const v = velEst.update(
+      { x: machine.x, y: machine.y, z: machine.z },
+      machine.motionState
+    );
+    velGg.pushSample(v.vx, v.vy, v.vz);
+    updateChips();
+  }
+
+  function startRaf() {
+    const tick = () => {
+      if (forceGg) forceGg.draw();
+      if (velGg) velGg.draw();
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function syncFormFromStatus(force) {
+    const status = latestStatus || {};
+    const params = status.params || {};
+    const modeEl = contentEl.querySelector('#procedure-mode');
+    const forceEl = contentEl.querySelector('#procedure-force');
+    const iterEl = contentEl.querySelector('#procedure-iterations');
+    const active = status.state === 'running' || status.state === 'paused';
+    if (!force && active) return;
+    if (modeEl && document.activeElement !== modeEl) {
+      modeEl.value = params.mode === 'aging' ? 'aging' : 'test';
+    }
+    if (forceEl && document.activeElement !== forceEl && params.insertionForce != null) {
+      forceEl.value = String(params.insertionForce);
+    }
+    if (iterEl && document.activeElement !== iterEl && params.iterations != null) {
+      iterEl.value = String(params.iterations);
+    }
+  }
+
+  function paint() {
+    if (!mounted) return;
+    const status = latestStatus || {};
+    const machine = latestMachine || {};
+
+    const meta = contentEl.querySelector('#proc-meta');
+    if (meta) {
+      meta.innerHTML = `Programm: <b>${escapeHtml(
+        (programMeta && programMeta.programName) || '—'
+      )}</b> · Punkte: <b>${
+        selectionMeta && selectionMeta.points ? selectionMeta.points.length : '—'
+      }</b>`;
+    }
+
+    const hints = conditionalHints(status);
+    const warnEl = contentEl.querySelector('#proc-warnings');
+    if (warnEl) {
+      if (hints.length) {
+        warnEl.hidden = false;
+        warnEl.innerHTML = hints.map((h) => `<p class="field-hint">${escapeHtml(h)}</p>`).join('');
+      } else {
+        warnEl.hidden = true;
+        warnEl.innerHTML = '';
+      }
+    }
+
+    const banner = contentEl.querySelector('#proc-core-banner');
+    if (banner) {
+      if (isCoreProcessRunning(machine.processState) && status.state !== 'running' && status.state !== 'paused') {
+        const d = describeRunningCoreProcess(machine.procedurePhase);
+        banner.hidden = false;
+        banner.innerHTML = `<h3>Maschinenstatus</h3><p class="placeholder-note">● <b>${escapeHtml(
+          d.processLabel
+        )}</b> · Phase: <b>${escapeHtml(d.phaseLabel)}</b></p>`;
+      } else {
+        banner.hidden = true;
+        banner.innerHTML = '';
+      }
+    }
+
+    syncFormFromStatus(false);
+    updateControls();
+    updateProgressUi();
+    updateChips();
+    updateDialogs();
+
+    const active = status.state === 'running' || status.state === 'paused';
+    const coreRunning = isCoreProcessRunning(machine.processState);
+    if (active || coreRunning) ensurePolling();
+    else clearPoll();
+
+    if (status.state === 'completed') {
+      setFeedback('Letzte Prozedur abgeschlossen — Ergebnisse verfügbar.', false);
+    } else if (status.state === 'unavailable') {
+      setFeedback(status.error || 'Controller offline.', true);
+    }
+  }
+
+  async function refreshStore() {
     const program = await fetchCurrentProgram();
     const selection = await fetchProgramSelection();
     const procedure = await fetchProcedureStatus();
@@ -304,6 +789,7 @@ export function renderProcedure(container) {
     }
 
     if (!program.ok) {
+      mounted = false;
       contentEl.innerHTML = `
         <div class="error-card">
           <h3>Kein Programm geladen</h3>
@@ -312,14 +798,13 @@ export function renderProcedure(container) {
             <button type="button" id="btn-go-load">Zu „Prüftstellen laden“</button>
             <button type="button" class="btn-back" data-route="menu">Zurück</button>
           </div>
-        </div>
-      `;
+        </div>`;
       contentEl.querySelector('#btn-go-load').addEventListener('click', () => navigate('load-points'));
       contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
       return;
     }
-
     if (!selection.ok || !selection.selection || !selection.selection.confirmed) {
+      mounted = false;
       contentEl.innerHTML = `
         <div class="error-card">
           <h3>Keine bestätigte Punktauswahl</h3>
@@ -328,292 +813,36 @@ export function renderProcedure(container) {
             <button type="button" id="btn-go-select">Zu „Prüfstellen auswählen“</button>
             <button type="button" class="btn-back" data-route="menu">Zurück</button>
           </div>
-        </div>
-      `;
+        </div>`;
       contentEl.querySelector('#btn-go-select').addEventListener('click', () => navigate('select-points'));
       contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
       return;
     }
 
-    const status = latestStatus;
-    const machine = latestMachine || {};
-    const active = status.state === 'running' || status.state === 'paused';
-    const completed = status.state === 'completed';
-    const stopped = status.state === 'stopped';
-    const coreRunning = isCoreProcessRunning(machine.processState);
-    const startDisabled = isProcedureStartButtonDisabled({
-      procedureState: status.state,
-      coreProcessState: machine.processState,
-    });
-    const caps = status.capabilities || {};
-
-    contentEl.innerHTML = `
-      <p class="placeholder-note">
-        Programm: <b>${escapeHtml(program.current.meta.programName ?? '—')}</b> ·
-        Bestätigte Punkte: <b>${selection.selection.points.length}</b>
-      </p>
-
-      ${renderCapabilityNotes(status)}
-      ${renderCoreProcessBanner(machine)}
-
-      <form id="procedure-form" class="control-form procedure-form">
-        <label>
-          Modus
-          <select id="procedure-mode" ${active || coreRunning ? 'disabled' : ''}>
-            <option value="test" ${(status.params && status.params.mode === 'test') || !status.params ? 'selected' : ''}>Prüfen</option>
-            <option value="aging" ${status.params && status.params.mode === 'aging' ? 'selected' : ''}>Altern</option>
-          </select>
-          ${!caps.modeSupported ? '<span class="field-hint">Core: nicht unterstützt</span>' : ''}
-        </label>
-        <label>
-          Eingliederungskraft [N]
-          <input id="procedure-force" type="number" min="1" max="50" step="any"
-            value="${escapeHtml(status.params ? status.params.insertionForce : 5)}"
-            ${active || coreRunning ? 'disabled' : ''} />
-          ${!caps.insertionForceSupported ? '<span class="field-hint">Core: nicht unterstützt</span>' : ''}
-          <span class="field-hint">Fachlich 1–50 N. Sim-Steifigkeit (Plant k [N/mm]) getrennt einstellen — Default 5 N/mm erreicht 50 N bei 10 mm Suchweg.</span>
-        </label>
-        <label>
-          Iterationen (nur Phase 3)
-          <input id="procedure-iterations" type="number" min="1" step="1"
-            value="${escapeHtml(status.params ? status.params.iterations : 1)}"
-            ${active || coreRunning ? 'disabled' : ''} />
-          ${!caps.iterationsSupported ? '<span class="field-hint">Core: nicht unterstützt</span>' : ''}
-          <span class="field-hint">Anzahl der Prüf-/Alterungszyklen in Phase 3. Phase 2 optimiert dynamisch bis Krafttoleranz.</span>
-        </label>
-      </form>
-
-      ${renderProgress(status, machine)}
-      ${renderToolOffsetAnomaly(status)}
-      ${renderProcedureAnomaly(machine)}${renderBoreConfirm(machine)}
-
-      <div class="control-actions page-actions">
-        <button type="button" id="btn-proc-start" ${startDisabled ? 'disabled' : ''} title="${
-          coreRunning && !active
-            ? escapeHtml(describeRunningCoreProcess(machine.procedurePhase).startBlockedMessage)
-            : ''
-        }">Prüfprozedur starten</button>
-        <button type="button" id="btn-proc-pause" ${status.state === 'running' ? '' : 'disabled'}>Pause</button>
-        <button type="button" id="btn-proc-resume" ${status.state === 'paused' ? '' : 'disabled'}>Fortsetzen</button>
-        <button type="button" id="btn-proc-stop" ${active || status.state === 'unavailable' ? '' : 'disabled'}>Stop</button>
-        ${
-          completed
-            ? '<button type="button" id="btn-proc-results">Ergebnisse anzeigen</button>'
-            : ''
-        }
-        <button type="button" class="btn-back" data-route="menu">Zurück</button>
-      </div>
-    `;
-
-    contentEl.querySelector('.btn-back').addEventListener('click', () => navigate('menu'));
-
-    const resultsBtn = contentEl.querySelector('#btn-proc-results');
-    if (resultsBtn) {
-      resultsBtn.addEventListener('click', () => navigate('results'));
+    programMeta = program.current && program.current.meta;
+    selectionMeta = selection.selection;
+    if (!mounted) {
+      mountDashboard();
+      syncFormFromStatus(true);
     }
-
-    contentEl.querySelector('#btn-proc-start').addEventListener('click', async () => {
-      try {
-        const mode = contentEl.querySelector('#procedure-mode').value;
-        const insertionForce = Number(contentEl.querySelector('#procedure-force').value);
-        const iterations = Number(contentEl.querySelector('#procedure-iterations').value);
-
-        const machine = await fetchMachineStatus();
-        const isHomed = machine.isHomed === true;
-        const mcsValid = machine.mcsValid === true;
-
-        const gate = await runWithHomingGate({
-          status: { connected: machine.connected !== false, isHomed, mcsValid },
-          startHoming: () => sendCommand({ command: 'home' }),
-          getStatus: async () => {
-            const st = await fetchMachineStatus();
-            return {
-              connected: st.connected !== false,
-              isHomed: st.isHomed === true,
-              mcsValid: st.mcsValid === true,
-              homingState: st.homingState,
-              machineState: st.machineState,
-              eStop: st.eStop === true,
-            };
-          },
-          onHomingStarted: () => {
-            setFeedback('Homing gestartet — warte auf erfolgreichen Abschluss…', false);
-          },
-          action: () => startProcedure({ mode, insertionForce, iterations }),
-        });
-
-        if (gate.result === 'mcs_required') {
-          setFeedback(
-            'Kein gültiges Maschinenkoordinatensystem — bitte unter Kalibrieren „MCS und Bauplatte/Messtaster definieren und kalibrieren“ durchführen.',
-            true
-          );
-          return;
-        }
-        if (gate.result === 'cancelled') {
-          setFeedback('Start abgebrochen — Homing erforderlich.', false);
-          return;
-        }
-        if (gate.result === 'failed') {
-          setFeedback('Homing fehlgeschlagen — Prüfprozedur nicht gestartet.', true);
-          await refresh();
-          return;
-        }
-        if (gate.result === 'timeout') {
-          setFeedback('Homing-Timeout — Prüfprozedur nicht gestartet.', true);
-          await refresh();
-          return;
-        }
-
-        setFeedback('Prozedur gestartet.', false);
-        await refresh();
-        ensurePolling();
-      } catch (err) {
-        setFeedback(err.message || String(err), true);
-        await refresh();
-      }
-    });
-
-    contentEl.querySelector('#btn-proc-pause').addEventListener('click', async () => {
-      try {
-        await pauseProcedure();
-        setFeedback('Prozedur pausiert.', false);
-        await refresh();
-      } catch (err) {
-        setFeedback(err.message || String(err), true);
-      }
-    });
-
-    const boreContinue = contentEl.querySelector('#btn-bore-continue');
-    if (boreContinue) {
-      boreContinue.addEventListener('click', async () => {
-        try {
-          await resumeProcedure();
-          setFeedback('Bohrungsmitte bestätigt — Prozedur fortgesetzt.', false);
-          await refresh();
-          ensurePolling();
-        } catch (err) {
-          setFeedback(err.message || String(err), true);
-        }
-      });
-    }
-    const boreStop = contentEl.querySelector('#btn-bore-stop');
-    if (boreStop) {
-      boreStop.addEventListener('click', async () => {
-        try {
-          await stopProcedure();
-          setFeedback('Prozedur gestoppt.', false);
-          await refresh();
-        } catch (err) {
-          setFeedback(err.message || String(err), true);
-        }
-      });
-    }
-
-    const anomStop = contentEl.querySelector('#btn-anom-stop');
-    if (anomStop) {
-      anomStop.addEventListener('click', async () => {
-        try {
-          await stopProcedure();
-          setFeedback('Prozedur gestoppt.', false);
-          await refresh();
-        } catch (err) {
-          setFeedback(err.message || String(err), true);
-        }
-      });
-    }
-    async function decideAnomaly(action, label) {
-      try {
-        await sendProcedureDecision(action);
-        setFeedback(label, false);
-        await refresh();
-        ensurePolling();
-      } catch (err) {
-        setFeedback(err.message || String(err), true);
-      }
-    }
-    const anomContinue = contentEl.querySelector('#btn-anom-continue');
-    if (anomContinue) {
-      anomContinue.addEventListener('click', () => decideAnomaly(0, 'Anomalie: Weiter'));
-    }
-    const anomNext = contentEl.querySelector('#btn-anom-next');
-    if (anomNext) {
-      anomNext.addEventListener('click', () => decideAnomaly(1, 'Anomalie: Nächster Punkt'));
-    }
-    const anomRepeat = contentEl.querySelector('#btn-anom-repeat');
-    if (anomRepeat) {
-      anomRepeat.addEventListener('click', () => decideAnomaly(2, 'Anomalie: Punkt wiederholen'));
-    }
-
-
-    contentEl.querySelector('#btn-proc-resume').addEventListener('click', async () => {
-      try {
-        await resumeProcedure();
-        setFeedback('Prozedur fortgesetzt.', false);
-        await refresh();
-        ensurePolling();
-      } catch (err) {
-        setFeedback(err.message || String(err), true);
-      }
-    });
-
-    contentEl.querySelector('#btn-proc-stop').addEventListener('click', async () => {
-      try {
-        await stopProcedure();
-        setFeedback('Prozedur gestoppt.', false);
-        await refresh();
-      } catch (err) {
-        setFeedback(err.message || String(err), true);
-        await refresh();
-      }
-    });
-
-    const fault =
-      machine.faultReason && machine.faultReason !== 'None' ? machine.faultReason : null;
-    if (fault === 'ProbeApproachContact') {
-      setFeedback(
-        'Messtaster-Kontakt während der Approach-Z-Fahrt (ProbeApproach). ' +
-          'Gespeichertes probeCenter.z liegt vermutlich zu tief oder die Anfahrt war zu aggressiv. ' +
-          'STOP/Homing, Kalibrierkennwerte prüfen, dann erneut.',
-        true
-      );
-    } else if (stopped && fault === 'ProbeSearchNoContact') {
-      setFeedback(
-        'Kein Messtasterkontakt während der Suche (Timeout). Kalibrierung/Geometrie prüfen.',
-        true
-      );
-    } else if (completed) {
-      setFeedback('Letzte Prozedur abgeschlossen — Ergebnisse verfügbar.', false);
-    } else if (status.state === 'unavailable') {
-      setFeedback(status.error || 'Controller offline.', true);
-    } else if (coreRunning && !active) {
-      setFeedback(describeRunningCoreProcess(machine.procedurePhase).startBlockedMessage, false);
-    }
-
-    if (active || coreRunning) {
-      ensurePolling();
-    } else {
-      clearPoll();
-    }
+    paint();
   }
 
-  function ensurePolling() {
-    if (pollTimer) return;
-    pollTimer = setInterval(() => {
-      refresh().catch(() => {});
-    }, 500);
-  }
+  unsubLive = subscribeLiveStatus((msg) => {
+    // WS payload is { type:'status', ...fields } or nested — accept both.
+    const machine = msg && (msg.x !== undefined || msg.fx !== undefined) ? msg : msg && msg.status;
+    if (!machine) return;
+    applyLiveTelemetry(machine);
+    if (mounted) {
+      latestMachine = { ...(latestMachine || {}), ...machine };
+    }
+  });
 
-  refresh()
-    .then(() => {
-      const state = latestStatus && latestStatus.state;
-      const coreRunning = latestMachine && isCoreProcessRunning(latestMachine.processState);
-      if (state === 'running' || state === 'paused' || coreRunning) {
-        ensurePolling();
-      }
-    })
-    .catch((err) => setFeedback(err.message || String(err), true));
+  refreshStore().catch((err) => setFeedback(err.message || String(err), true));
 
   return () => {
     clearPoll();
+    if (rafId) cancelAnimationFrame(rafId);
+    if (unsubLive) unsubLive();
   };
 }

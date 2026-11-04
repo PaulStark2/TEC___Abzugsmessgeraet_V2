@@ -120,6 +120,7 @@ npm start
 ```
 
 Three.js wird lokal per npm eingebunden und unter `/vendor/three/` ausgeliefert (kein CDN).
+Chart.js (+ Zoom-Plugin, Hammer.js) ebenso unter `/vendor/chart.js/`, `/vendor/chartjs-plugin-zoom/`, `/vendor/hammerjs/` für die Prüfergebnis-Diagramme.
 
 #### Manueller Gate-Test (3D-Viewport)
 

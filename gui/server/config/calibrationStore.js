@@ -5,8 +5,10 @@ const path = require('path');
 
 const FILE_PATH = path.join(__dirname, '..', 'data', 'calibration.json');
 
-/** MCS origin at the +max mechanical switches (machine = 0). Home is derived (-R,-R,-R). */
+/** Legacy MCS (all axes home at +Max, workspace negative). Rejected on load. */
 const MCS_ORIGIN_POS_MAX_SWITCHES = 'positiveMaxSwitches';
+/** Current MCS: X homes at Min (workspace +X), Y/Z at +Max (workspace −). Home (+R,−R,−R). */
+const MCS_ORIGIN_X_MIN_YZ_MAX = 'xMinHomeYzMaxHome';
 
 function emptyMcs() {
   return {
@@ -118,9 +120,9 @@ function normalize(parsed) {
   const mcsIn = parsed.machineCoordinateSystem;
   let mcs = emptyMcs();
   if (mcsIn && typeof mcsIn === 'object') {
-    const origin = mcsIn.origin === MCS_ORIGIN_POS_MAX_SWITCHES ? MCS_ORIGIN_POS_MAX_SWITCHES : null;
+    // Only xMinHomeYzMaxHome is accepted. Legacy positiveMaxSwitches is rejected.
+    const origin = mcsIn.origin === MCS_ORIGIN_X_MIN_YZ_MAX ? MCS_ORIGIN_X_MIN_YZ_MAX : null;
     const home = finitePose(mcsIn.homePosition);
-    // Legacy identity MCS (valid + home, no origin) is rejected — wrong frame.
     const valid = mcsIn.valid === true && origin !== null;
     mcs = {
       valid,
@@ -230,7 +232,7 @@ function setMachineCoordinateSystem(homePosition) {
   return save({
     machineCoordinateSystem: {
       valid: true,
-      origin: MCS_ORIGIN_POS_MAX_SWITCHES,
+      origin: MCS_ORIGIN_X_MIN_YZ_MAX,
       homePosition: home,
     },
     plateOrigin: null,
@@ -402,6 +404,7 @@ function isLegacyToolOffsetSemantics(calib, reference = { x: 40, y: 40, z: 10 })
 
 module.exports = {
   MCS_ORIGIN_POS_MAX_SWITCHES,
+  MCS_ORIGIN_X_MIN_YZ_MAX,
   load,
   save,
   normalize,

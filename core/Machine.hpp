@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AbortReason.hpp"
 #include "CalibrationSet.hpp"
 #include "ForceFilter.hpp"
 #include "ForceTare.hpp"
@@ -63,8 +64,9 @@ public:
     HomingState homingState() const;
     bool isHomed() const;
 
-    // After Soft-STOP of an automatic process: reference is no longer trusted for a
-    // new procedure start (operator must Home again). Does not clear measuredHome.
+    // After Soft-STOP of an automatic process: HomingState is cleared so the next
+    // procedure start requires Home again. Does not clear measuredHome and does not
+    // clear session machine-frame trust used for Reference fast approach.
     void invalidateHoming();
 
     // Bitmask of directions currently blocked by soft limits (6 bits, kLimitDir*).
@@ -99,7 +101,7 @@ public:
     bool home();
 
     // Explicit MCS definition (same motion SM as home). Origin at +max switches (machine = 0);
-    // latches derived home (-R,-R,-R), sets machine_coordinate_system_valid, clears plate/probe.
+    // latches derived home (+Rx,-Ry,-Rz), sets machine_coordinate_system_valid, clears plate/probe.
     bool defineMachineCoordinateSystem();
 
     // Host restore after restart: latch MCS without motion and without invalidating geometry.
@@ -135,6 +137,10 @@ public:
 
     // Clear latched Fault after e_stop is released (M11). // clear fault
     void clearFault(); // command
+
+    // Allow restricted jog while Fault is latched (operator recovery). False if not Fault or e_stop.
+    bool enableFaultManual();
+    bool faultManualActive() const;
 
     // Pneumatic commands (independent actuators, M11 stub). // pneumatics
     void setSpreaderExtend(bool extend); // Spreizer aktiv/inaktiv
@@ -200,6 +206,9 @@ public:
     FaultReason lastFaultReason() const;
     // Latch a process abort reason without entering MachineState::Fault.
     void latchFaultReason(FaultReason reason);
+    AbortReason lastAbortReason() const;
+    void latchAbortReason(AbortReason reason);
+    void clearAbortReason();
     float forceSampleAge() const;
 
     bool spreaderBusy() const;
@@ -263,10 +272,12 @@ private:
     // Per-axis seek sub-state (not on the wire; HomingState stays Z/X/Y).
     enum class HomingAxisLeg : uint8_t
     {
-        FastSeek = 0,     // +max until limit true
-        CreepBack = 1,    // DefineMcs: −axis until limit false
-        CreepForward = 2, // DefineMcs: +axis until limit true (rising edge)
-        RetractR = 3      // retract by R from latched switch
+        FastApproach = 0, // Reference trusted: fast travel to home − approach distance
+        FastSeek = 1,     // slow blind seek toward switch until limit true
+        CreepBack = 2,    // DefineMcs: −axis until limit false
+        CreepForward = 3, // DefineMcs: +axis until limit true (rising edge)
+        RetractR = 4,     // retract by R from latched switch
+        RetractSpreader = 5 // last homing step: Spreizer einfahren
     };
 
     MachineConfig machine_config_;
@@ -279,7 +290,9 @@ private:
     bool pre_clamp_xy_enabled_;
     unsigned xy_correction_steps_;
     float xy_correction_accum_s_ = 0.0f;
+    bool fault_manual_active_ = false;
     FaultReason last_fault_reason_;
+    AbortReason last_abort_reason_;
     float force_sample_age_s_;
     std::uint32_t last_force_sample_sequence_;
     bool have_force_sample_;
@@ -308,6 +321,9 @@ private:
     void enterSafetyFault(FaultReason reason); // stopMotion + latched Fault
     void applySpreaderSafeState(); // freeze last command; do not invent a retracted pose
     void updatePneumaticStub(); // mirror Extend -> Extended for both actuators
+    void evaluateFaultManualSafety(float dt); // recovery hard limits; no phase collision
+    void advanceFaultManualMotion(float dt); // jog while Fault stays latched
+    AxisForceLimit phaseCollisionLimitN() const; // Measure: % of Prüfkraft → N
 
     // M16 limit helpers: derive blocked directions and effective planner targets without
     // mutating stored_target_* (so a later command away from the limit still works).
@@ -325,15 +341,21 @@ private:
     void tickHoming(float dt);
     bool startHomingSequence(HomingMode mode);
     void beginHomingPhase(HomingState phase);
+    void beginSlowSeek();
     void beginCreepBack();
     void beginCreepForward();
-    // Snap the active axis to MCS origin (0) at the +max switch; retract to -R.
+    // Snap active axis to MCS origin (0) at the homing switch; retract into workspace.
     void beginHomingRetract(HomingState phase);
     TestPoint derivedMachineHomePose() const;
     void applyDerivedHomeFromRetractR();
     float homingRetractDistance(float configured) const;
     float homingCreepVelocity() const;
-    void setHomingMotionSpeed(float velocity);
+    // +1 = seek toward +Max (Y/Z); −1 = seek toward XMin (X remap).
+    float homingSeekSign() const;
+    // Machine-frame standoff before derived home along the seek axis.
+    float homingApproachTarget(HomingState phase) const;
+    bool homingPoseBeforeApproach(HomingState phase) const;
+    void setHomingMotionSpeed(float velocity, float acceleration);
     void commandActiveAxisToward(float signed_delta);
     bool homingPhaseLimitReached(HomingState phase) const;
     void finishHomingSuccess();
@@ -342,6 +364,11 @@ private:
     HomingMode homing_mode_;
     HomingAxisLeg homing_axis_leg_;
     float homing_creep_back_traveled_;
+    // Captured at startHomingSequence: Reference && session_machine_frame_trusted_.
+    bool homing_use_fast_approach_;
+    // Set after first successful home this power cycle; Soft-STOP / invalidate keep it.
+    // Cleared on safety Fault, HomingError, or absolute pose snap (setCurrentPose).
+    bool session_machine_frame_trusted_;
 
     void tickActiveMotion(float dt);
     // One low-pass step on raw_force_, then publish tare(filtered).

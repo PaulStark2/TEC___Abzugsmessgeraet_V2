@@ -3,7 +3,7 @@
 /**
  * Preflight for automatic procedure start.
  * Mirrors Core guards; Safe-Z is dynamic from the program (plate frame)
- * and a valid Messtaster when it sits higher than the test points.
+ * and a valid Einmessbohrung (probeCenter) when it sits higher than the test points.
  */
 
 const { resolveProgramSafeZ } = require('../coord/safeZ');
@@ -46,7 +46,7 @@ function validateProcedureStartPreconditions(input) {
       ok: false,
       code: 'mcs',
       error:
-        'Kein gültiges Maschinenkoordinatensystem — bitte unter Kalibrieren „MCS und Bauplatte/Messtaster definieren und kalibrieren“ durchführen',
+        'Kein gültiges Maschinenkoordinatensystem — bitte unter Kalibrieren „MCS und Bauplatte/Einmessbohrung definieren und kalibrieren“ durchführen',
     };
   }
 
@@ -62,7 +62,7 @@ function validateProcedureStartPreconditions(input) {
     return {
       ok: false,
       code: 'probe_center',
-      error: 'Messtaster-Zentrum nicht gesetzt — bitte M19-Kalibrierung durchführen',
+      error: 'Einmessbohrung-Zentrum nicht gesetzt — bitte geometrische Kalibrierung durchführen',
     };
   }
 

@@ -5,13 +5,18 @@
 namespace
 {
 
+bool needsFloor(const BoreSearch::Params& p)
+{
+    return p.do_floor || p.z_first;
+}
+
 bool paramsOk(const BoreSearch::Params& p)
 {
     if (!(p.wall_force_N > 0.0f) || !(p.xy_search_limit > 0.0f) || !(p.timeout_s > 0.0f))
     {
         return false;
     }
-    if (p.do_floor)
+    if (needsFloor(p))
     {
         if (!(p.floor_force_N > 0.0f) || !(p.z_search_limit > 0.0f) || !(p.z_lift_mm >= 0.0f))
         {
@@ -39,6 +44,13 @@ bool BoreSearch::start(Machine& machine, const Params& params)
     elapsed_s_ = 0.0f;
     origin_z_ = machine.z();
     floor_z_ = machine.z();
+    if (params_.z_first)
+    {
+        state_ = State::FloorDown;
+        motion_ = Motion::Command;
+        edge_armed_ = false;
+        return true;
+    }
     resetXySearch(machine);
     state_ = State::FirstOut;
     motion_ = Motion::Command;
@@ -145,7 +157,19 @@ void BoreSearch::commandTravel(Machine& machine)
     }
 
     const float component = axis_x_ ? fx : fy;
-    const int sign = seekSign(component, tol);
+    int sign = seek_sign_;
+    if (state_ == State::FirstOut || state_ == State::SecondOut)
+    {
+        // Out legs: unload from contact force, or default + when free.
+        sign = seekSign(component, tol);
+    }
+    else
+    {
+        // Back legs: always reverse the Out seek. Do not re-run seekSign —
+        // after Stop the filtered force often dips below tol and would default
+        // to +1 again, re-capturing the same wall (then a degenerate chord).
+        sign = -seek_sign_;
+    }
     // Motion sign and the force sign of the wall being sought are the same.
     seek_sign_ = sign;
     const float sought = static_cast<float>(sign) * component;
@@ -211,7 +235,11 @@ void BoreSearch::finishCenter(Machine& machine)
 
     result_.cx = cx;
     result_.cy = cy;
-    result_.cz = machine.z();
+    // z_first: keep floor contact Z already stored after FloorLift.
+    if (!params_.z_first)
+    {
+        result_.cz = machine.z();
+    }
     result_.radius = radius;
     result_.anomaly = anomaly;
     result_.fx = fx;
@@ -222,7 +250,8 @@ void BoreSearch::finishCenter(Machine& machine)
         result_.points[i] = points_[i];
     }
 
-    if (params_.do_floor)
+    // z_first already did floor before XY — never run floor again.
+    if (params_.do_floor && !params_.z_first)
     {
         origin_z_ = machine.z();
         state_ = State::FloorDown;
@@ -277,8 +306,7 @@ void BoreSearch::tick(float dt, Machine& machine)
                 return;
             }
             const float fz = machine.hostInputs().force.fz;
-            // Contact from above: rising |Fz| with compression typically negative Fz in this stack,
-            // but PreClamp / contact use signed components. Floor uses magnitude of Fz against threshold.
+            // Contact from above: rising |Fz|. Floor uses magnitude against threshold.
             const float mag = std::fabs(fz);
             if (!edge_armed_)
             {
@@ -293,8 +321,10 @@ void BoreSearch::tick(float dt, Machine& machine)
                 motion_ = Motion::Stop;
                 return;
             }
-            if (std::fabs(machine.z() - origin_z_) >= params_.z_search_limit - 1.0e-3f &&
-                motionSettled(machine))
+            // Abort when travel ends without contact (soft-clamped goal or full limit).
+            // Do not require |z−origin|≥limit — that hangs forever if Z cannot reach the
+            // commanded depth (workspace / soft limit).
+            if (motionSettled(machine))
             {
                 enterError(ErrorReason::FloorNotFound);
             }
@@ -313,8 +343,16 @@ void BoreSearch::tick(float dt, Machine& machine)
         {
             return;
         }
-        result_.cz = machine.z();
         result_.fz = machine.hostInputs().force.fz;
+        if (params_.z_first)
+        {
+            // Durable probe_center.z = floor contact; XY runs at lifted work height.
+            result_.cz = floor_z_;
+            resetXySearch(machine);
+            return;
+        }
+        // Plate teach: keep prior semantics (Z after lift).
+        result_.cz = machine.z();
         state_ = State::Complete;
         motion_ = Motion::Command;
         return;
@@ -390,7 +428,11 @@ void BoreSearch::tick(float dt, Machine& machine)
         return;
     }
 
-    if (std::fabs(along - origin) >= params_.xy_search_limit - 1.0e-3f && motionSettled(machine))
+    // Only abort when settled at this leg's seek goal — not merely |along−origin|≥limit.
+    // After FirstOut capture the tool often sits near +limit; FirstBack would otherwise
+    // trip WallNotFound immediately before reverse travel starts.
+    const float goal_along = origin + static_cast<float>(seek_sign_) * params_.xy_search_limit;
+    if (std::fabs(along - goal_along) <= 1.0e-3f && motionSettled(machine))
     {
         enterError(ErrorReason::WallNotFound);
     }

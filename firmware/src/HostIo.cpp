@@ -49,6 +49,9 @@ static std::uint32_t g_status_divider = 0;
 // Limit lines pick up stepper EMI (spikes to ~2 V). Core treats a single High
 // sample as +max during homing — debounce at 1 kHz before publishing.
 static constexpr std::uint8_t kLimitDebounceMs = 10;
+// Probe NC on PA5: same EMI class as limits; undebounced Low spikes latch a
+// false Messtaster contact mid-air during Z search (hub height / above disc).
+static constexpr std::uint8_t kProbeDebounceMs = 15;
 
 struct DebouncedLevel
 {
@@ -62,6 +65,7 @@ static DebouncedLevel g_lim_yn{};
 static DebouncedLevel g_lim_yp{};
 static DebouncedLevel g_lim_zn{};
 static DebouncedLevel g_lim_zp{};
+static DebouncedLevel g_probe{};
 
 static bool pinHigh(GPIO_TypeDef* port, std::uint16_t pin)
 {
@@ -376,8 +380,9 @@ HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_se
     inputs.forceSampleSequence = force_sequence;
     inputs.hostHeartbeatValid = true;
     inputs.hostHeartbeatSequence = heartbeat_sequence;
-    inputs.limitXMin = debounceLevel(g_lim_xn, pinHigh(PIN_LIM_XN_PORT, PIN_LIM_XN_PIN), kLimitDebounceMs);
-    inputs.limitXMax = debounceLevel(g_lim_xp, pinHigh(PIN_LIM_XP_PORT, PIN_LIM_XP_PIN), kLimitDebounceMs);
+    // X remap: physical XP (homing corner) → limitXMin; physical XN → limitXMax.
+    inputs.limitXMin = debounceLevel(g_lim_xn, pinHigh(PIN_LIM_XP_PORT, PIN_LIM_XP_PIN), kLimitDebounceMs);
+    inputs.limitXMax = debounceLevel(g_lim_xp, pinHigh(PIN_LIM_XN_PORT, PIN_LIM_XN_PIN), kLimitDebounceMs);
     inputs.limitYMin = debounceLevel(g_lim_yn, pinHigh(PIN_LIM_YN_PORT, PIN_LIM_YN_PIN), kLimitDebounceMs);
     inputs.limitYMax = debounceLevel(g_lim_yp, pinHigh(PIN_LIM_YP_PORT, PIN_LIM_YP_PIN), kLimitDebounceMs);
     inputs.limitZMin = debounceLevel(g_lim_zn, pinHigh(PIN_LIM_ZN_PORT, PIN_LIM_ZN_PIN), kLimitDebounceMs);
@@ -385,7 +390,9 @@ HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_se
     // E-Stop: no debounce — fail fast. Hardware should still cut power.
     inputs.e_stop = pinHigh(PIN_ESTOP_PORT, PIN_ESTOP_PIN);
     // Level only (NC: Low = contact). Pose/sequence latch is in FirmwareHost.
-    inputs.probeTriggered = !pinHigh(PIN_PROBE_PORT, PIN_PROBE_PIN);
+    // Debounce before publishing — a single EMI Low must not create a rising edge.
+    const bool probe_raw_contact = !pinHigh(PIN_PROBE_PORT, PIN_PROBE_PIN);
+    inputs.probeTriggered = debounceLevel(g_probe, probe_raw_contact, kProbeDebounceMs);
     inputs.probeTriggerPoseValid = false;
     inputs.probeTriggerSequence = 0;
     return inputs;

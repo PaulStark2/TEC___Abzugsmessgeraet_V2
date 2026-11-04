@@ -149,3 +149,58 @@ inline bool resolveProgramSafeZMachine(const TestProgram& program, float safe_z_
     (void)max_clearance_z;
     return computeSafeZMachine(calibration, safe_z_plate, out_safe_z_machine);
 }
+
+// Teach Anfahrt clearance in machine frame (no program required):
+//   max_calib_z = max(Z of valid plate_origin, k1, k2, k3, probe_center)
+//   safe_z_calib_machine = max_calib_z + safe_z_calib_buffer
+inline bool computeMaxCalibZMachine(const CalibrationSet& calibration, float& out_max_z)
+{
+    bool have = false;
+    float max_z = 0.0f;
+    auto consider = [&](bool valid, const TestPoint& p) {
+        if (!valid || !std::isfinite(p.z))
+        {
+            return;
+        }
+        if (!have || p.z > max_z)
+        {
+            max_z = p.z;
+            have = true;
+        }
+    };
+    consider(calibration.plate_origin_valid, calibration.plate_origin);
+    if (calibration.rotation_points_valid)
+    {
+        consider(true, calibration.k1);
+        consider(true, calibration.k2);
+        consider(true, calibration.k3);
+    }
+    consider(calibration.probe_center_valid, calibration.probe_center);
+    if (!have)
+    {
+        return false;
+    }
+    out_max_z = max_z;
+    return true;
+}
+
+inline bool resolveCalibSafeZMachine(const CalibrationSet& calibration, float safe_z_calib_buffer,
+                                     float& out_safe_z_calib_machine)
+{
+    if (!(safe_z_calib_buffer > 0.0f) || !std::isfinite(safe_z_calib_buffer))
+    {
+        return false;
+    }
+    float max_z = 0.0f;
+    if (!computeMaxCalibZMachine(calibration, max_z))
+    {
+        return false;
+    }
+    const float safe = max_z + safe_z_calib_buffer;
+    if (!std::isfinite(safe))
+    {
+        return false;
+    }
+    out_safe_z_calib_machine = safe;
+    return true;
+}

@@ -9,6 +9,7 @@ import { renderResults } from './pages/results.js';
 import { renderPlate } from './pages/plate.js';
 import { renderCalibrate } from './pages/calibrate.js';
 import { renderParameters } from './pages/parameters.js';
+import { renderFaults } from './pages/faults.js';
 
 const ROUTES = {
   menu: renderMenu,
@@ -17,6 +18,7 @@ const ROUTES = {
   procedure: renderProcedure,
   results: renderResults,
   manual: renderManual,
+  faults: renderFaults,
   plate: renderPlate,
   calibrate: renderCalibrate,
   parameters: renderParameters,

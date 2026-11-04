@@ -180,7 +180,8 @@ async function main() {
     assert.ok(page.raw.includes('gantry-canvas'), 'page contains gantry canvas');
     assert.ok(page.raw.includes('/js/sim/simulationPage.js'), 'page loads simulation module');
     const hmi = await request(guiPort, 'GET', '/');
-    assert.ok(hmi.raw.includes('tcp-canvas'), 'machine HMI still intact');
+    assert.ok(hmi.raw.includes('id="page-root"'), 'machine HMI still intact');
+    assert.ok(hmi.raw.includes('btn-stop-global'), 'global STOP still present');
     console.log('  PASS: standalone simulation page, HMI unchanged');
 
     console.log('[2] plant state via Node proxy');

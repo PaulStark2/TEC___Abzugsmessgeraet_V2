@@ -97,7 +97,7 @@ bool runHome(simbridge::SimProtocolBridge& bridge, const char* label, int max_ti
         {
             const bool lim =
                 (hs == HomingState::HomingZ && bridge.machine().hostInputs().limitZMax) ||
-                (hs == HomingState::HomingX && bridge.machine().hostInputs().limitXMax) ||
+                (hs == HomingState::HomingX && bridge.machine().hostInputs().limitXMin) ||
                 (hs == HomingState::HomingY && bridge.machine().hostInputs().limitYMax);
             if (!lim && i > 0)
             {

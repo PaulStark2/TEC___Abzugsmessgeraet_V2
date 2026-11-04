@@ -44,6 +44,7 @@ private:
                               std::vector<OutboundFrame>& out);
 
     bool isFaultGuarded(uint8_t message_id) const;
+    bool isFaultManualAllowed(uint8_t message_id) const;
 
     void appendForceCalibration(const tecomm::ForceCalibrationResultPayload& result, std::vector<OutboundFrame>& out);
 

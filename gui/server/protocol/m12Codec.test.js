@@ -120,6 +120,7 @@ function testStatusDecode() {
     procedurePhase: 0,
     faultReason: 0,
     spreaderState: 2,
+    faultManual: 0,
   };
   const payload = encodeStatusReportPayload(status);
   assert.strictEqual(payload.length, STATUS_REPORT_PAYLOAD_WIRE_SIZE);
@@ -130,11 +131,13 @@ function testStatusDecode() {
   assert.ok(nearEqual(report.x, 3));
   assert.ok(nearEqual(report.fx, 0.1));
   assert.strictEqual(report.spreaderState, 2);
+  assert.strictEqual(report.faultManual, 0);
   const gui = statusReportToGuiStatus(report, true);
   assert.strictEqual(gui.machineState, 'Active');
   assert.strictEqual(gui.motionState, 'Moving');
   assert.strictEqual(gui.pneumaticExtended, true);
   assert.strictEqual(gui.spreaderState, 'Extended');
+  assert.strictEqual(gui.faultManual, false);
   assert.strictEqual(gui.currentPointIndex, null);
   assert.strictEqual(gui.connected, true);
 }
@@ -213,18 +216,19 @@ function sampleMachineConfig() {
     xy_correction_step: 0.05,
     xy_max_correction: 2,
     insertion_buffer: 1,
+    after_seat_retract_mm: 2,
+    extract_after_free_mm: 0,
+    extract_after_free_v: 1,
     collision_approach_N: 20,
     collision_retract_N: 20,
     collision_clamp_N: 20,
     collision_unclamp_N: 20,
     collision_contact_N: 40,
-    collision_measure_N: 40,
+    collision_measure_N: 150,
     spreader_extend_time_s: 0.5,
     spreader_retract_time_s: 0.5,
     force_tolerance_N: 0.5,
     v_search: 2,
-    probe_search_distance: 10,
-    probe_backoff: 1,
     home_offset_x: 0,
     home_offset_y: 0,
     home_offset_z: 0,
@@ -232,23 +236,20 @@ function sampleMachineConfig() {
     tool_offset_y: -0.5,
     tool_offset_z: 1,
     safe_z_buffer: 30,
+    safe_z_calib_buffer: 30,
     sample_timeout_s: 0.5,
     heartbeat_timeout_s: 0.3,
     xy_correct_timeout_s: 2,
-    head_diameter: 0,
-    measuring_head_diameter: 8,
-    measuring_head_thickness: 3,
-    tool_diameter: 2.5,
-    tool_cylindrical_height: 15,
-    probe_xy_search_margin: 2,
+    approach_distance: 15,
+    probe_v_approach: 10,
+    probe_wall_force_N: 0.5,
+    probe_floor_force_N: 0.5,
+    probe_xy_search_limit: 5,
+    probe_z_search_limit: 20,
+    probe_z_lift_mm: 2,
+    probe_bore_timeout_s: 60,
+    probe_bore_refine_passes: 1,
     insert_search_distance: 10,
-    search_depth: 5,
-    approach_distance: 10,
-    v_search_fine: 1,
-    probe_offset_reference_x: 0,
-    probe_offset_reference_y: 0,
-    probe_offset_reference_z: 5,
-    num_fine_searches: 3,
     phase1_v_extract: 1,
     phase1_v_insert: 1,
     phase1_a: 0,
@@ -257,12 +258,6 @@ function sampleMachineConfig() {
     phase3_v_insert: 2,
     phase3_a: 0,
     phase3_corner: 0,
-    v_approach_probe: 10,
-    v_transfer_probe: 10,
-    a_probe_transfer: 0,
-    corner_probe_transfer: 0,
-    a_probe_search: 0,
-    a_probe_brake: 500,
     probe_center_x: 0,
     probe_center_y: 0,
     probe_center_z: 0,
@@ -276,16 +271,27 @@ function testMachineConfigRoundtrip() {
   const decoded = decodeMachineConfigPayload(payload);
   assert.ok(nearEqual(decoded.tool_offset_z, 1));
   assert.ok(nearEqual(decoded.safe_z_buffer, 30));
+  assert.ok(nearEqual(decoded.safe_z_calib_buffer, 30));
   assert.ok(nearEqual(decoded.heartbeat_timeout_s, 0.3));
-  assert.ok(nearEqual(decoded.measuring_head_diameter, 8));
-  assert.ok(nearEqual(decoded.tool_cylindrical_height, 15));
-  assert.ok(nearEqual(decoded.probe_xy_search_margin, 2));
+  assert.ok(nearEqual(decoded.probe_wall_force_N, 0.5));
+  assert.ok(nearEqual(decoded.probe_z_lift_mm, 2));
+  assert.ok(nearEqual(decoded.probe_xy_search_limit, 5));
   assert.ok(nearEqual(decoded.insert_search_distance, 10));
-  assert.strictEqual(decoded.num_fine_searches, 3);
+  assert.strictEqual(decoded.probe_bore_refine_passes, 1);
   assert.ok(nearEqual(decoded.phase3_v_insert, 2));
   assert.ok(nearEqual(decoded.corner_testpoints, 0));
-  assert.ok(nearEqual(decoded.a_probe_brake, 500));
-  assert.ok(nearEqual(decoded.v_approach_probe, 10));
+  assert.ok(nearEqual(decoded.probe_v_approach, 10));
+  assert.ok(nearEqual(decoded.approach_distance, 15));
+  assert.ok(nearEqual(decoded.after_seat_retract_mm, 2));
+  assert.ok(nearEqual(decoded.extract_after_free_mm, 0));
+  assert.ok(nearEqual(decoded.extract_after_free_v, 1));
+  assert.ok(nearEqual(decoded.v_homing_fast, 18));
+  assert.ok(nearEqual(decoded.homing_approach_distance, 50));
+  assert.ok(nearEqual(decoded.a_homing_fast, 500));
+  assert.ok(nearEqual(decoded.force_path_dz_mm, 0.01));
+  assert.ok(nearEqual(decoded.force_path_dz_fine_mm, 0.005));
+  assert.ok(nearEqual(decoded.force_near_target_frac, 0.8));
+  assert.ok(nearEqual(decoded.phase3_v_insert_fine, 0.5));
   assert.ok(nearEqual(decoded.force_range_N, 30));
   assert.ok(nearEqual(decoded.force_hard_limit_N, 30));
   assert.ok(nearEqual(decoded.force_hard_limit_x_N, 30));
@@ -382,16 +388,26 @@ function testStatusReportProcedurePhase() {
     procedurePhase: 11,
     faultReason: 7,
     spreaderState: 4,
+    faultManual: 1,
+    abortReason: 20,
   });
   assert.strictEqual(payload.length, STATUS_REPORT_PAYLOAD_WIRE_SIZE);
+  assert.strictEqual(STATUS_REPORT_PAYLOAD_WIRE_SIZE, 46);
   const decoded = decodeStatusReportPayload(payload);
   assert.strictEqual(decoded.procedurePhase, 11);
   assert.strictEqual(decoded.faultReason, 7);
   assert.strictEqual(decoded.spreaderState, 4);
+  assert.strictEqual(decoded.faultManual, 1);
+  assert.strictEqual(decoded.abortReason, 20);
+  assert.strictEqual(decoded.currentIteration || 0, 0);
   const gui = statusReportToGuiStatus(decoded, true);
   assert.strictEqual(gui.procedurePhase, 'TestOrAge');
   assert.strictEqual(gui.faultReason, 'CommunicationTimeout');
   assert.strictEqual(gui.spreaderState, 'SafeDeenergized');
+  assert.strictEqual(gui.faultManual, true);
+  assert.strictEqual(gui.abortReason, 20);
+  assert.strictEqual(gui.abortReasonOrdinal, 20);
+  assert.strictEqual(gui.currentIteration, 0);
 }
 
 testForcePathChunkRoundtrip();

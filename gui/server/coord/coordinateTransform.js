@@ -54,7 +54,38 @@ function toMachinePoints(calibration, platePoints) {
   return out;
 }
 
+/**
+ * Machine-frame TCP → plate-frame (inverse of toMachinePoint).
+ */
+function toPlatePoint(calibration, machinePoint) {
+  if (!calibration || !calibration.plateOriginValid || !calibration.plateOrigin) {
+    return null;
+  }
+  if (!machinePoint || typeof machinePoint !== 'object') {
+    return null;
+  }
+  const o = calibration.plateOrigin;
+  const t = calibration.toolOffset || { x: 0, y: 0, z: 0 };
+  const yaw = Number(calibration.plateYawRad) || 0;
+  const mx = Number(machinePoint.x);
+  const my = Number(machinePoint.y);
+  const mz = Number(machinePoint.z);
+  if (![o.x, o.y, o.z, t.x, t.y, t.z, mx, my, mz, yaw].every(Number.isFinite)) {
+    return null;
+  }
+  const dx = mx - o.x - t.x;
+  const dy = my - o.y - t.y;
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  return {
+    x: c * dx + s * dy,
+    y: -s * dx + c * dy,
+    z: mz - o.z - t.z,
+  };
+}
+
 module.exports = {
   toMachinePoint,
   toMachinePoints,
+  toPlatePoint,
 };

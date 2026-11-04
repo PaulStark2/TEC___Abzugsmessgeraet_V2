@@ -20,9 +20,11 @@ bool isEmptyCommandId(uint8_t message_id)
     case MessageId::CmdResume:
     case MessageId::CmdStart:
     case MessageId::CmdClearFault:
+    case MessageId::CmdEnableFaultManual:
     case MessageId::CmdHome:
     case MessageId::CmdGetMachineConfig:
     case MessageId::CmdStartProbeCalib:
+    case MessageId::CmdStartTestOrAge:
     case MessageId::CmdDefineMcs:
     case MessageId::CmdInvalidateHoming:
     case MessageId::CmdForceTare:
@@ -62,6 +64,7 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdSetPlateOrigin:
     case MessageId::CmdSetProbeCenter:
     case MessageId::CmdStartProbeCalib:
+    case MessageId::CmdStartTestOrAge:
     case MessageId::CmdDefineMcs:
     case MessageId::CmdRestoreMcs:
     case MessageId::CmdInvalidateHoming:
@@ -72,6 +75,9 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdStartPlateBoreSearch:
     case MessageId::CmdSetPlateYaw:
     case MessageId::CmdProcedureDecision:
+    case MessageId::CmdEnableFaultManual:
+    case MessageId::CmdApproachCalibPoint:
+    case MessageId::CmdSetRotationPoints:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
     case MessageId::MsgRawAdc:
@@ -322,6 +328,27 @@ bool validatePayloadForMessage(uint8_t message_id, const uint8_t* payload, std::
 
     case MessageId::CmdStartPlateBoreSearch:
         return payload_length == kPlateBorePointIdWireSize;
+
+    case MessageId::CmdApproachCalibPoint:
+        return payload_length == kCalibPointIdWireSize;
+
+    case MessageId::CmdSetRotationPoints:
+        if (payload_length != kRotationPointsPayloadWireSize)
+        {
+            return false;
+        }
+        {
+            std::size_t offset = 0;
+            for (int i = 0; i < 9; ++i)
+            {
+                float v = 0.0f;
+                if (!readF32LE(payload, payload_length, offset, v, true))
+                {
+                    return false;
+                }
+            }
+            return offset == payload_length;
+        }
 
     case MessageId::CmdSetPlateYaw:
         if (payload_length != kPlateYawPayloadWireSize)

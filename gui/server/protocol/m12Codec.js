@@ -127,13 +127,11 @@ const MACHINE_CONFIG_FIELDS = [
   { key: 'collision_clamp_N', type: 'f32' },
   { key: 'collision_unclamp_N', type: 'f32' },
   { key: 'collision_contact_N', type: 'f32' },
-  { key: 'collision_measure_N', type: 'f32' },
+  { key: 'collision_measure_N', type: 'f32', defaultValue: 150 },
   { key: 'spreader_extend_time_s', type: 'f32' },
   { key: 'spreader_retract_time_s', type: 'f32' },
   { key: 'force_tolerance_N', type: 'f32' },
   { key: 'v_search', type: 'f32' },
-  { key: 'probe_search_distance', type: 'f32' },
-  { key: 'probe_backoff', type: 'f32' },
   { key: 'home_offset_x', type: 'f32' },
   { key: 'home_offset_y', type: 'f32' },
   { key: 'home_offset_z', type: 'f32' },
@@ -141,23 +139,20 @@ const MACHINE_CONFIG_FIELDS = [
   { key: 'tool_offset_y', type: 'f32' },
   { key: 'tool_offset_z', type: 'f32' },
   { key: 'safe_z_buffer', type: 'f32' },
+  { key: 'safe_z_calib_buffer', type: 'f32', defaultValue: 30 },
   { key: 'sample_timeout_s', type: 'f32' },
   { key: 'heartbeat_timeout_s', type: 'f32' },
   { key: 'xy_correct_timeout_s', type: 'f32' },
-  { key: 'head_diameter', type: 'f32' },
-  { key: 'measuring_head_diameter', type: 'f32' },
-  { key: 'measuring_head_thickness', type: 'f32' },
-  { key: 'tool_diameter', type: 'f32' },
-  { key: 'search_depth', type: 'f32' },
   { key: 'approach_distance', type: 'f32' },
-  { key: 'v_search_fine', type: 'f32' },
-  { key: 'probe_offset_reference_x', type: 'f32' },
-  { key: 'probe_offset_reference_y', type: 'f32' },
-  { key: 'probe_offset_reference_z', type: 'f32' },
-  { key: 'tool_cylindrical_height', type: 'f32' },
-  { key: 'probe_xy_search_margin', type: 'f32' },
+  { key: 'probe_v_approach', type: 'f32', defaultValue: 10 },
+  { key: 'probe_wall_force_N', type: 'f32', defaultValue: 0.5 },
+  { key: 'probe_floor_force_N', type: 'f32', defaultValue: 0.5 },
+  { key: 'probe_xy_search_limit', type: 'f32', defaultValue: 5 },
+  { key: 'probe_z_search_limit', type: 'f32', defaultValue: 20 },
+  { key: 'probe_z_lift_mm', type: 'f32', defaultValue: 2 },
+  { key: 'probe_bore_timeout_s', type: 'f32', defaultValue: 60 },
+  { key: 'probe_bore_refine_passes', type: 'u8', defaultValue: 0 },
   { key: 'insert_search_distance', type: 'f32' },
-  { key: 'num_fine_searches', type: 'u16' },
   { key: 'phase1_v_extract', type: 'f32' },
   { key: 'phase1_v_insert', type: 'f32' },
   { key: 'phase1_a', type: 'f32' },
@@ -166,12 +161,6 @@ const MACHINE_CONFIG_FIELDS = [
   { key: 'phase3_v_insert', type: 'f32' },
   { key: 'phase3_a', type: 'f32' },
   { key: 'phase3_corner', type: 'f32' },
-  { key: 'v_approach_probe', type: 'f32' },
-  { key: 'v_transfer_probe', type: 'f32' },
-  { key: 'a_probe_transfer', type: 'f32' },
-  { key: 'corner_probe_transfer', type: 'f32' },
-  { key: 'a_probe_search', type: 'f32' },
-  { key: 'a_probe_brake', type: 'f32' },
   { key: 'probe_center_x', type: 'f32', optionalZero: true },
   { key: 'probe_center_y', type: 'f32', optionalZero: true },
   { key: 'probe_center_z', type: 'f32', optionalZero: true },
@@ -190,26 +179,33 @@ const MACHINE_CONFIG_FIELDS = [
   { key: 'collision_unclamp_y_N', type: 'f32', defaultValue: 20 },
   { key: 'collision_contact_x_N', type: 'f32', defaultValue: 30 },
   { key: 'collision_contact_y_N', type: 'f32', defaultValue: 30 },
-  { key: 'collision_measure_x_N', type: 'f32', defaultValue: 30 },
-  { key: 'collision_measure_y_N', type: 'f32', defaultValue: 30 },
+  { key: 'collision_measure_x_N', type: 'f32', defaultValue: 150 },
+  { key: 'collision_measure_y_N', type: 'f32', defaultValue: 150 },
   { key: 'xy_search_limit', type: 'f32', defaultValue: 5 },
   { key: 'preclamp_confirm', type: 'u8', defaultValue: 1 },
   { key: 'v_bore_search', type: 'f32', defaultValue: 1 },
   { key: 'bore_refine_passes', type: 'u8', defaultValue: 0 },
-  { key: 'v_plate_bore_search', type: 'f32', defaultValue: 1 },
-  { key: 'plate_wall_force_N', type: 'f32', defaultValue: 0.5 },
-  { key: 'plate_floor_force_N', type: 'f32', defaultValue: 0.5 },
-  { key: 'plate_xy_search_limit', type: 'f32', defaultValue: 5 },
-  { key: 'plate_z_search_limit', type: 'f32', defaultValue: 10 },
-  { key: 'plate_z_lift_mm', type: 'f32', defaultValue: 2 },
-  { key: 'plate_bore_timeout_s', type: 'f32', defaultValue: 60 },
-  { key: 'plate_bore_refine_passes', type: 'u8', defaultValue: 0 },
   { key: 'coord_tolerance_mm', type: 'f32', defaultValue: 0.5 },
   { key: 'test_lateral_force_N', type: 'f32', defaultValue: 5 },
   { key: 'z_limit_pos_mm', type: 'f32', defaultValue: 10 },
   { key: 'z_limit_neg_mm', type: 'f32', defaultValue: 15 },
   { key: 'anomaly_skip', type: 'u8', defaultValue: 0 },
   { key: 'tool_offset_change_tolerance_mm', type: 'f32', defaultValue: 0.5 },
+  { key: 'fault_manual_v_max', type: 'f32', defaultValue: 5 },
+  { key: 'fault_manual_a', type: 'f32', defaultValue: 500 },
+  { key: 'fault_manual_hard_limit_x_N', type: 'f32', defaultValue: 50 },
+  { key: 'fault_manual_hard_limit_y_N', type: 'f32', defaultValue: 50 },
+  { key: 'fault_manual_hard_limit_N', type: 'f32', defaultValue: 50 },
+  { key: 'after_seat_retract_mm', type: 'f32', defaultValue: 2 },
+  { key: 'extract_after_free_mm', type: 'f32', defaultValue: 0 },
+  { key: 'extract_after_free_v', type: 'f32', defaultValue: 1 },
+  { key: 'v_homing_fast', type: 'f32', defaultValue: 18 },
+  { key: 'homing_approach_distance', type: 'f32', defaultValue: 50 },
+  { key: 'a_homing_fast', type: 'f32', defaultValue: 500 },
+  { key: 'force_path_dz_mm', type: 'f32', defaultValue: 0.01 },
+  { key: 'force_path_dz_fine_mm', type: 'f32', defaultValue: 0.005 },
+  { key: 'force_near_target_frac', type: 'f32', defaultValue: 0.8 },
+  { key: 'phase3_v_insert_fine', type: 'f32', defaultValue: 0.5 },
 ];
 
 function encodeMachineConfigPayload(cfg) {
@@ -401,8 +397,13 @@ function decodeStatusReportPayload(payload) {
   const procedurePhase = payload[offset++];
   const faultReason = payload[offset++];
   const spreaderState = payload[offset++];
+  const faultManual = payload[offset++];
+  const abortReason = payload.readUInt16LE(offset);
+  offset += 2;
+  const currentIteration = payload.readUInt16LE(offset);
+  offset += 2;
 
-  const boolFields = [eStop, spreaderExtend, spreaderExtended, fixtureExtend, fixtureExtended];
+  const boolFields = [eStop, spreaderExtend, spreaderExtended, fixtureExtend, fixtureExtended, faultManual];
   if (boolFields.some((v) => v !== 0 && v !== 1)) {
     return null;
   }
@@ -431,6 +432,9 @@ function decodeStatusReportPayload(payload) {
     procedurePhase,
     faultReason,
     spreaderState,
+    faultManual,
+    abortReason,
+    currentIteration,
   };
 }
 
@@ -465,6 +469,11 @@ function encodeStatusReportPayload(status) {
   out[offset++] = (status.procedurePhase || 0) & 0xff;
   out[offset++] = (status.faultReason || 0) & 0xff;
   out[offset++] = (status.spreaderState || 0) & 0xff;
+  out[offset++] = status.faultManual ? 1 : 0;
+  out.writeUInt16LE((status.abortReason || 0) & 0xffff, offset);
+  offset += 2;
+  out.writeUInt16LE((status.currentIteration || 0) & 0xffff, offset);
+  offset += 2;
   return out;
 }
 
@@ -508,8 +517,12 @@ function statusReportToGuiStatus(decoded, connected = true) {
     procedurePhaseOrdinal: decoded.procedurePhase,
     faultReason: faultReasonName(decoded.faultReason || 0),
     faultReasonOrdinal: decoded.faultReason || 0,
+    abortReason: decoded.abortReason || 0,
+    abortReasonOrdinal: decoded.abortReason || 0,
+    currentIteration: decoded.currentIteration || 0,
     spreaderState: spreaderStateName(decoded.spreaderState || 0),
     spreaderStateOrdinal: decoded.spreaderState || 0,
+    faultManual: decoded.faultManual !== 0,
     connected: Boolean(connected),
   };
 }
@@ -522,9 +535,11 @@ function isEmptyCommandId(messageId) {
     case MessageId.CmdResume:
     case MessageId.CmdStart:
     case MessageId.CmdClearFault:
+    case MessageId.CmdEnableFaultManual:
     case MessageId.CmdHome:
     case MessageId.CmdGetMachineConfig:
     case MessageId.CmdStartProbeCalib:
+    case MessageId.CmdStartTestOrAge:
     case MessageId.CmdDefineMcs:
     case MessageId.CmdInvalidateHoming:
     case MessageId.CmdForceTare:
@@ -575,6 +590,10 @@ function validatePayloadForMessage(messageId, payload) {
       return length === TEST_CONFIGURATION_PAYLOAD_WIRE_SIZE && decodeTestConfigurationPayload(payload) !== null;
     case MessageId.CmdStartPlateBoreSearch:
       return length === 1 && payload[0] >= 1 && payload[0] <= 4;
+    case MessageId.CmdApproachCalibPoint:
+      return length === 1 && payload[0] >= 1 && payload[0] <= 5;
+    case MessageId.CmdSetRotationPoints:
+      return length === 36;
     case MessageId.CmdSetPlateYaw:
       return length === 4 && Number.isFinite(payload.readFloatLE(0));
     case MessageId.CmdSetPlateOrigin:
@@ -715,6 +734,34 @@ function encodeStartPlateBoreSearchMessage(pointId) {
     return { ok: false, error: 'pointId must be 1..4' };
   }
   return encodeFrame(MessageId.CmdStartPlateBoreSearch, Buffer.from([id]));
+}
+
+function encodeApproachCalibPointMessage(pointId) {
+  const id = Number(pointId);
+  if (!Number.isInteger(id) || id < 1 || id > 5) {
+    return { ok: false, error: 'pointId must be 1..5' };
+  }
+  return encodeFrame(MessageId.CmdApproachCalibPoint, Buffer.from([id]));
+}
+
+function encodeSetRotationPointsMessage(k1, k2, k3) {
+  const points = [k1, k2, k3];
+  const payload = Buffer.alloc(36);
+  let offset = 0;
+  for (const point of points) {
+    if (!point || typeof point !== 'object') {
+      return { ok: false, error: 'k1/k2/k3 must be {x,y,z} objects' };
+    }
+    if (
+      !writeF32LE(payload, offset, Number(point.x)) ||
+      !writeF32LE(payload, offset + 4, Number(point.y)) ||
+      !writeF32LE(payload, offset + 8, Number(point.z))
+    ) {
+      return { ok: false, error: 'k1/k2/k3 coordinates must be finite' };
+    }
+    offset += 12;
+  }
+  return encodeFrame(MessageId.CmdSetRotationPoints, payload);
 }
 
 function encodeSetPlateYawMessage(yawRad) {
@@ -1205,6 +1252,8 @@ module.exports = {
   encodeTestConfigurationMessage,
   encodePlateOriginMessage,
   encodeStartPlateBoreSearchMessage,
+  encodeApproachCalibPointMessage,
+  encodeSetRotationPointsMessage,
   encodeSetPlateYawMessage,
   encodeProbeCenterMessage,
   encodeRestoreMcsMessage,

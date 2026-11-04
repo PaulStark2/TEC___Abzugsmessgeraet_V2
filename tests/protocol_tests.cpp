@@ -559,18 +559,26 @@ int main()
         cfg.xy_correction_step = 0.05f;
         cfg.xy_max_correction = 2.0f;
         cfg.insertion_buffer = 1.0f;
+        cfg.after_seat_retract_mm = 2.0f;
+        cfg.extract_after_free_mm = 1.5f;
+        cfg.extract_after_free_v = 3.0f;
+        cfg.v_homing_fast = 18.0f;
+        cfg.homing_approach_distance = 50.0f;
+        cfg.a_homing_fast = 250.0f;
+        cfg.force_path_dz_mm = 0.02f;
+        cfg.force_path_dz_fine_mm = 0.005f;
+        cfg.force_near_target_frac = 0.75f;
+        cfg.phase3_v_insert_fine = 0.4f;
         cfg.collision_approach_N = 20.0f;
         cfg.collision_retract_N = 20.0f;
         cfg.collision_clamp_N = 20.0f;
         cfg.collision_unclamp_N = 20.0f;
         cfg.collision_contact_N = 40.0f;
-        cfg.collision_measure_N = 40.0f;
+        cfg.collision_measure_N = 150.0f;
         cfg.spreader_extend_time_s = 0.5f;
         cfg.spreader_retract_time_s = 0.5f;
         cfg.force_tolerance_N = 0.5f;
         cfg.v_search = 2.0f;
-        cfg.probe_search_distance = 10.0f;
-        cfg.probe_backoff = 1.0f;
         cfg.home_offset_x = 0.0f;
         cfg.home_offset_y = 0.0f;
         cfg.home_offset_z = 0.0f;
@@ -581,20 +589,16 @@ int main()
         cfg.sample_timeout_s = 0.5f;
         cfg.heartbeat_timeout_s = 0.3f;
         cfg.xy_correct_timeout_s = 2.0f;
-        cfg.head_diameter = 0.0f;
-        cfg.measuring_head_diameter = 8.0f;
-        cfg.measuring_head_thickness = 3.0f;
-        cfg.tool_diameter = 2.5f;
-        cfg.search_depth = 5.0f;
-        cfg.approach_distance = 10.0f;
-        cfg.v_search_fine = 1.0f;
-        cfg.probe_offset_reference_x = 0.0f;
-        cfg.probe_offset_reference_y = 0.0f;
-        cfg.probe_offset_reference_z = 5.0f;
-        cfg.tool_cylindrical_height = 15.0f;
-        cfg.probe_xy_search_margin = 2.0f;
+        cfg.approach_distance = 15.0f;
+        cfg.probe_v_approach = 10.0f;
+        cfg.probe_wall_force_N = 0.5f;
+        cfg.probe_floor_force_N = 0.5f;
+        cfg.probe_xy_search_limit = 5.0f;
+        cfg.probe_z_search_limit = 10.0f;
+        cfg.probe_z_lift_mm = 2.0f;
+        cfg.probe_bore_timeout_s = 60.0f;
+        cfg.probe_bore_refine_passes = 2;
         cfg.insert_search_distance = 10.0f;
-        cfg.num_fine_searches = 3;
         cfg.phase1_v_extract = 1.0f;
         cfg.phase1_v_insert = 1.0f;
         cfg.phase1_a = 0.0f;
@@ -603,12 +607,6 @@ int main()
         cfg.phase3_v_insert = 2.0f;
         cfg.phase3_a = 0.0f;
         cfg.phase3_corner = 0.0f;
-        cfg.v_approach_probe = 10.0f;
-        cfg.v_transfer_probe = 10.0f;
-        cfg.a_probe_transfer = 0.0f;
-        cfg.corner_probe_transfer = 0.0f;
-        cfg.a_probe_search = 0.0f;
-        cfg.a_probe_brake = 500.0f;
 
         uint8_t wire[tecomm::kMachineConfigPayloadWireSize];
         if (!tecomm::encodeMachineConfigPayload(cfg, wire, sizeof(wire)))
@@ -623,14 +621,27 @@ int main()
         if (parsed.tool_offset_z != cfg.tool_offset_z || parsed.safe_z_buffer != cfg.safe_z_buffer ||
             parsed.heartbeat_timeout_s != cfg.heartbeat_timeout_s ||
             parsed.force_tolerance_N != cfg.force_tolerance_N || parsed.v_homing != cfg.v_homing ||
-            parsed.measuring_head_diameter != cfg.measuring_head_diameter ||
-            parsed.num_fine_searches != 3 || parsed.probe_offset_reference_z != cfg.probe_offset_reference_z ||
-            parsed.tool_cylindrical_height != cfg.tool_cylindrical_height ||
-            parsed.probe_xy_search_margin != cfg.probe_xy_search_margin ||
+            parsed.approach_distance != cfg.approach_distance ||
+            parsed.probe_v_approach != cfg.probe_v_approach ||
+            parsed.probe_wall_force_N != cfg.probe_wall_force_N ||
+            parsed.probe_floor_force_N != cfg.probe_floor_force_N ||
+            parsed.probe_xy_search_limit != cfg.probe_xy_search_limit ||
+            parsed.probe_z_search_limit != cfg.probe_z_search_limit ||
+            parsed.probe_z_lift_mm != cfg.probe_z_lift_mm ||
+            parsed.probe_bore_timeout_s != cfg.probe_bore_timeout_s ||
+            parsed.probe_bore_refine_passes != 2 ||
             parsed.insert_search_distance != cfg.insert_search_distance ||
+            parsed.after_seat_retract_mm != cfg.after_seat_retract_mm ||
+            parsed.extract_after_free_mm != cfg.extract_after_free_mm ||
+            parsed.extract_after_free_v != cfg.extract_after_free_v ||
+            parsed.v_homing_fast != cfg.v_homing_fast ||
+            parsed.homing_approach_distance != cfg.homing_approach_distance ||
+            parsed.a_homing_fast != cfg.a_homing_fast ||
+            parsed.force_path_dz_mm != cfg.force_path_dz_mm ||
+            parsed.force_path_dz_fine_mm != cfg.force_path_dz_fine_mm ||
+            parsed.force_near_target_frac != cfg.force_near_target_frac ||
+            parsed.phase3_v_insert_fine != cfg.phase3_v_insert_fine ||
             parsed.phase3_v_insert != cfg.phase3_v_insert ||
-            parsed.v_approach_probe != cfg.v_approach_probe ||
-            parsed.a_probe_brake != cfg.a_probe_brake ||
             parsed.coord_tolerance_mm != 0.5f ||
             parsed.test_lateral_force_N != 5.0f)
         {

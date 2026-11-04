@@ -544,5 +544,72 @@ int main()
         }
     }
 
+    // -------------------------------
+    // FM: Handmodus trotz Fault — jog under elevated recovery hard limit
+    // -------------------------------
+    {
+        Machine m;
+        HostInputs in = makeSafeInputs();
+        in.force.fz = m.machineConfig().force.hard_limit_N + 1.0f;
+        setHostSafety(m, in);
+        m.tick(kDt);
+        if (m.machineState() != MachineState::Fault || m.faultManualActive())
+        {
+            return 80;
+        }
+
+        // Still jammed: clear would re-trip. Enable recovery instead.
+        if (!m.enableFaultManual() || !m.faultManualActive())
+        {
+            return 81;
+        }
+
+        const float x0 = m.x();
+        m.moveTo(x0 + 1.0f, m.y(), m.z());
+        if (m.machineState() != MachineState::Fault)
+        {
+            return 82; // must stay Fault
+        }
+        for (int i = 0; i < 200; ++i)
+        {
+            setHostSafety(m, in);
+            m.tick(kDt);
+        }
+        if (m.machineState() != MachineState::Fault || !m.faultManualActive())
+        {
+            return 83;
+        }
+        if (!(m.x() > x0 + 0.1f))
+        {
+            return 84; // recovery jog must move
+        }
+
+        // Exceed recovery hard limit → freeze again
+        in.force.fz = m.machineConfig().fault_manual.hard_limit_N + 1.0f;
+        setHostSafety(m, in);
+        m.tick(kDt);
+        if (m.machineState() != MachineState::Fault || m.faultManualActive())
+        {
+            return 85;
+        }
+        if (m.lastFaultReason() != FaultReason::ForceHardLimit)
+        {
+            return 86;
+        }
+
+        // Free force, re-enable, clear
+        in.force.fz = 0.0f;
+        setHostSafety(m, in);
+        if (!m.enableFaultManual())
+        {
+            return 87;
+        }
+        m.clearFault();
+        if (m.machineState() != MachineState::Idle || m.faultManualActive())
+        {
+            return 88;
+        }
+    }
+
     return 0;
 }

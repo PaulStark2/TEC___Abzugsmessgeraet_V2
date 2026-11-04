@@ -80,15 +80,15 @@ static int testA_defineMcsPlantHome()
     {
         return 11;
     }
-    // Switch-origin define: home = (-R,-R,-R), offset ≈ plant +max (raw at switch).
+    // X homes at plant x_min (+R); Y/Z at +max (−R).
     const float r = 2.0f;
-    if (!nearEqual(m.x(), -r, 0.5f) || !nearEqual(m.y(), -r, 0.5f) || !nearEqual(m.z(), -r, 0.5f))
+    if (!nearEqual(m.x(), r, 0.5f) || !nearEqual(m.y(), -r, 0.5f) || !nearEqual(m.z(), -r, 0.5f))
     {
-        std::fprintf(stderr, "A machine=(%.3f,%.3f,%.3f) expected~(-%.3f,-%.3f,-%.3f)\n", m.x(),
-                     m.y(), m.z(), r, r, r);
+        std::fprintf(stderr, "A machine=(%.3f,%.3f,%.3f) expected~(%.3f,%.3f,%.3f)\n", m.x(), m.y(),
+                     m.z(), r, -r, -r);
         return 12;
     }
-    const float ox = bridge.plant().limits().x_max;
+    const float ox = bridge.plant().limits().x_min;
     const float oy = bridge.plant().limits().y_max;
     const float oz = bridge.plant().limits().z_max;
     if (std::fabs(m.referenceOffsetX() - ox) > 0.5f || std::fabs(m.referenceOffsetY() - oy) > 0.5f ||
@@ -110,11 +110,11 @@ static int testB_normalHomeKeepsCalib()
         return 20;
     }
     const TestPoint home = m.calibrationSet().home_offset;
-    m.setPlateOrigin(TestPoint{-45.0f, -43.0f, -33.0f});
-    m.setProbeCenter(TestPoint{-60.0f, -60.0f, -40.0f});
+    m.setPlateOrigin(TestPoint{45.0f, -43.0f, -33.0f});
+    m.setProbeCenter(TestPoint{60.0f, -60.0f, -40.0f});
     m.setToolOffset(TestPoint{-0.0001f, -0.0001f, 0.0001f});
 
-    m.moveTo(home.x - 5.0f, home.y - 5.0f, home.z - 5.0f);
+    m.moveTo(home.x + 5.0f, home.y - 5.0f, home.z - 5.0f);
     for (int i = 0; i < 2000 && m.motionState() == MotionState::Moving; ++i)
     {
         bridge.tick(0.05f);
@@ -132,8 +132,8 @@ static int testB_normalHomeKeepsCalib()
     {
         return 23;
     }
-    if (!nearEqual(m.calibrationSet().plate_origin.x, -45.0f) ||
-        !nearEqual(m.calibrationSet().probe_center.x, -60.0f) ||
+    if (!nearEqual(m.calibrationSet().plate_origin.x, 45.0f) ||
+        !nearEqual(m.calibrationSet().probe_center.x, 60.0f) ||
         !m.calibrationSet().plate_origin_valid || !m.calibrationSet().probe_center_valid)
     {
         return 24;
@@ -150,8 +150,8 @@ static int testC_stepLoss()
         return 30;
     }
     const TestPoint home = m.calibrationSet().home_offset;
-    m.setPlateOrigin(TestPoint{-45.0f, -43.0f, -33.0f});
-    m.setProbeCenter(TestPoint{-60.0f, -60.0f, -40.0f});
+    m.setPlateOrigin(TestPoint{45.0f, -43.0f, -33.0f});
+    m.setProbeCenter(TestPoint{60.0f, -60.0f, -40.0f});
     m.shiftRawPose(5.0f, -3.0f, 4.0f);
     m.invalidateHoming();
     if (!homeViaPlant(bridge))
@@ -165,17 +165,17 @@ static int testC_stepLoss()
                      m.x(), m.y(), m.z(), home.x, home.y, home.z);
         return 32;
     }
-    if (!nearEqual(m.calibrationSet().probe_center.x, -60.0f) ||
-        !nearEqual(m.calibrationSet().plate_origin.x, -45.0f))
+    if (!nearEqual(m.calibrationSet().probe_center.x, 60.0f) ||
+        !nearEqual(m.calibrationSet().plate_origin.x, 45.0f))
     {
         return 33;
     }
-    m.moveTo(home.x - 10.0f, home.y, home.z);
+    m.moveTo(home.x + 10.0f, home.y, home.z);
     for (int i = 0; i < 3000 && m.motionState() == MotionState::Moving; ++i)
     {
         bridge.tick(0.05f);
     }
-    if (!nearEqual(m.x(), home.x - 10.0f, 0.5f))
+    if (!nearEqual(m.x(), home.x + 10.0f, 0.5f))
     {
         return 34;
     }
@@ -190,9 +190,9 @@ static int testD_procedureStartWithPersistedStyleCalib()
     {
         return 40;
     }
-    // Plate/probe in machine frame (workspace is negative; origin at +max switches).
-    m.setPlateOrigin(TestPoint{-45.0f, -43.0f, -33.0f});
-    m.setProbeCenter(TestPoint{-60.0f, -60.0f, -40.0f});
+    // Plate/probe in machine frame (X workspace +, Y/Z −).
+    m.setPlateOrigin(TestPoint{45.0f, -43.0f, -33.0f});
+    m.setProbeCenter(TestPoint{60.0f, -60.0f, -40.0f});
     if (!loadAndStart(bridge, TestPoint{5.0f, 2.0f, 0.0f}))
     {
         std::fprintf(stderr, "D start failed process=%u\n",

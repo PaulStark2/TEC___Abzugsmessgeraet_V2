@@ -30,29 +30,40 @@ FirmwareHost::FirmwareHost()
 void FirmwareHost::tickOneMillisecond(HostInputs inputs, float adc_x, float adc_y, float adc_z)
 {
     const CountWindow::Mean mean = counts_.push(adc_x, adc_y, adc_z, 0.001f);
-    force_calib_.observeRaw(roundAdcCount(mean.x), roundAdcCount(mean.y), roundAdcCount(mean.z), true);
 
-    // Same contract as SimProtocolBridge: one Z curve on all three ADC channels.
-    // The polynomial sees the unrounded window mean. Without a committed curve,
-    // the provisional scale uses that same mean.
+    // Mechanical dose axes are crossed: PA0 ↔ machine Y, PA1 ↔ machine X.
+    // MsgRawAdc and HostInputs use machine-axis order after the swap.
+    const float axis_x_counts = mean.y;
+    const float axis_y_counts = mean.x;
+    const float axis_z_counts = mean.z;
+    force_calib_.observeRaw(roundAdcCount(axis_x_counts), roundAdcCount(axis_y_counts),
+                            roundAdcCount(axis_z_counts), true);
+
+    // Same Z curve on all three channels. The polynomial sees the unrounded mean.
     const float range_N = machine_.machineConfig().force.range_N;
     if (force_calib_.active())
     {
-        inputs.force.fx = static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(mean.x)));
-        inputs.force.fy = static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(mean.y)));
-        inputs.force.fz = static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(mean.z)));
+        inputs.force.fx =
+            static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(axis_x_counts)));
+        inputs.force.fy =
+            static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(axis_y_counts)));
+        inputs.force.fz =
+            static_cast<float>(force_calib_.evaluateSensorNewton(static_cast<double>(axis_z_counts)));
     }
     else
     {
-        inputs.force.fx = adc_scaler::countsToNewton(mean.x, range_N);
-        inputs.force.fy = adc_scaler::countsToNewton(mean.y, range_N);
-        inputs.force.fz = adc_scaler::countsToNewton(mean.z, range_N);
+        inputs.force.fx = adc_scaler::countsToNewton(axis_x_counts, range_N);
+        inputs.force.fy = adc_scaler::countsToNewton(axis_y_counts, range_N);
+        inputs.force.fz = adc_scaler::countsToNewton(axis_z_counts, range_N);
     }
 
-    // Historical Zortrax: +Fy was wired opposite +Y. Negate Newton Fy only.
-    // Counts, the polynomial and MsgRawAdc stay on the sensor. TEC_INVERT_FY=0
-    // on the current SFU1204 machine.
+    // Cell reports reaction (−F when driving + into a stop). Core unload is
+    // u = −sign(F); negate laterals once so +F aligns with +machine. Do not also
+    // flip Core unload. Z unchanged (tension − / compression +).
+    inputs.force.fx = -inputs.force.fx;
+    inputs.force.fy = -inputs.force.fy;
 #if TEC_INVERT_FY
+    // Historical Zortrax-only extra Y flip; keep OFF on the SFU machine.
     inputs.force.fy = -inputs.force.fy;
 #endif
 
