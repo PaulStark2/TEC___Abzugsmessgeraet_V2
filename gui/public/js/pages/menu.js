@@ -3,7 +3,7 @@
 import { navigate } from '../router.js';
 
 const MENU_ITEMS = [
-  { route: 'load-points', label: 'Prüftstellen laden' },
+  { route: 'load-points', label: 'Prüfstellen laden' },
   { route: 'select-points', label: 'Prüfstellen auswählen' },
   { route: 'procedure', label: 'Prüf-/Alterungsprozedur' },
   { route: 'results', label: 'Prüfergebnisse' },

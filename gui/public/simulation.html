@@ -17,16 +17,21 @@
   </head>
   <body class="sim-body">
     <header class="app-header">
-      <h1>Simulation — virtuelle Außenwelt</h1>
-      <p id="sim-status" class="gui-status">Simulations-UI startet…</p>
-      <p id="sim-program-frame-note" class="sim-program-note" hidden></p>
-      <p id="sim-safe-z-note" class="sim-program-note" hidden></p>
-      <p id="sim-path-preview-note" class="sim-program-note">Vorschau ohne Kurvenradius</p>
-      <p class="sim-header-note">
-        Diese UI stellt die Außenwelt dar und liefert Sensorsignale. Sie steuert die Maschine
-        nicht — Bewegungsentscheidungen trifft ausschließlich der Controller/Core.
-        <a href="/">Zur Maschinen-GUI</a>
-      </p>
+      <div class="app-header__titles">
+        <h1>Simulation — virtuelle Außenwelt</h1>
+        <p id="sim-status" class="gui-status">Simulations-UI startet…</p>
+        <p id="sim-program-frame-note" class="sim-program-note" hidden></p>
+        <p id="sim-safe-z-note" class="sim-program-note" hidden></p>
+        <p id="sim-path-preview-note" class="sim-program-note">Vorschau ohne Kurvenradius</p>
+        <p class="sim-header-note">
+          Diese UI stellt die Außenwelt dar und liefert Sensorsignale. Sie steuert die Maschine
+          nicht — Bewegungsentscheidungen trifft ausschließlich der Controller/Core.
+          <a href="/">Zur Maschinen-GUI</a>
+        </p>
+      </div>
+      <div class="app-header__brand">
+        <img class="app-header__logo" src="/brand/fidentis-logo.png" alt="FIDENTIS" />
+      </div>
     </header>
 
     <div class="status-bar" aria-label="Controller-Status">

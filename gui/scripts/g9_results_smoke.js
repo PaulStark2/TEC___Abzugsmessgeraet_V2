@@ -5,6 +5,7 @@
  */
 
 const { startSmokeServer } = require('./lib/smokeServer');
+const { rawJob } = require('../server/program/sampleJob');
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -29,14 +30,15 @@ async function run() {
   const { request, stop, base } = server;
 
   try {
+    await request('DELETE', '/api/results/current', null);
     const empty = await request('GET', '/api/results/current', null);
     assert(empty.status === 404, 'no results initially');
 
-    await request('POST', '/api/program/upload', {
-      version: 1,
-      programName: 'G9Smoke',
-      testPoints: [{ name: 'Only', sequenceNumber: 1, x: 1, y: 2, z: 3 }],
-    });
+    await request(
+      'POST',
+      '/api/program/upload',
+      rawJob([{ toothNumber: 11, x: 1, y: 2, z: 3 }], { buildJobNumber: 'G9Smoke' })
+    );
     await request('PUT', '/api/program/selection', { selectAll: true });
     await request('POST', '/api/program/selection/confirm', null);
     await request('POST', '/api/procedure/start', {
@@ -51,13 +53,10 @@ async function run() {
     assert(current.status === 200, 'results available');
     assert(Array.isArray(current.body.results.rows), 'rows array');
 
-    const csv = await request('GET', '/api/results/export', null);
-    assert(csv.status === 200, 'export 200');
-    assert(typeof csv.body === 'string' || csv.body == null || typeof csv.body === 'object', 'body');
-    // smokeServer parses JSON; for CSV the body may be the raw string if parse fails — check export via raw fetch style
-    // Our request() JSON.parses — CSV becomes string leftover. Accept string with header.
-    const text = typeof csv.body === 'string' ? csv.body : String(csv.body);
-    assert(text.includes('sequenceNumber'), `CSV header missing in: ${text.slice(0, 80)}`);
+    const exported = await request('GET', '/api/results/export', null);
+    assert(exported.status === 200, 'export 200');
+    const text = typeof exported.body === 'string' ? exported.body : String(exported.body);
+    assert(text.startsWith('PK'), 'export is a zip');
 
     console.log('G9 results smoke: PASS', { base });
   } finally {

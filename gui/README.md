@@ -16,6 +16,8 @@ npm start
 
 Browser: [http://localhost:3000](http://localhost:3000)
 
+Job-JSON ohne Prüfstand prüfen: GUI starten, im Menü **Prüfstellen laden**, **Beispiel-Job laden**, dann **Prüfstellen auswählen**. Auftrag oder einzelne Zähne anhaken. Neu angehakte Punkte hängen sich an die Prüfreihenfolge unten an; schon gesetzte Punkte bleiben stehen. Die Zeilen dort lassen sich frei ziehen. Ein zweites **Alles auswählen**, wenn schon alles angehakt ist, leert die Liste. Der Controller muss dafür nicht laufen.
+
 Simulations-UI (eigenständige Seite, M15):
 [http://localhost:3000/simulation](http://localhost:3000/simulation)
 

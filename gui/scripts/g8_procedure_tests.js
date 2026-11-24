@@ -4,6 +4,7 @@
  * G8 unit tests — mock procedure adapter (no HTTP server).
  */
 
+const { normalizedJob } = require('../server/program/sampleJob');
 const programStore = require('../server/program/programStore');
 const selectionStore = require('../server/program/selectionStore');
 const resultsStore = require('../server/results/resultsStore');
@@ -41,14 +42,15 @@ async function run() {
   let r = adapter.start({ mode: 'test', insertionForce: 10, iterations: 1 });
   assert(!r.ok, 'start without selection fails');
 
-  programStore.setProgram({
-    version: 1,
-    programName: 'G8Unit',
-    testPoints: [
-      { name: 'A', sequenceNumber: 1, x: 1, y: 0, z: 0 },
-      { name: 'B', sequenceNumber: 2, x: 2, y: 0, z: 0 },
-    ],
-  });
+  programStore.setProgram(
+    normalizedJob(
+      [
+        { toothNumber: 11, x: 1, y: 0, z: 0 },
+        { toothNumber: 12, x: 2, y: 0, z: 0 },
+      ],
+      { buildJobNumber: 'G8Unit' }
+    )
+  );
   selectionStore.setDraft({ selectAll: true });
   selectionStore.confirmSelection();
 

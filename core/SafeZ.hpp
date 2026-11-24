@@ -8,16 +8,22 @@
 #include <cmath>
 
 // Dynamic Safe-Z from the loaded test program and optional probe (plate frame):
-//   max_clearance_z_plate = max(max(program.point.z), probe_z_plate)
+//   approach_z = program.point.z + point_z_clearance   (0 keeps the historical floor)
+//   max_clearance_z_plate = max(max(approach_z), probe_z_plate)
 //   safe_z_plate = max_clearance_z_plate + safe_z_buffer
 // probe_z_plate = probe_center.z - plate_origin.z - tool_offset.z (machine → plate).
 // Probe is included only when probe_center_valid. Machine traverse height:
 //   safe_z_machine = plate_origin.z + safe_z_plate + tool_offset.z
 // Requires a non-empty program and a positive finite buffer. No synthetic default height.
 
-inline bool computeMaxPlatePointZ(const TestProgram& program, float& out_max_z)
+inline bool computeMaxPlatePointZ(const TestProgram& program, float& out_max_z,
+                                  float point_z_clearance = 0.0f)
 {
     if (program.size() == 0)
+    {
+        return false;
+    }
+    if (!std::isfinite(point_z_clearance))
     {
         return false;
     }
@@ -30,9 +36,14 @@ inline bool computeMaxPlatePointZ(const TestProgram& program, float& out_max_z)
         {
             return false;
         }
-        if (!have || plate.z > max_z)
+        const float approach_z = plate.z + point_z_clearance;
+        if (!std::isfinite(approach_z))
         {
-            max_z = plate.z;
+            return false;
+        }
+        if (!have || approach_z > max_z)
+        {
+            max_z = approach_z;
             have = true;
         }
     }
@@ -67,14 +78,14 @@ inline bool computeProbeZPlate(const CalibrationSet& calibration, float& out_pro
 }
 
 inline bool computeSafeZPlate(const TestProgram& program, float safe_z_buffer, float& out_max_point_z,
-                              float& out_safe_z_plate)
+                              float& out_safe_z_plate, float point_z_clearance = 0.0f)
 {
     if (!(safe_z_buffer > 0.0f) || !std::isfinite(safe_z_buffer))
     {
         return false;
     }
     float max_z = 0.0f;
-    if (!computeMaxPlatePointZ(program, max_z))
+    if (!computeMaxPlatePointZ(program, max_z, point_z_clearance))
     {
         return false;
     }
@@ -91,11 +102,12 @@ inline bool computeSafeZPlate(const TestProgram& program, float safe_z_buffer, f
 // Plate-frame Safe-Z including a valid Messtaster when it sits higher than the points.
 inline bool computeSafeZPlateWithProbe(const TestProgram& program, float safe_z_buffer,
                                        const CalibrationSet& calibration, float& out_max_point_z,
-                                       float& out_max_clearance_z, float& out_safe_z_plate)
+                                       float& out_max_clearance_z, float& out_safe_z_plate,
+                                       float point_z_clearance = 0.0f)
 {
     float max_point_z = 0.0f;
     float points_only_plate = 0.0f;
-    if (!computeSafeZPlate(program, safe_z_buffer, max_point_z, points_only_plate))
+    if (!computeSafeZPlate(program, safe_z_buffer, max_point_z, points_only_plate, point_z_clearance))
     {
         return false;
     }
@@ -135,13 +147,14 @@ inline bool computeSafeZMachine(const CalibrationSet& calibration, float safe_z_
 }
 
 inline bool resolveProgramSafeZMachine(const TestProgram& program, float safe_z_buffer,
-                                       const CalibrationSet& calibration, float& out_safe_z_machine)
+                                       const CalibrationSet& calibration, float& out_safe_z_machine,
+                                       float point_z_clearance = 0.0f)
 {
     float max_point_z = 0.0f;
     float max_clearance_z = 0.0f;
     float safe_z_plate = 0.0f;
     if (!computeSafeZPlateWithProbe(program, safe_z_buffer, calibration, max_point_z, max_clearance_z,
-                                    safe_z_plate))
+                                    safe_z_plate, point_z_clearance))
     {
         return false;
     }

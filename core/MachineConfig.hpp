@@ -38,10 +38,14 @@ struct MachineConfig
         // Acceleration for fast approach only [mm/s²]; 0 = constant velocity.
         float a_homing_fast = 500.0f;
 
-        // Clearance above max(highest plate-frame program Z, probe Z in plate frame) [mm].
+        // Clearance above max(highest plate-frame approach Z, probe Z in plate frame) [mm].
+        // Approach Z = program floor Z + point_z_clearance_mm.
         float safe_z_buffer = 30.0f;
         // Teach Anfahrt clearance above max machine-Z of stored calib poses (KM/K1–K3/probe) [mm].
         float safe_z_calib_buffer = 30.0f;
+        // Approach height above the JSON floor Z [mm]. Floor stays the lower bound
+        // during fine approach and the pneumatic Clamp phase.
+        float point_z_clearance_mm = 2.0f;
 
         // Procedure phase extract (+Z) / insert (−Z) speeds and path profile.
         float phase1_v_extract = 1.0f;

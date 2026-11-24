@@ -40,6 +40,17 @@ Einmessen spec: [docs/M19_ProbeCalibration.md](../docs/M19_ProbeCalibration.md).
 | Logic | High = triggered (+Max = Homing-Referenz) |
 | Noise | Stepper EMI on long wires → spikes (~2 V); Core used to accept **one** High sample |
 | Firmware | **10 ms** stable High/Low debounce in `HostIo` before publishing limits (E-Stop undebounced) |
+
+### E-Stop (PA9)
+
+| Item | Value |
+|------|--------|
+| Switch | Removes the sense voltage (open = stop) |
+| Logic | **Low = E-Stop**, High = released |
+| GPIO | Input + pull-down, so an open wire reads Low |
+| Firmware | `e_stop = !pinHigh(PA9)`, no debounce |
+
+Core still sees a logical `e_stop` flag. Simulation and the GUI are unchanged.
 | Hardware | Keep **≤4.7 kΩ** (better **1–2.2 kΩ**) pull-down to MCU GND; short twisted pair; away from STEP/DIR; optional **RC** (~100 Ω + 10–100 nF) at the pin; stronger filter / Schmitt if still dirty |
 
 At `v_homing = 5 mm/s`, 10 ms ≈ 0.05 mm past the switch — acceptable. Spikes below VIH (~2.31 V @ 3.3 V) can still false-trigger if peaks are narrower/higher than the scope shows or GND bounces.

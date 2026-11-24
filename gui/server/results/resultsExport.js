@@ -51,6 +51,12 @@ function buildSamplesCsv(analysis) {
   const header = [
     'PunktIndex',
     'PunktName',
+    'Baujob',
+    'Platte',
+    'Auftrag',
+    'Zahn',
+    'Z_Boden_mm',
+    'Z_Anfahrt_mm',
     'Iteration',
     'Richtung',
     'RichtungsName',
@@ -67,6 +73,12 @@ function buildSamplesCsv(analysis) {
           [
             point.pointIndex,
             csvEscape(point.name),
+            csvEscape(point.buildJobNumber),
+            csvEscape(point.plate),
+            csvEscape(point.orderUid),
+            point.toothNumber ?? '',
+            excelNum(point.zFloor),
+            excelNum(point.zApproach),
             curve.iteration,
             curve.leg,
             csvEscape(legLabel(curve.leg)),
@@ -86,6 +98,12 @@ function buildSummaryCsv(analysis) {
   const header = [
     'PunktIndex',
     'PunktName',
+    'Baujob',
+    'Platte',
+    'Auftrag',
+    'Zahn',
+    'Z_Boden_mm',
+    'Z_Anfahrt_mm',
     'Richtung',
     'RichtungsName',
     'AnzahlSpitzen',
@@ -104,6 +122,12 @@ function buildSummaryCsv(analysis) {
         [
           point.pointIndex,
           csvEscape(point.name),
+          csvEscape(point.buildJobNumber),
+          csvEscape(point.plate),
+          csvEscape(point.orderUid),
+          point.toothNumber ?? '',
+          excelNum(point.zFloor),
+          excelNum(point.zApproach),
           leg,
           csvEscape(legLabel(leg)),
           stats.count,
@@ -293,7 +317,13 @@ function buildPointPdfBuffer(analysis, point) {
     doc.fontSize(16).fillColor('#000').text('Kraft-Weg-Auswertung', { underline: true });
     doc.moveDown(0.5);
     doc.fontSize(11).text(`Prüfauftrag: ${program}`);
-    doc.text(`Prüfpunkt: ${point.name} (Index ${point.pointIndex})`);
+    doc.text(
+      `Prüfpunkt: ${point.name}` +
+        (point.plate ? ` · Platte ${point.plate}` : '') +
+        (point.orderUid ? ` · ${point.orderUid}` : '') +
+        (point.toothNumber != null ? ` · Zahn ${point.toothNumber}` : '') +
+        ` (Index ${point.pointIndex})`
+    );
     doc.moveDown(0.4);
     doc.text(
       `Eingliedern — Spitzenkraft Mittel: ${formatN(point.insert.meanPeakN)}, StdAbw: ${formatN(point.insert.stddevPeakN)} (${point.insert.count} Iter.)`

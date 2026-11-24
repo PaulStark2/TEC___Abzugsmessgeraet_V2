@@ -163,6 +163,8 @@ inline MachineConfig toMachineConfig(const tecomm::MachineConfigPayload& p)
 
     cfg.motion.safe_z_calib_buffer = p.safe_z_calib_buffer;
 
+    cfg.motion.point_z_clearance_mm = p.point_z_clearance_mm;
+
     cfg.force.sample_timeout_s = p.sample_timeout_s;
 
     cfg.communication.heartbeat_timeout_s = p.heartbeat_timeout_s;
@@ -325,6 +327,8 @@ inline tecomm::MachineConfigPayload toMachineConfigPayload(const MachineConfig& 
     p.tool_offset_z = cfg.calibration.tool_offset.z;
 
     p.safe_z_buffer = cfg.motion.safe_z_buffer;
+
+    p.point_z_clearance_mm = cfg.motion.point_z_clearance_mm;
 
     p.safe_z_calib_buffer = cfg.motion.safe_z_calib_buffer;
 

@@ -38,8 +38,10 @@ struct SafetyLimits
     // Force-filter time constant [s]: 0 = passthrough, (0, 1] = tau of the low-pass.
     static constexpr float kMaxForceFilter = 1.0f;
 
-    // Max allowed safe_z_buffer [mm] (clearance above highest program or probe Z).
+    // Max allowed safe_z_buffer [mm] (clearance above highest approach or probe Z).
     static constexpr float kMaxAbsSafeZ = 500.0f;
+    // Approach offset above the job-file floor Z [mm].
+    static constexpr float kMaxPointZClearanceMm = 20.0f;
 
     // Force sample freshness window [s]. Stale HostInputs.force → Fault.
     static constexpr float kMinForceSampleTimeout_s = 0.05f;

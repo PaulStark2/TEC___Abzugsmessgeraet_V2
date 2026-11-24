@@ -37,6 +37,7 @@ function run() {
   assert.strictEqual(cfg.anomaly_skip, 0);
   assert.strictEqual(cfg.tool_offset_z, 0);
   assert.strictEqual(cfg.safe_z_buffer, 30);
+  assert.strictEqual(cfg.point_z_clearance_mm, 2);
   assert.strictEqual(cfg.jog_min_step_mm, 0.1);
   assert.strictEqual(cfg.heartbeat_timeout_s, 0.3);
   assert.strictEqual(cfg.insert_search_distance, 10);
@@ -66,6 +67,7 @@ function run() {
   const future = GROUPS.flatMap((g) => g.fields).filter((f) => f.future).map((f) => f.key);
   assert.deepStrictEqual(future, []);
   assert.strictEqual(cfg.force_filter, 0.05);
+  assert.strictEqual(cfg.point_z_clearance_mm, 2);
 
   const readOnly = GROUPS.flatMap((g) => g.fields).filter((f) => f.readOnly).map((f) => f.key);
   assert.deepStrictEqual(readOnly.sort(), ['tool_offset_x', 'tool_offset_y', 'tool_offset_z']);

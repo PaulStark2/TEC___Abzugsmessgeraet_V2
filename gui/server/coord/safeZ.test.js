@@ -61,10 +61,17 @@ function testProbeHigherRaisesSafeZ() {
   assert.strictEqual(r.safeZMachine, 55);
 }
 
+function testClearanceRaisesApproach() {
+  const r = computeSafeZPlate([{ z: 10 }], 30, 2);
+  assert.strictEqual(r.maxPointZ, 12);
+  assert.strictEqual(r.safeZPlate, 42);
+}
+
 testA();
 testB();
 testEmpty();
 testMachineTransform();
 testProbeLowerDoesNotRaise();
 testProbeHigherRaisesSafeZ();
+testClearanceRaisesApproach();
 console.log('safeZ.test.js: PASS');

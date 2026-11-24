@@ -497,22 +497,27 @@ function buildSummaryFromProgram(normalizedProgram) {
   const zs = testPoints.map((p) => p.z);
 
   const pointRows = testPoints.map((p) => ({
+    id: p.id,
     name: p.name,
-    sequenceNumber: p.sequenceNumber,
+    plate: p.plate,
+    orderUid: p.orderUid,
+    toothNumber: p.toothNumber,
     x: p.x,
     y: p.y,
     z: p.z,
   }));
 
   return {
-    programName: normalizedProgram.programName ?? null,
-    version: normalizedProgram.version,
+    programName: normalizedProgram.programName ?? normalizedProgram.buildJobNumber ?? null,
+    buildJobNumber: normalizedProgram.buildJobNumber ?? null,
+    schemaVersion: normalizedProgram.schemaVersion ?? 2,
     count: testPoints.length,
+    plates: normalizedProgram.plates || [],
     pointsPreview: pointRows,
     testPoints: pointRows,
-    xRange: { min: Math.min(...xs), max: Math.max(...xs) },
-    yRange: { min: Math.min(...ys), max: Math.max(...ys) },
-    zRange: { min: Math.min(...zs), max: Math.max(...zs) },
+    xRange: testPoints.length ? { min: Math.min(...xs), max: Math.max(...xs) } : null,
+    yRange: testPoints.length ? { min: Math.min(...ys), max: Math.max(...ys) } : null,
+    zRange: testPoints.length ? { min: Math.min(...zs), max: Math.max(...zs) } : null,
   };
 }
 
@@ -596,9 +601,11 @@ const server = http.createServer(async (req, res) => {
       const result = programFiles.teachPoint({
         mode: body.mode,
         fileName: body.fileName,
-        programName: body.programName,
-        pointName: body.pointName,
-        plate,
+        buildJobNumber: body.buildJobNumber,
+        plateId: body.plateId,
+        orderUid: body.orderUid,
+        toothNumber: body.toothNumber,
+        pose: plate,
       });
       if (!result.ok) {
         sendJson(res, 400, result);
@@ -655,9 +662,11 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       current: {
         meta: {
-          programName: current.programName ?? null,
-          version: current.version,
+          programName: current.programName ?? current.buildJobNumber ?? null,
+          buildJobNumber: current.buildJobNumber ?? null,
+          schemaVersion: current.schemaVersion ?? 2,
         },
+        plates: current.plates || [],
         testPoints: current.testPoints,
       },
     });

@@ -132,7 +132,7 @@ export async function fetchProgramSelection() {
 
 /**
  * Update selection draft (G6).
- * @param {{ selectedSequenceNumbers?: number[], selectAll?: boolean }} body
+ * @param {{ toothRank?: string[], selectAll?: boolean, orderSelection?: { plate: string, orderUid: string, selected: boolean }, selectedIds?: string[] }} body
  */
 export async function updateProgramSelection(body) {
   const response = await fetch('/api/program/selection', {
@@ -214,8 +214,8 @@ export async function fetchProgramFiles() {
 }
 
 /**
- * Teach current TCP as a plate-frame Prüfpunkt into a new or existing program JSON.
- * @param {{ mode: 'create'|'append', pointName: string, programName?: string, fileName?: string }} body
+ * Teach current TCP as the clamp floor (plate frame) into a job JSON.
+ * @param {{ mode: 'create'|'append', plateId: string, orderUid: string, toothNumber: number, buildJobNumber?: string, fileName?: string }} body
  */
 export async function teachProgramPoint(body) {
   const response = await fetch('/api/program/teach', {

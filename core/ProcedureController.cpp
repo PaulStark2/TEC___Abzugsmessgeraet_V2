@@ -818,13 +818,27 @@ bool ProcedureController::resolveCurrentMachinePoint()
     {
         return false;
     }
-    return toMachinePoint(machine_.calibrationSet(), plate, target_machine_);
+    TestPoint machine_point{};
+    if (!toMachinePoint(machine_.calibrationSet(), plate, machine_point))
+    {
+        return false;
+    }
+    const float clearance = machine_.machineConfig().motion.point_z_clearance_mm;
+    if (!std::isfinite(clearance) || clearance < 0.0f)
+    {
+        return false;
+    }
+    floor_machine_z_ = machine_point.z;
+    target_machine_ = machine_point;
+    target_machine_.z = machine_point.z + clearance;
+    return std::isfinite(target_machine_.z) && std::isfinite(floor_machine_z_);
 }
 
 bool ProcedureController::resolveSafeZMachine(float& out_safe_z_machine) const
 {
     return resolveProgramSafeZMachine(program_, machine_.machineConfig().motion.safe_z_buffer,
-                                      machine_.calibrationSet(), out_safe_z_machine);
+                                      machine_.calibrationSet(), out_safe_z_machine,
+                                      machine_.machineConfig().motion.point_z_clearance_mm);
 }
 
 bool ProcedureController::programPointsBelowSafeZ() const
@@ -846,7 +860,8 @@ bool ProcedureController::programPointsBelowSafeZ() const
         {
             return false;
         }
-        if (!(machine_point.z < safe_z_machine))
+        const float clearance = machine_.machineConfig().motion.point_z_clearance_mm;
+        if (!(machine_point.z + clearance < safe_z_machine))
         {
             return false;
         }
@@ -898,6 +913,14 @@ void ProcedureController::commandTraverseXY(float x, float y)
 
 void ProcedureController::commandLowerToZ(float z)
 {
+    // Fine approach (leg 3) and pneumatic Clamp stay at or above the JSON floor.
+    // SeatToForce and TestOrAge call moveTo directly and may go deeper.
+    const bool hold_floor = phase_ == ProcedurePhase::Clamp ||
+                            (phase_ == ProcedurePhase::PointApproach && approach_leg_ >= 3);
+    if (hold_floor && z < floor_machine_z_)
+    {
+        z = floor_machine_z_;
+    }
     machine_.moveTo(machine_.x(), machine_.y(), z);
 }
 
@@ -1079,9 +1102,9 @@ void ProcedureController::commandFineApproach()
                                     motion.corner_testpoints);
     machine_.setCollisionContext(CollisionContext::Contact);
     std::fprintf(stderr,
-                 "[PointApproach] FINE z=%.3f v_fine_testpoints=%.3f pose=(%.3f,%.3f,%.3f) "
+                 "[PointApproach] FINE approach=%.3f floor=%.3f v_fine_testpoints=%.3f pose=(%.3f,%.3f,%.3f) "
                  "fz=%.3f\n",
-                 target_machine_.z, motion.v_fine_testpoints, machine_.x(), machine_.y(),
+                 target_machine_.z, floor_machine_z_, motion.v_fine_testpoints, machine_.x(), machine_.y(),
                  machine_.z(), machine_.hostInputs().force.fz);
     commandLowerToZ(target_machine_.z);
     approach_leg_ = 3;

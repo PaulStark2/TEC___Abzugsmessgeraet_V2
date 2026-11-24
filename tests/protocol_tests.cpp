@@ -84,7 +84,9 @@ static tecomm::LoadProgramPayload makeLoadProgram(uint8_t count)
 {
     tecomm::LoadProgramPayload program{};
     program.point_count = count;
-    for (uint8_t i = 0; i < count; ++i)
+    const uint8_t stored = count < tecomm::kLoadProgramMaxPointCount ? count
+                                                                    : tecomm::kLoadProgramMaxPointCount;
+    for (uint8_t i = 0; i < stored; ++i)
     {
         program.points[i].x = static_cast<float>(i);
         program.points[i].y = static_cast<float>(i) * 2.0f;

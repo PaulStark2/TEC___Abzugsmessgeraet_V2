@@ -10,6 +10,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { normalizedJob } = require('../program/sampleJob');
 const programStore = require('../program/programStore');
 const selectionStore = require('../program/selectionStore');
 const resultsStore = require('../results/resultsStore');
@@ -141,11 +142,7 @@ function withPreparedStores(fn) {
     });
 
     try {
-      programStore.setProgram({
-        version: 1,
-        programName: 'LatchUnit',
-        testPoints: [{ name: 'A', sequenceNumber: 1, x: 1, y: 0, z: 0 }],
-      });
+      programStore.setProgram(normalizedJob([{ toothNumber: 11, x: 1, y: 0, z: 0 }], { buildJobNumber: 'LatchUnit' }));
       selectionStore.setDraft({ selectAll: true });
       selectionStore.confirmSelection();
       await fn();

@@ -10,12 +10,14 @@ There are two clearance concepts:
 ## Formula (plate frame) — Program-Safe-Z
 
 ```text
+approach_z_plate    = program.point.z + point_z_clearance_mm
 probe_z_plate       = probe_center.z − plate_origin.z − tool_offset.z
-max_clearance_z     = max(max(program.point.z), probe_z_plate)
+max_clearance_z     = max(max(approach_z_plate), probe_z_plate)
 safe_z_plate        = max_clearance_z + safe_z_buffer
 ```
 
-- `program.point.z` are **Bauplattenkoordinaten** (plate frame).
+- `program.point.z` is the JSON clamp floor in **Bauplattenkoordinaten**.
+- `point_z_clearance_mm` (default **2 mm**) is the approach offset in +Z. The fine approach stops there. Fine approach and pneumatic Clamp do not command below the floor.
 - `probe_center` is the calibrated Einmessbohrung mid-point (**machine** frame);
   it is converted to plate frame before the max.
 - If the Einmessbohrung sits higher than every test point, the buffer is added to

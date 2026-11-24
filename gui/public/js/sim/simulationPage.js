@@ -381,7 +381,8 @@ function updateSafeZNote(plannedVertices) {
   const resolved = resolveProgramSafeZ(
     plateProgramPoints,
     machineConfigSnapshot?.safe_z_buffer,
-    calibrationSnapshot
+    calibrationSnapshot,
+    machineConfigSnapshot?.point_z_clearance_mm
   );
   if (!resolved) {
     note.hidden = false;
@@ -431,7 +432,8 @@ function updateTrajectory(status) {
   const resolved = resolveProgramSafeZ(
     plateProgramPoints,
     machineConfigSnapshot?.safe_z_buffer,
-    calibrationSnapshot
+    calibrationSnapshot,
+    machineConfigSnapshot?.point_z_clearance_mm
   );
   const safeZ = resolved ? resolved.safeZMachine : NaN;
 

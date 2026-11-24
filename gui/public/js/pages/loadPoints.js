@@ -41,59 +41,93 @@ function renderErrorList(errors) {
   `;
 }
 
+function renderCluster(summary) {
+  const plates = Array.isArray(summary.plates) ? summary.plates : null;
+  const points = summary.testPoints || summary.pointsPreview || [];
+  if (plates && plates.length) {
+    return plates
+      .map(
+        (plate) => `
+        <section class="job-plate">
+          <h4>Platte ${escapeHtml(plate.plate)}</h4>
+          ${(plate.orders || [])
+            .map(
+              (order) => `
+              <div class="job-order">
+                <h5>Auftrag ${escapeHtml(order.orderUid)}</h5>
+                <table class="program-table">
+                  <thead>
+                    <tr><th>Zahn</th><th>X</th><th>Y</th><th>Z Boden</th></tr>
+                  </thead>
+                  <tbody>
+                    ${(order.teeth || [])
+                      .map(
+                        (tooth) => `
+                      <tr>
+                        <td>${escapeHtml(tooth.toothNumber)}</td>
+                        <td>${formatNumber(tooth.x)}</td>
+                        <td>${formatNumber(tooth.y)}</td>
+                        <td>${formatNumber(tooth.z)}</td>
+                      </tr>`
+                      )
+                      .join('')}
+                  </tbody>
+                </table>
+              </div>`
+            )
+            .join('')}
+        </section>`
+      )
+      .join('');
+  }
+  return `
+    <table class="program-table">
+      <thead>
+        <tr><th>Platte</th><th>Auftrag</th><th>Zahn</th><th>X</th><th>Y</th><th>Z Boden</th></tr>
+      </thead>
+      <tbody>
+        ${points
+          .map(
+            (p) => `
+          <tr>
+            <td>${escapeHtml(p.plate ?? '')}</td>
+            <td>${escapeHtml(p.orderUid ?? '')}</td>
+            <td>${escapeHtml(p.toothNumber ?? '')}</td>
+            <td>${formatNumber(p.x)}</td>
+            <td>${formatNumber(p.y)}</td>
+            <td>${formatNumber(p.z)}</td>
+          </tr>`
+          )
+          .join('')}
+      </tbody>
+    </table>`;
+}
+
 function renderProgramSummary(summary) {
   const points = summary.testPoints || summary.pointsPreview || [];
   const count = summary.count ?? points.length;
+  const range = (span) =>
+    span && Number.isFinite(span.min) ? `${formatNumber(span.min)} … ${formatNumber(span.max)}` : '—';
 
   return `
     <div class="success-card">
       <h3>Erfolgreich geladen</h3>
       <p class="placeholder-note">
-        Prüfprogramm: <b>${escapeHtml(summary.programName ?? '—')}</b><br/>
-        Version: <b>${escapeHtml(summary.version)}</b><br/>
-        Punkte: <b>${escapeHtml(count)}</b>
+        Baujob: <b>${escapeHtml(summary.buildJobNumber ?? summary.programName ?? '—')}</b><br/>
+        Zähne: <b>${escapeHtml(count)}</b>
       </p>
       <p class="placeholder-note">
-        Koordinaten sind <b>Bauplatten-Koordinaten</b> (nicht Maschinenkoordinaten).
-        Zur Bestimmung der Maschinenpositionen muss die Bauplatte kalibriert sein.
+        Koordinaten sind <b>Bauplatten-Koordinaten</b> [mm].
+        Z ist die maximale Tiefe (Boden), nicht die angefahrene Höhe.
+        Die Anfahrt liegt um den Parameter „Z-Abstand Anfahrt“ darüber.
       </p>
       <p class="placeholder-note">
-        X-Bereich: ${escapeHtml(summary.xRange.min)} … ${escapeHtml(summary.xRange.max)}<br/>
-        Y-Bereich: ${escapeHtml(summary.yRange.min)} … ${escapeHtml(summary.yRange.max)}<br/>
-        Z-Bereich: ${escapeHtml(summary.zRange.min)} … ${escapeHtml(summary.zRange.max)}
+        X-Bereich: ${range(summary.xRange)}<br/>
+        Y-Bereich: ${range(summary.yRange)}<br/>
+        Z-Boden: ${range(summary.zRange)}
       </p>
-
-      <h4>Geladene Prüfstellen (${count}) — Bauplatten-Koordinaten [mm]</h4>
-      ${
-        points.length
-          ? `
-        <div class="program-table-scroll">
-          <table class="program-table">
-            <thead>
-              <tr>
-                <th>#</th><th>Name</th><th>Seq</th><th>X (Plate)</th><th>Y (Plate)</th><th>Z (Plate)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${points
-                .map(
-                  (p, idx) => `
-                <tr>
-                  <td>${idx + 1}</td>
-                  <td>${escapeHtml(p.name)}</td>
-                  <td>${p.sequenceNumber}</td>
-                  <td>${formatNumber(p.x)}</td>
-                  <td>${formatNumber(p.y)}</td>
-                  <td>${formatNumber(p.z)}</td>
-                </tr>`
-                )
-                .join('')}
-            </tbody>
-          </table>
-        </div>
-      `
-          : ''
-      }
+      <h4>Geladene Prüfstellen (${count})</h4>
+      ${renderCluster(summary)}
     </div>
   `;
 }
@@ -101,18 +135,20 @@ function renderProgramSummary(summary) {
 export function renderLoadPoints(container) {
   container.innerHTML = `
     <section class="panel page-panel">
-      <h2>Prüftstellen laden</h2>
+      <h2>Prüfstellen laden</h2>
       <p class="placeholder-note">
-        JSON-Testprogramm hochladen. Der Server validiert und speichert das Programm nur im RAM.
+        Job-JSON des Datenverarbeitungssystems laden (Baujob, Platte, Auftrag, Zahn).
+        Der Server prüft die Datei und hält sie nur im RAM. Ohne Prüfstand reicht der Beispiel-Job.
       </p>
 
       <div class="upload-card">
         <label class="file-label">
-          Testprogramm-Datei (.json)
+          Job-Datei (.json)
           <input id="program-file" type="file" accept="application/json,.json" />
         </label>
         <div class="control-actions">
           <button type="button" id="btn-upload-program">Upload / Laden</button>
+          <button type="button" id="btn-load-sample">Beispiel-Job laden</button>
           <button type="button" id="btn-delete-program" disabled>Prüfstellen löschen</button>
         </div>
         <p id="upload-status" class="command-feedback" aria-live="polite"></p>
@@ -150,6 +186,7 @@ export function renderLoadPoints(container) {
   const statusEl = container.querySelector('#upload-status');
   const summaryRoot = container.querySelector('#program-summary-root');
   const uploadBtn = container.querySelector('#btn-upload-program');
+  const sampleBtn = container.querySelector('#btn-load-sample');
   const deleteBtn = container.querySelector('#btn-delete-program');
   const deviceSelect = container.querySelector('#device-program-select');
   const loadDeviceBtn = container.querySelector('#btn-load-device-program');
@@ -277,8 +314,36 @@ export function renderLoadPoints(container) {
     await refreshDeleteButton();
   }
 
+  async function onLoadSample() {
+    summaryRoot.innerHTML = '';
+    setStatus('Beispiel-Job wird geladen…', false);
+    try {
+      const response = await fetch('/samples/Messpunkte_Friktionskraft.json');
+      if (!response.ok) {
+        setStatus('Beispiel-Job nicht gefunden.', true);
+        return;
+      }
+      const parsed = await response.json();
+      const result = await uploadProgram(parsed);
+      if (!result.ok) {
+        setStatus('Beispiel-Job abgelehnt.', true);
+        summaryRoot.innerHTML = renderErrorList(result.errors);
+        return;
+      }
+      setStatus('Beispiel-Job geladen. Als Nächstes unter „Prüfstellen auswählen“ die Reihenfolge festlegen.', false);
+      summaryRoot.innerHTML = renderProgramSummary(result.summary);
+      await refreshDeleteButton();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
   uploadBtn.addEventListener('click', () => {
     onUpload().catch((err) => setStatus(err.message || String(err), true));
+  });
+
+  sampleBtn.addEventListener('click', () => {
+    onLoadSample().catch((err) => setStatus(err.message || String(err), true));
   });
 
   deleteBtn.addEventListener('click', () => {
@@ -301,8 +366,9 @@ export function renderLoadPoints(container) {
         const points = programResult.current.testPoints || [];
         summaryRoot.innerHTML = renderProgramSummary({
           programName: programResult.current.meta?.programName,
-          version: programResult.current.meta?.version,
+          buildJobNumber: programResult.current.meta?.buildJobNumber,
           count: points.length,
+          plates: programResult.current.plates,
           testPoints: points,
           xRange: {
             min: Math.min(...points.map((p) => p.x)),

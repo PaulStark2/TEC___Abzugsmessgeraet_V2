@@ -103,11 +103,13 @@ Pause remains forbidden during the actual test phases (M17 rule retained).
 Dynamic height from the loaded test program (plate frame):
 
 ```text
-safe_z_plate = max(program.point.z) + safe_z_buffer
-safe_z_machine = plate_origin.z + safe_z_plate + tool_offset.z
+approach_z          = program.point.z + point_z_clearance_mm
+safe_z_plate        = max(max(approach_z), probe_z_plate) + safe_z_buffer
+safe_z_machine      = plate_origin.z + safe_z_plate + tool_offset.z
 ```
 
-- `MachineConfig.motion.safe_z_buffer` (default **30 mm**) is the only configurable clearance.
+- `program.point.z` is the JSON floor (Bauplattenkoordinate).
+- `point_z_clearance_mm` (default 2 mm) is added before the max, so the buffer sits above the approached height.
 - There is **no** absolute machine-frame `safe_z` parameter.
 - Without a loaded program, Safe-Z cannot be computed and automatic start is refused.
 - Static: `start()` rejects unless every transformed machine-Z is **strictly `< safe_z_machine`** (true by construction when `safe_z_buffer > 0`).
@@ -230,14 +232,40 @@ Password for the parameter menu is GUI-only (`tec-admin` / `PARAMETER_MENU_PASSW
 
 ---
 
-## Coordinate systems
+## Coordinate systems and job file
 
-Prüfpunktdatei: `name, x, y, z` relative to the taught plate origin (axes parallel to
-machine axes).
+The company job file (`schemaVersion` 2) is the only accepted Prüfpunkt file.
+Fields above `job` are ignored. Hierarchy:
 
 ```text
-machine = plateOrigin + platePoint + toolOffset
+job.buildJobNumber → plates[].plate → orders[].orderUid → teeth[].toothNumber → point {x,y,z}
 ```
+
+`x`, `y`, `z` are plate-frame millimetres (origin: plate centre, Z on the top surface,
+same axis directions as the taught plate, including `plateYaw`). `point.z` is the
+**clamp floor** (maximum depth), not the approached height.
+
+```text
+approachZ = floorZ + point_z_clearance_mm    (parameter, default 2 mm, range 0…20)
+machine   = plateOrigin + Rz(plateYaw) * platePoint + toolOffset
+```
+
+`CmdLoadProgram` still carries only `x, y, z`, and `z` is the floor. Core adds
+`point_z_clearance_mm` for the fine-approach target. Coarse approach stays
+`approach_distance` above that target.
+
+During fine approach and the pneumatic Clamp phase the commanded Z is never below
+the floor. SeatToForce (`InsertInitial`) and TestOrAge may go below it.
+
+The run order is not in the file. The GUI confirms a subset (max 32). Checking an
+order or a tooth appends those points; a newly added order is sorted by tooth
+number, and „Alles auswählen“ appends every still open point in file order of
+plates and orders with tooth number ascending. Points already in the list stay
+where the operator put them. Dragging a row in the preview sets any order.
+A second „Alles auswählen“ when every point is already selected clears the list.
+Results keep build job, plate, order UID and tooth number with each point.
+
+Teach writes the same job file. The jogged pose is stored as the floor.
 
 `toolOffset` default is `{0,0,0}`. It is an optional TCP/spreader offset, **not** a second
 plate origin. Setting it changes the transformed machine pose on purpose; it must not be
@@ -252,7 +280,7 @@ Do not use byte offsets in the GUI. Use `gui/server/protocol/m12Codec.js`.
 | Payload | Wire size |
 |---------|-----------|
 | `StatusReport` | **41 B** (was 39): + `fault_reason u8`, `spreader_state u8` |
-| `MachineConfig` | **196 B** as of the M19.0 geometry correction (first M19.0 cut was 184 B, M18 was 142 B) |
+| `MachineConfig` | **376 B** (`point_z_clearance_mm` appended; was 372 B) |
 
 Status flags (bit indices):
 

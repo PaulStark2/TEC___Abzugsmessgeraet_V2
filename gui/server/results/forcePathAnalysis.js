@@ -181,7 +181,7 @@ function statsForPeaks(peaks) {
 
 /**
  * @param {Array} rawCurves from forcePathStore.getCurves()
- * @param {{ programName?: string, pointNames?: Record<number,string>|string[] }} meta
+ * @param {{ programName?: string, buildJobNumber?: string, pointNames?: Record<number,string>|string[], pointIdentities?: Record<number, object> }} meta
  */
 function analyzeForcePaths(rawCurves, meta = {}) {
   let curves = (rawCurves || []).map(classifyCurve);
@@ -189,13 +189,16 @@ function analyzeForcePaths(rawCurves, meta = {}) {
   curves = curves.map(attachPeaks);
 
   const pointNames = meta.pointNames || {};
+  const identities = meta.pointIdentities || {};
 
   const pointIndexSet = new Set();
   for (const c of curves) pointIndexSet.add(c.pointIndex);
   const pointIndices = [...pointIndexSet].sort((a, b) => a - b);
 
   const points = pointIndices.map((pointIndex) => {
+    const identity = identities[pointIndex] || {};
     const name =
+      identity.name ||
       (Array.isArray(pointNames) ? pointNames[pointIndex] : pointNames[pointIndex]) ||
       `Punkt ${pointIndex + 1}`;
     const pointCurves = curves.filter((c) => c.pointIndex === pointIndex);
@@ -210,6 +213,14 @@ function analyzeForcePaths(rawCurves, meta = {}) {
     return {
       pointIndex,
       name,
+      buildJobNumber: identity.buildJobNumber || meta.buildJobNumber || null,
+      plate: identity.plate || null,
+      orderUid: identity.orderUid || null,
+      toothNumber: identity.toothNumber != null ? identity.toothNumber : null,
+      x: identity.x != null ? identity.x : null,
+      y: identity.y != null ? identity.y : null,
+      zFloor: identity.z != null ? identity.z : null,
+      zApproach: identity.zApproach != null ? identity.zApproach : null,
       curves: pointCurves,
       insert: statsForPeaks(insertPeaks),
       extract: statsForPeaks(extractPeaks),
@@ -218,6 +229,7 @@ function analyzeForcePaths(rawCurves, meta = {}) {
 
   return {
     programName: meta.programName || null,
+    buildJobNumber: meta.buildJobNumber || null,
     curveCount: curves.length,
     points,
     curves,

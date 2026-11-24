@@ -116,7 +116,7 @@ export function createForcePathChart(canvas, opts) {
           display: false,
         },
         tooltip: {
-          backgroundColor: 'rgba(20, 22, 28, 0.92)',
+          backgroundColor: 'rgba(16, 24, 32, 0.94)',
           titleColor: '#f1f3f5',
           bodyColor: '#d7dbe2',
           borderColor: 'rgba(255,255,255,0.15)',

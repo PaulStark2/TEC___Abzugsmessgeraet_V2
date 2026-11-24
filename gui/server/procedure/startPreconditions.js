@@ -74,7 +74,13 @@ function validateProcedureStartPreconditions(input) {
     };
   }
 
-  const safeZ = resolveProgramSafeZ(points, cfg.safe_z_buffer, calib);
+  const clearance = Number(cfg.point_z_clearance_mm);
+  const safeZ = resolveProgramSafeZ(
+    points,
+    cfg.safe_z_buffer,
+    calib,
+    Number.isFinite(clearance) ? clearance : 0
+  );
   if (!safeZ.ok) {
     return {
       ok: false,

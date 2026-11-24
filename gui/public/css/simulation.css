@@ -19,7 +19,7 @@
 }
 
 .sim-program-note--warn {
-  color: #c9a227;
+  color: #ffb74d;
 }
 
 .sim-layout {
@@ -107,14 +107,14 @@
 .sim-field input[type="number"] {
   width: 7rem;
   padding: 0.35rem 0.5rem;
-  background: #1b1f25;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
 
 .sim-field input[readonly] {
-  background: #16191e;
+  background: #0e1620;
   color: var(--muted);
   cursor: default;
 }
@@ -122,7 +122,7 @@
 .sim-panel button {
   margin-top: 0.35rem;
   padding: 0.45rem 0.9rem;
-  background: #2f3742;
+  background: var(--button);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -141,7 +141,7 @@
 }
 
 .sim-readout--active span {
-  color: #ffcc00;
+  color: var(--text);
 }
 
 .sim-canvas {
@@ -149,7 +149,7 @@
   height: auto;
   aspect-ratio: 16 / 10;
   display: block;
-  background: #12151a;
+  background: var(--inset);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
@@ -190,7 +190,7 @@
 }
 
 .sim-force-btn--active {
-  background: #8a6a12;
-  border-color: #c9a227;
+  background: #3d5168;
+  border-color: var(--accent);
   color: #fff;
 }

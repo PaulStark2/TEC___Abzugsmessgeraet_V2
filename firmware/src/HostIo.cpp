@@ -387,8 +387,9 @@ HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_se
     inputs.limitYMax = debounceLevel(g_lim_yp, pinHigh(PIN_LIM_YP_PORT, PIN_LIM_YP_PIN), kLimitDebounceMs);
     inputs.limitZMin = debounceLevel(g_lim_zn, pinHigh(PIN_LIM_ZN_PORT, PIN_LIM_ZN_PIN), kLimitDebounceMs);
     inputs.limitZMax = debounceLevel(g_lim_zp, pinHigh(PIN_LIM_ZP_PORT, PIN_LIM_ZP_PIN), kLimitDebounceMs);
-    // E-Stop: no debounce — fail fast. Hardware should still cut power.
-    inputs.e_stop = pinHigh(PIN_ESTOP_PORT, PIN_ESTOP_PIN);
+    // E-Stop: Low = active. The switch removes the sense voltage, so an open
+    // or cut line must stop. No debounce — fail fast. Hardware still cuts power.
+    inputs.e_stop = !pinHigh(PIN_ESTOP_PORT, PIN_ESTOP_PIN);
     // Level only (NC: Low = contact). Pose/sequence latch is in FirmwareHost.
     // Debounce before publishing — a single EMI Low must not create a rising edge.
     const bool probe_raw_contact = !pinHigh(PIN_PROBE_PORT, PIN_PROBE_PIN);

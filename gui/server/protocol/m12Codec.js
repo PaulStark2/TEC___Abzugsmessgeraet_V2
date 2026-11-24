@@ -206,6 +206,7 @@ const MACHINE_CONFIG_FIELDS = [
   { key: 'force_path_dz_fine_mm', type: 'f32', defaultValue: 0.005 },
   { key: 'force_near_target_frac', type: 'f32', defaultValue: 0.8 },
   { key: 'phase3_v_insert_fine', type: 'f32', defaultValue: 0.5 },
+  { key: 'point_z_clearance_mm', type: 'f32', defaultValue: 2 },
 ];
 
 function encodeMachineConfigPayload(cfg) {

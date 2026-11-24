@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "unit": "mm",
+  "coordinateSystem": {
+    "xyOrigin": "center of the referenced build plate",
+    "zOrigin": "top surface of the referenced build plate",
+    "axes": "same X/Y/Z directions as Secondary nesting; right-handed",
+    "pointDefinition": "center of the deepest primary bore floor; fully inserted primary"
+  },
+  "calculation": {
+    "approximate": true,
+    "holeDiameterMM": 2.6,
+    "floorClearanceMM": 2
+  },
+  "complete": true,
+  "job": {
+    "buildJobNumber": "9516",
+    "plates": [
+      {
+        "plate": "A",
+        "orders": [
+          {
+            "orderUid": "FID-77SY-E077-SK8V",
+            "teeth": [
+              {
+                "toothNumber": 33,
+                "point": {
+                  "x": -9.7459642215744147,
+                  "y": -35.366914953528223,
+                  "z": 10.869317538458834
+                }
+              },
+              {
+                "toothNumber": 34,
+                "point": {
+                  "x": -14.5476743342222,
+                  "y": -29.742276405047427,
+                  "z": 11.674156011521625
+                }
+              },
+              {
+                "toothNumber": 43,
+                "point": {
+                  "x": 13.03782889460758,
+                  "y": -33.401466448063061,
+                  "z": 9.4768517797952363
+                }
+              }
+            ]
+          },
+          {
+            "orderUid": "FID-W0A2-AD59-PPGQ",
+            "teeth": [
+              {
+                "toothNumber": 12,
+                "point": {
+                  "x": 0.751235751327922,
+                  "y": -0.0876528867091082,
+                  "z": 11.612976650471671
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

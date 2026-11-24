@@ -496,7 +496,11 @@ export function renderProcedure(container) {
     const totalPoints = Number(p.totalPoints) || 0;
     const pointLabels = [];
     pointLabels.push('Vorbereitung');
-    for (let i = 1; i <= totalPoints; i += 1) pointLabels.push(`Punkt ${i}`);
+    const names = (selectionMeta && selectionMeta.points) || [];
+    for (let i = 1; i <= totalPoints; i += 1) {
+      const point = names[i - 1];
+      pointLabels.push(point && point.name ? point.name : `Punkt ${i}`);
+    }
     pointLabels.push('Abschluss');
     let pointActive = 0;
     if (p.scope === 'setup') pointActive = 0;
@@ -726,8 +730,8 @@ export function renderProcedure(container) {
 
     const meta = contentEl.querySelector('#proc-meta');
     if (meta) {
-      meta.innerHTML = `Programm: <b>${escapeHtml(
-        (programMeta && programMeta.programName) || '—'
+      meta.innerHTML = `Baujob: <b>${escapeHtml(
+        (programMeta && (programMeta.buildJobNumber || programMeta.programName)) || '—'
       )}</b> · Punkte: <b>${
         selectionMeta && selectionMeta.points ? selectionMeta.points.length : '—'
       }</b>`;
@@ -793,9 +797,9 @@ export function renderProcedure(container) {
       contentEl.innerHTML = `
         <div class="error-card">
           <h3>Kein Programm geladen</h3>
-          <p class="placeholder-note">Bitte zuerst Prüftstellen laden und auswählen.</p>
+          <p class="placeholder-note">Bitte zuerst Prüfstellen laden und auswählen.</p>
           <div class="control-actions page-actions">
-            <button type="button" id="btn-go-load">Zu „Prüftstellen laden“</button>
+            <button type="button" id="btn-go-load">Zu „Prüfstellen laden“</button>
             <button type="button" class="btn-back" data-route="menu">Zurück</button>
           </div>
         </div>`;

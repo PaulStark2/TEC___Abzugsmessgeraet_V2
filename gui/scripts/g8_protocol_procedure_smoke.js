@@ -12,6 +12,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { findFreePort, startSmokeServer } = require('./lib/smokeServer');
+const { rawJob } = require('../server/program/sampleJob');
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -130,14 +131,18 @@ async function waitMachineOffline(base, timeoutMs = 15000) {
 }
 
 async function prepareSelection(base) {
-  await request(base, 'POST', '/api/program/upload', {
-    version: 1,
-    programName: 'G8Proto',
-    testPoints: [
-      { name: 'A', sequenceNumber: 1, x: 0, y: 0, z: 0 },
-      { name: 'B', sequenceNumber: 2, x: 3, y: 0, z: 0 },
-    ],
-  });
+  await request(
+    base,
+    'POST',
+    '/api/program/upload',
+    rawJob(
+      [
+        { toothNumber: 11, x: 0, y: 0, z: 0 },
+        { toothNumber: 12, x: 3, y: 0, z: 0 },
+      ],
+      { buildJobNumber: 'G8Proto' }
+    )
+  );
   await request(base, 'PUT', '/api/program/selection', { selectAll: true });
   await request(base, 'POST', '/api/program/selection/confirm', null);
 }

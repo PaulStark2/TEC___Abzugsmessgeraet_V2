@@ -124,6 +124,8 @@ static void Gpio_Init(void)
     gpio.Pull = GPIO_PULLDOWN;
     HAL_GPIO_Init(PIN_PROBE_PORT, &gpio);
 
+    // Limits: High = hit, idle pulled Low. E-Stop (PA9): Low = active; the same
+    // pull-down holds the line Low when the switch removes the sense voltage.
     gpio.Pin = PIN_LIM_XP_PIN | PIN_LIM_YP_PIN | PIN_LIM_ZP_PIN | PIN_ESTOP_PIN | PIN_LIM_XN_PIN |
                PIN_LIM_YN_PIN | PIN_LIM_ZN_PIN;
     gpio.Mode = GPIO_MODE_INPUT;

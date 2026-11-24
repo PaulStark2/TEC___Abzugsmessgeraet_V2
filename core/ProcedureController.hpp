@@ -181,6 +181,9 @@ private:
     uint8_t cycle_leg_; // phase-specific leg (InsertInitial; Test; Unclamp)
     uint8_t approach_leg_; // PointApproach / ProbeApproach / ProbeRemeasure / MoveSafeEnd
     TestPoint target_machine_;
+    // JSON floor in machine frame for the current point. Fine approach and Clamp
+    // must not command Z below this. Seat and TestOrAge may.
+    float floor_machine_z_ = 0.0f;
     float end_x_;
     float end_y_;
     bool probe_calib_standalone_;

@@ -511,7 +511,8 @@ bool encodeMachineConfigPayload(const MachineConfigPayload& payload, uint8_t* ou
         writeF32LE(out, capacity, offset, payload.force_path_dz_mm) &&
         writeF32LE(out, capacity, offset, payload.force_path_dz_fine_mm) &&
         writeF32LE(out, capacity, offset, payload.force_near_target_frac) &&
-        writeF32LE(out, capacity, offset, payload.phase3_v_insert_fine);
+        writeF32LE(out, capacity, offset, payload.phase3_v_insert_fine) &&
+        writeF32LE(out, capacity, offset, payload.point_z_clearance_mm);
     return ok && offset == kMachineConfigPayloadWireSize && payload.anomaly_skip <= 1;
 }
 
@@ -614,7 +615,8 @@ bool decodeMachineConfigPayload(const uint8_t* data, std::size_t length, Machine
         readF32LE(data, length, offset, out.force_path_dz_mm, true) &&
         readF32LE(data, length, offset, out.force_path_dz_fine_mm, true) &&
         readF32LE(data, length, offset, out.force_near_target_frac, true) &&
-        readF32LE(data, length, offset, out.phase3_v_insert_fine, true);
+        readF32LE(data, length, offset, out.phase3_v_insert_fine, true) &&
+        readF32LE(data, length, offset, out.point_z_clearance_mm, true);
     return ok && offset == length && length == kMachineConfigPayloadWireSize &&
            out.preclamp_confirm <= 1 && out.anomaly_skip <= 1;
 }

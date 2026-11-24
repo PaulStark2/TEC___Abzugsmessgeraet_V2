@@ -122,6 +122,7 @@ struct MachineConfigPayload
     float tool_offset_z;
     float safe_z_buffer;
     float safe_z_calib_buffer = 30.0f;
+    float point_z_clearance_mm = 2.0f;
     float sample_timeout_s;
     float heartbeat_timeout_s;
     float xy_correct_timeout_s;

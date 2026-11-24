@@ -22,6 +22,14 @@ static bool expectedSafeZMachine(const Machine& machine, const TestProgram& prog
 static void prepare(Machine& machine)
 {
     machine.setPlateOrigin(TestPoint{0.0f, 0.0f, 0.0f});
+    MachineConfig motion_cfg = machine.machineConfig();
+    // These path checks arrive at the programmed Z. That Z is the floor; clearance 0
+    // makes the approach height equal the floor. Production default stays 2 mm.
+    motion_cfg.motion.point_z_clearance_mm = 0.0f;
+    // A Z-window trip pauses the run. These checks only need the travel between points.
+    motion_cfg.force.anomaly_skip = true;
+    ConfigValidationError motion_err = ConfigValidationError::Ok;
+    machine.trySetMachineConfig(motion_cfg, motion_err);
     TestConfiguration cfg = machine.testConfiguration();
     cfg.target_force_N = 0.1f;
     cfg.mode = TestMode::Aging;
@@ -96,6 +104,19 @@ int main()
             !nearEqual(plate, 28.0f))
         {
             return 2;
+        }
+    }
+
+    // Approach offset raises the height Safe-Z is measured from.
+    {
+        TestProgram program;
+        program.add(TestPoint{0.0f, 0.0f, 10.0f});
+        float max_z = 0.0f;
+        float plate = 0.0f;
+        if (!computeSafeZPlate(program, 30.0f, max_z, plate, 2.0f) || !nearEqual(max_z, 12.0f) ||
+            !nearEqual(plate, 42.0f))
+        {
+            return 15;
         }
     }
 
@@ -388,8 +409,8 @@ int main()
         {
             return 41;
         }
-        bool saw_homing = false;
-        bool saw_z_seek_above_safe = false;
+        bool saw_safe_end = false;
+        bool saw_z_at_safe = false;
         float safe_z_machine = 0.0f;
         if (!expectedSafeZMachine(machine, program, safe_z_machine))
         {
@@ -397,13 +418,12 @@ int main()
         }
         for (int i = 0; i < 8000 && ex.processState() == ProcessState::Running; ++i)
         {
-            if (ex.procedurePhase() == ProcedurePhase::MoveSafeEnd &&
-                machine.machineState() == MachineState::Homing)
+            if (ex.procedurePhase() == ProcedurePhase::MoveSafeEnd)
             {
-                saw_homing = true;
-                if (machine.z() > safe_z_machine + 0.5f)
+                saw_safe_end = true;
+                if (machine.z() + 0.05f >= safe_z_machine)
                 {
-                    saw_z_seek_above_safe = true;
+                    saw_z_at_safe = true;
                 }
             }
             machine.setHostInputs(withProcessForce(ex, machine));
@@ -413,7 +433,7 @@ int main()
         {
             return 42;
         }
-        if (!saw_homing || !saw_z_seek_above_safe || !machine.isHomed())
+        if (!saw_safe_end || !saw_z_at_safe || !machine.isHomed())
         {
             return 43;
         }

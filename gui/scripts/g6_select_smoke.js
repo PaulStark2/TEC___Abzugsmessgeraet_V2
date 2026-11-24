@@ -6,6 +6,7 @@
  */
 
 const { startSmokeServer } = require('./lib/smokeServer');
+const { rawJob } = require('../server/program/sampleJob');
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -19,14 +20,17 @@ async function run() {
     const sel0 = await request('GET', '/api/program/selection', null);
     assert(sel0.status === 404, 'selection without program is 404');
 
-    const upload = await request('POST', '/api/program/upload', {
-      version: 1,
-      programName: 'G6Smoke',
-      testPoints: [
-        { name: 'P1', sequenceNumber: 1, x: 0, y: 0, z: 0 },
-        { name: 'P2', sequenceNumber: 2, x: 1, y: 1, z: 1 },
-      ],
-    });
+    const upload = await request(
+      'POST',
+      '/api/program/upload',
+      rawJob(
+        [
+          { toothNumber: 1, x: 0, y: 0, z: 0 },
+          { toothNumber: 2, x: 1, y: 1, z: 1 },
+        ],
+        { buildJobNumber: 'G6Smoke' }
+      )
+    );
     assert(upload.status === 200 && upload.body.ok, 'upload ok');
 
     const sel1 = await request('GET', '/api/program/selection', null);
@@ -34,10 +38,10 @@ async function run() {
     assert(sel1.body.selection.confirmed === false, 'not confirmed yet');
 
     const put = await request('PUT', '/api/program/selection', {
-      selectedSequenceNumbers: [2],
+      selectedIds: ['A|ORD-1|2'],
     });
     assert(put.status === 200 && put.body.ok, 'PUT selection ok');
-    assert(put.body.selection.draftSequenceNumbers.length === 1, 'one selected');
+    assert(put.body.selection.preview.length === 1, 'one selected');
 
     const confirmOk = await request('POST', '/api/program/selection/confirm', null);
     assert(confirmOk.status === 200 && confirmOk.body.ok, 'confirm ok');
@@ -45,7 +49,8 @@ async function run() {
     const sel2 = await request('GET', '/api/program/selection', null);
     assert(sel2.body.selection.confirmed === true, 'confirmed');
     assert(sel2.body.selection.points.length === 1, 'confirmed one point');
-    assert(sel2.body.selection.points[0].sequenceNumber === 2, 'confirmed seq 2');
+    assert(sel2.body.selection.points[0].toothNumber === 2, 'confirmed tooth 2');
+    assert(sel2.body.selection.points[0].sequenceNumber === 1, 'run index starts at 1');
 
     const del = await request('DELETE', '/api/program/selection', null);
     assert(del.status === 200 && del.body.ok, 'DELETE ok');
@@ -55,7 +60,7 @@ async function run() {
     assert(selectAll.body.selection.draftSequenceNumbers.length === 2, 'select all');
 
     const confirmEmpty = await request('PUT', '/api/program/selection', {
-      selectedSequenceNumbers: [],
+      selectedIds: [],
     });
     assert(confirmEmpty.status === 200, 'empty draft allowed');
     const confirmBad = await request('POST', '/api/program/selection/confirm', null);
@@ -64,11 +69,11 @@ async function run() {
     // upload clears selection
     await request('PUT', '/api/program/selection', { selectAll: true });
     await request('POST', '/api/program/selection/confirm', null);
-    const upload2 = await request('POST', '/api/program/upload', {
-      version: 1,
-      programName: 'G6Smoke2',
-      testPoints: [{ name: 'Only', sequenceNumber: 1, x: 0, y: 0, z: 0 }],
-    });
+    const upload2 = await request(
+      'POST',
+      '/api/program/upload',
+      rawJob([{ toothNumber: 1, x: 0, y: 0, z: 0 }], { buildJobNumber: 'G6Smoke2' })
+    );
     assert(upload2.status === 200, 're-upload ok');
     const sel3 = await request('GET', '/api/program/selection', null);
     assert(sel3.body.selection.confirmed === false, 'upload cleared confirmed');

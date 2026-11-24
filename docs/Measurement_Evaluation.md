@@ -195,8 +195,8 @@ Offline ohne Prüfstand: `POST /api/results/demo` (Button „Demo-Testdaten lade
 
 | Datei | Inhalt |
 |-------|--------|
-| `*_samples.csv` | Messpaare, Excel-DE: UTF-8-BOM, `;`, Dezimal `,` |
-| `*_summary.csv` | je Punkt/Richtung: Anzahl, Mittel, StdAbw, Spaltenliste `Spitzen_N` |
+| `*_samples.csv` | Messpaare, Excel-DE: UTF-8-BOM, `;`, Dezimal `,`. Nach `PunktName`: Baujob, Platte, Auftrag, Zahn, Z_Boden_mm, Z_Anfahrt_mm |
+| `*_summary.csv` | je Punkt/Richtung: dieselben Identitätsfelder, Anzahl, Mittel, StdAbw, Spaltenliste `Spitzen_N` |
 | `*_<Punkt>.pdf` | Kraft-Weg mit Achsen `F [N]` / `z (relativ) [mm]`, Ticks, Gitter, Null-Linien |
 
 PDF-Erzeugung mit `pdfkit` (Vektorpfade, ohne Browser-Engine). Farblogik identisch zur GUI.

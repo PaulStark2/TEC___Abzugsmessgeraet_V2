@@ -74,7 +74,19 @@ const GROUPS = [
         unit: 'mm',
         minExclusive: 0,
         max: 500,
-        info: 'Abstand oberhalb von max(höchster Prüfpunkt, Einmessbohrung) beim Verfahren. Safe-Z (Bauplatte) = max(Punkt.z, probeCenter.z) + Puffer.',
+        info: 'Abstand oberhalb von max(Anfahr-Z, Einmessbohrung) beim Verfahren. Anfahr-Z = Z-Boden + Z-Abstand Anfahrt.',
+      },
+      {
+        key: 'point_z_clearance_mm',
+        label: 'Z-Abstand Anfahrt',
+        unit: 'mm',
+        min: 0,
+        max: 20,
+        info:
+          'Abstand in +Z über der JSON-Z (Boden / maximale Tiefe). ' +
+          'Dieser Punkt wird in der feinen Anfahrt angefahren. ' +
+          'Während feiner Anfahrt und pneumatischem Klemmen wird die JSON-Z nicht unterschritten. ' +
+          'Kraft-Einsitz und Messzyklen dürfen darunter fahren.',
       },
       {
         key: 'safe_z_calib_buffer',
@@ -985,6 +997,7 @@ function defaultMachineConfigPayload() {
     tool_offset_z: 0,
     tool_offset_change_tolerance_mm: 0.5,
     safe_z_buffer: 30,
+    point_z_clearance_mm: 2,
     safe_z_calib_buffer: 30,
     sample_timeout_s: 0.5,
     heartbeat_timeout_s: 0.3,

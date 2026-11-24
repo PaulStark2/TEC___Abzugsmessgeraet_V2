@@ -32,8 +32,8 @@ Communication stays Core-free. Core mapping lives in
 
 | ID | Name | Payload |
 |----|------|---------|
-| `0x50` | `CmdSetMachineConfig` | 196 B `MachineConfigPayload` (M19.0 geometry correction; was 184 B, 142 B in M18, 126 B in M17) |
-| `0x51` | `CmdGetMachineConfig` | empty; reply `MsgMachineConfig` (`0xA3`, 196 B) |
+| `0x50` | `CmdSetMachineConfig` | 376 B `MachineConfigPayload` (`point_z_clearance_mm` appended; earlier cuts were 372 / 196 / 184 B) |
+| `0x51` | `CmdGetMachineConfig` | empty; reply `MsgMachineConfig` (`0xA3`, 376 B) |
 | `0x52` | `CmdSetTestConfiguration` | 8 B: mode u8, targetForce f32, iterations u16, activePointIndex u8 |
 | `0x53` | `CmdSetPlateOrigin` | 12 B `x,y,z` machine pose |
 
@@ -54,7 +54,10 @@ active `CollisionContext`. Trip → latched `Fault`.
 
 ## M17.4 — Frames
 
-`machine = plateOrigin + platePoint + toolOffset` (`core/CoordinateTransform.hpp`).
+`machine.xy = plateOrigin.xy + Rz(plateYaw) * platePoint.xy + toolOffset.xy`,
+`machine.z = plateOrigin.z + (platePoint.z + point_z_clearance_mm) + toolOffset.z`
+(`core/CoordinateTransform.hpp`, clearance applied in `ProcedureController`).
+Plate `z` in the job file is the clamp floor. See [`docs/M18_Procedure.md`](M18_Procedure.md).
 `TestExecutor::start()` and `CmdStart` require a valid `plateOrigin`.
 Successful homing re-references each axis at the +max switch (`referenceMachinePose` to
 machine 0, no raw teleport) then retracts to the derived home (−R). See

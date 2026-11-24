@@ -93,16 +93,30 @@ export function mountManualControls(container, opts) {
     <div class="manual-section">
       <h3>Prüfpunkt teachen</h3>
       <p class="placeholder-note">
-        Speichert die aktuelle TCP-Pose als Bauplatten-Koordinaten in einer JSON-Datei
-        (gleicher Format wie beim Laden von Prüfpunkten). Bauplatte muss kalibriert sein.
+        Speichert die aktuelle TCP-Pose als Bauplatten-Koordinaten in einer Job-JSON.
+        Die angefahrene Z-Höhe wird als Boden (maximale Clamp-Tiefe) gespeichert.
+        Die Prüfung fährt später den Parameter „Z-Abstand Anfahrt“ darüber an.
+        Bauplatte muss kalibriert sein.
       </p>
       <div class="control-actions">
         <button type="button" id="btn-teach-point">Prüfpunkt teachen</button>
       </div>
       <div id="teach-point-form" class="control-form manual-teach-form" hidden>
         <label>
-          Punktname
-          <input id="teach-point-name" type="text" maxlength="80" placeholder="z.B. Bohrung A">
+          Baujob-Nummer
+          <input id="teach-job-number" type="text" maxlength="80" placeholder="z.B. 9516">
+        </label>
+        <label>
+          Platte
+          <input id="teach-plate-id" type="text" maxlength="16" placeholder="z.B. A" value="A">
+        </label>
+        <label>
+          Auftrags-UID
+          <input id="teach-order-uid" type="text" maxlength="80" placeholder="z.B. FID-…">
+        </label>
+        <label>
+          Zahnnummer
+          <input id="teach-tooth-number" type="number" step="1" placeholder="z.B. 33">
         </label>
         <fieldset class="teach-mode-fieldset">
           <legend>Ziel</legend>
@@ -115,10 +129,6 @@ export function mountManualControls(container, opts) {
             In vorhandener JSON-Datei ergänzen
           </label>
         </fieldset>
-        <label id="teach-program-name-wrap">
-          Programmname (neue Datei)
-          <input id="teach-program-name" type="text" maxlength="80" placeholder="z.B. Handteach_01">
-        </label>
         <label id="teach-file-select-wrap" hidden>
           Vorhandene Datei
           <select id="teach-file-select"></select>
@@ -145,9 +155,10 @@ export function mountManualControls(container, opts) {
   const startToaBtn = container.querySelector('#btn-start-testorage');
   const teachOpenBtn = container.querySelector('#btn-teach-point');
   const teachForm = container.querySelector('#teach-point-form');
-  const teachNameEl = container.querySelector('#teach-point-name');
-  const teachProgramNameEl = container.querySelector('#teach-program-name');
-  const teachProgramNameWrap = container.querySelector('#teach-program-name-wrap');
+  const teachJobEl = container.querySelector('#teach-job-number');
+  const teachPlateEl = container.querySelector('#teach-plate-id');
+  const teachOrderEl = container.querySelector('#teach-order-uid');
+  const teachToothEl = container.querySelector('#teach-tooth-number');
   const teachFileSelectWrap = container.querySelector('#teach-file-select-wrap');
   const teachFileSelect = container.querySelector('#teach-file-select');
   const teachSaveBtn = container.querySelector('#btn-teach-save');
@@ -170,16 +181,14 @@ export function mountManualControls(container, opts) {
 
   function syncTeachModeUi() {
     const mode = selectedTeachMode();
-    const isCreate = mode === 'create';
-    teachProgramNameWrap.hidden = !isCreate;
-    teachFileSelectWrap.hidden = isCreate;
+    teachFileSelectWrap.hidden = mode !== 'append';
   }
 
   async function refreshTeachFileList() {
     teachFileSelect.innerHTML = '';
     try {
       const result = await fetchProgramFiles();
-      const files = (result.files || []).filter((f) => f.valid && f.pointCount < 32);
+      const files = (result.files || []).filter((f) => f.valid);
       if (files.length === 0) {
         const opt = document.createElement('option');
         opt.value = '';
@@ -190,8 +199,8 @@ export function mountManualControls(container, opts) {
       for (const f of files) {
         const opt = document.createElement('option');
         opt.value = f.fileName;
-        const labelName = f.programName ? `${f.programName} (${f.fileName})` : f.fileName;
-        opt.textContent = `${labelName} — ${f.pointCount}/32`;
+        const labelName = f.buildJobNumber || f.programName || f.fileName;
+        opt.textContent = `${labelName} (${f.fileName}) — ${f.pointCount} Zähne`;
         teachFileSelect.appendChild(opt);
       }
     } catch (err) {
@@ -204,11 +213,13 @@ export function mountManualControls(container, opts) {
 
   const onTeachOpen = async () => {
     teachForm.hidden = false;
-    teachNameEl.value = '';
-    teachProgramNameEl.value = '';
+    teachJobEl.value = '';
+    teachPlateEl.value = 'A';
+    teachOrderEl.value = '';
+    teachToothEl.value = '';
     syncTeachModeUi();
     await refreshTeachFileList();
-    teachNameEl.focus();
+    teachJobEl.focus();
   };
 
   const onTeachCancel = () => {
@@ -220,16 +231,22 @@ export function mountManualControls(container, opts) {
   };
 
   const onTeachSave = async () => {
-    const pointName = String(teachNameEl.value || '').trim();
-    if (!pointName) {
-      setFeedback('Bitte einen Punktnamen eingeben.', true);
+    const buildJobNumber = String(teachJobEl.value || '').trim();
+    const plateId = String(teachPlateEl.value || '').trim();
+    const orderUid = String(teachOrderEl.value || '').trim();
+    const toothNumber = Number(teachToothEl.value);
+    if (!plateId || !orderUid || !Number.isInteger(toothNumber)) {
+      setFeedback('Platte, Auftrags-UID und ganzzahlige Zahnnummer sind Pflicht.', true);
       return;
     }
     const mode = selectedTeachMode();
-    const body = { mode, pointName };
+    const body = { mode, plateId, orderUid, toothNumber };
     if (mode === 'create') {
-      const programName = String(teachProgramNameEl.value || '').trim() || pointName;
-      body.programName = programName;
+      if (!buildJobNumber) {
+        setFeedback('Bitte eine Baujob-Nummer eingeben.', true);
+        return;
+      }
+      body.buildJobNumber = buildJobNumber;
     } else {
       const fileName = String(teachFileSelect.value || '').trim();
       if (!fileName) {
@@ -237,13 +254,16 @@ export function mountManualControls(container, opts) {
         return;
       }
       body.fileName = fileName;
+      if (buildJobNumber) {
+        body.buildJobNumber = buildJobNumber;
+      }
     }
     try {
       const result = await teachProgramPoint(body);
       const p = result.point || {};
       setFeedback(
-        `Gespeichert in ${result.fileName}: „${p.name}“ Seq ${p.sequenceNumber} ` +
-          `(Plate ${formatCoord(p.x)}, ${formatCoord(p.y)}, ${formatCoord(p.z)})`,
+        `Gespeichert in ${result.fileName}: Platte ${p.plate} · ${p.orderUid} · Zahn ${p.toothNumber} ` +
+          `(Boden ${formatCoord(p.x)}, ${formatCoord(p.y)}, ${formatCoord(p.z)})`,
         false
       );
       teachForm.hidden = true;

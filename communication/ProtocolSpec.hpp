@@ -34,7 +34,7 @@ constexpr std::size_t kLoadProgramMaxPointCount = 32;
 constexpr std::size_t kLoadProgramMaxPayloadWireSize =
     1 + kLoadProgramMaxPointCount * kMoveToPayloadWireSize; // 385
 // Bore-based probe/plate teach (plate_calib removed) + safe_z_calib_buffer + fault_manual.
-constexpr std::size_t kMachineConfigPayloadWireSize = 372; // + force_path_dz / fine insert
+constexpr std::size_t kMachineConfigPayloadWireSize = 376; // + point_z_clearance_mm
 constexpr std::size_t kProcedureDecisionPayloadWireSize = 1; // action u8
 // type u8 + point u8 + iter u16 + 5×f32 + skip u8 + confirm u8 = 26
 constexpr std::size_t kProcedureAnomalyPayloadWireSize = 26;

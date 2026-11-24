@@ -2,10 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { validateTestProgram } = require('./validateTestProgram');
+const { validateTestProgram, toJobFile, toothId } = require('./validateTestProgram');
 
 const PROGRAMS_DIR = path.join(__dirname, '..', 'data', 'programs');
-const MAX_TEST_POINTS = 32;
 
 function ensureProgramsDir() {
   if (!fs.existsSync(PROGRAMS_DIR)) {
@@ -16,7 +15,7 @@ function ensureProgramsDir() {
 /**
  * Accept only a bare "*.json" basename (no path separators).
  * @param {string} fileName
- * @returns {string|null} sanitized basename or null
+ * @returns {string|null}
  */
 function sanitizeFileName(fileName) {
   if (typeof fileName !== 'string') {
@@ -32,11 +31,6 @@ function sanitizeFileName(fileName) {
   return base;
 }
 
-/**
- * Build a safe file name from a program name.
- * @param {string} programName
- * @returns {string|null}
- */
 function fileNameFromProgramName(programName) {
   if (typeof programName !== 'string') {
     return null;
@@ -69,7 +63,7 @@ function listPrograms() {
   ensureProgramsDir();
   const names = fs
     .readdirSync(PROGRAMS_DIR)
-    .filter((n) => /^[a-zA-Z0-9_-]+\.json$/i.test(n))
+    .filter((name) => /^[a-zA-Z0-9_-]+\.json$/i.test(name))
     .sort((a, b) => a.localeCompare(b));
 
   const out = [];
@@ -78,27 +72,18 @@ function listPrograms() {
       const raw = JSON.parse(fs.readFileSync(path.join(PROGRAMS_DIR, fileName), 'utf8'));
       const validation = validateTestProgram(raw);
       if (!validation.ok) {
-        out.push({
-          fileName,
-          programName: null,
-          pointCount: 0,
-          valid: false,
-        });
+        out.push({ fileName, programName: null, buildJobNumber: null, pointCount: 0, valid: false });
         continue;
       }
       out.push({
         fileName,
         programName: validation.value.programName || null,
+        buildJobNumber: validation.value.buildJobNumber || null,
         pointCount: validation.value.testPoints.length,
         valid: true,
       });
     } catch {
-      out.push({
-        fileName,
-        programName: null,
-        pointCount: 0,
-        valid: false,
-      });
+      out.push({ fileName, programName: null, buildJobNumber: null, pointCount: 0, valid: false });
     }
   }
   return out;
@@ -122,67 +107,95 @@ function readProgram(fileName) {
   if (!validation.ok) {
     return { ok: false, error: 'Programmvalidierung fehlgeschlagen', errors: validation.errors };
   }
-  return { ok: true, fileName: resolved.fileName, program: validation.value };
+  return { ok: true, fileName: resolved.fileName, program: validation.value, raw };
 }
 
-function writeProgram(fileName, program) {
+function writeProgram(fileName, program, preservedRoot) {
   const resolved = resolveProgramPath(fileName);
   if (!resolved) {
     return { ok: false, error: 'Ungültiger Dateiname' };
   }
-  const validation = validateTestProgram(program);
+  const fileObject = toJobFile(program, preservedRoot);
+  const validation = validateTestProgram(fileObject);
   if (!validation.ok) {
     return { ok: false, error: 'Programmvalidierung fehlgeschlagen', errors: validation.errors };
   }
   ensureProgramsDir();
-  const payload = {
-    version: validation.value.version,
-    ...(validation.value.programName ? { programName: validation.value.programName } : {}),
-    testPoints: validation.value.testPoints,
-  };
-  fs.writeFileSync(resolved.fullPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(resolved.fullPath, `${JSON.stringify(fileObject, null, 2)}\n`, 'utf8');
   return { ok: true, fileName: resolved.fileName, program: validation.value };
 }
 
-function nextSequenceNumber(testPoints) {
-  if (!Array.isArray(testPoints) || testPoints.length === 0) {
-    return 1;
+function findPlate(program, plateId) {
+  return (program.plates || []).find((plate) => plate.plate === plateId) || null;
+}
+
+function insertTooth(program, plateId, orderUid, tooth) {
+  let plate = findPlate(program, plateId);
+  if (!plate) {
+    plate = { plate: plateId, orders: [] };
+    program.plates.push(plate);
   }
-  let max = 0;
-  for (const p of testPoints) {
-    const seq = Number(p.sequenceNumber);
-    if (Number.isInteger(seq) && seq > max) {
-      max = seq;
-    }
+  let order = plate.orders.find((item) => item.orderUid === orderUid);
+  if (!order) {
+    order = { orderUid, teeth: [] };
+    plate.orders.push(order);
   }
-  return max + 1;
+  if (order.teeth.some((item) => item.toothNumber === tooth.toothNumber)) {
+    return { ok: false, error: `Zahn ${tooth.toothNumber} existiert in Auftrag ${orderUid} bereits` };
+  }
+  order.teeth.push(tooth);
+  return { ok: true };
 }
 
 /**
- * Create a new program file with one point, or append a point to an existing file.
- * @param {{ mode: 'create'|'append', fileName?: string, programName?: string, pointName: string, plate: {x,y,z} }} opts
+ * Create a job file with one tooth, or append a tooth.
+ * The jogged pose is stored as the JSON point (clamp floor), not the approach height.
+ * @param {{
+ *   mode: 'create'|'append',
+ *   fileName?: string,
+ *   buildJobNumber?: string,
+ *   plateId: string,
+ *   orderUid: string,
+ *   toothNumber: number,
+ *   pose: {x:number,y:number,z:number},
+ * }} opts
  */
 function teachPoint(opts) {
   const mode = opts && opts.mode;
-  const pointName = typeof opts.pointName === 'string' ? opts.pointName.trim() : '';
-  const plate = opts.plate;
-  if (!pointName) {
-    return { ok: false, error: 'Punktname darf nicht leer sein' };
+  const plateId = typeof opts.plateId === 'string' ? opts.plateId.trim() : '';
+  const orderUid = typeof opts.orderUid === 'string' ? opts.orderUid.trim() : '';
+  const toothNumber = Number(opts.toothNumber);
+  const pose = opts.pose;
+  if (!plateId) {
+    return { ok: false, error: 'Platte darf nicht leer sein' };
   }
-  if (!plate || ![plate.x, plate.y, plate.z].every(Number.isFinite)) {
+  if (!orderUid) {
+    return { ok: false, error: 'Auftrags-UID darf nicht leer sein' };
+  }
+  if (!Number.isInteger(toothNumber)) {
+    return { ok: false, error: 'Zahnnummer muss eine ganze Zahl sein' };
+  }
+  if (!pose || ![pose.x, pose.y, pose.z].every(Number.isFinite)) {
     return { ok: false, error: 'Ungültige Bauplatten-Koordinaten' };
   }
+  const tooth = {
+    toothNumber,
+    id: toothId(plateId, orderUid, toothNumber),
+    x: pose.x,
+    y: pose.y,
+    z: pose.z,
+  };
 
   if (mode === 'create') {
-    const programName =
-      typeof opts.programName === 'string' && opts.programName.trim()
-        ? opts.programName.trim()
-        : pointName;
+    const buildJobNumber =
+      typeof opts.buildJobNumber === 'string' && opts.buildJobNumber.trim()
+        ? opts.buildJobNumber.trim()
+        : `${plateId}-${toothNumber}`;
     const fileName = opts.fileName
       ? sanitizeFileName(opts.fileName)
-      : fileNameFromProgramName(programName);
+      : fileNameFromProgramName(buildJobNumber);
     if (!fileName) {
-      return { ok: false, error: 'Ungültiger Programm-/Dateiname' };
+      return { ok: false, error: 'Ungültiger Baujob-/Dateiname' };
     }
     const resolved = resolveProgramPath(fileName);
     if (!resolved) {
@@ -192,15 +205,14 @@ function teachPoint(opts) {
       return { ok: false, error: `Datei ${fileName} existiert bereits` };
     }
     const program = {
-      version: 1,
-      programName,
-      testPoints: [
+      schemaVersion: 2,
+      unit: 'mm',
+      buildJobNumber,
+      programName: buildJobNumber,
+      plates: [
         {
-          name: pointName,
-          sequenceNumber: 1,
-          x: plate.x,
-          y: plate.y,
-          z: plate.z,
+          plate: plateId,
+          orders: [{ orderUid, teeth: [tooth] }],
         },
       ],
     };
@@ -208,12 +220,13 @@ function teachPoint(opts) {
     if (!written.ok) {
       return written;
     }
+    const saved = written.program.testPoints[0];
     return {
       ok: true,
       mode: 'create',
       fileName: written.fileName,
       program: written.program,
-      point: written.program.testPoints[0],
+      point: saved,
     };
   }
 
@@ -222,32 +235,35 @@ function teachPoint(opts) {
     if (!existing.ok) {
       return existing;
     }
-    if (existing.program.testPoints.length >= MAX_TEST_POINTS) {
-      return { ok: false, error: `Maximal ${MAX_TEST_POINTS} Prüfpunkte pro Datei` };
-    }
-    const seq = nextSequenceNumber(existing.program.testPoints);
-    const point = {
-      name: pointName,
-      sequenceNumber: seq,
-      x: plate.x,
-      y: plate.y,
-      z: plate.z,
-    };
     const program = {
-      version: existing.program.version || 1,
-      ...(existing.program.programName ? { programName: existing.program.programName } : {}),
-      testPoints: [...existing.program.testPoints, point],
+      schemaVersion: existing.program.schemaVersion || 2,
+      unit: 'mm',
+      buildJobNumber: existing.program.buildJobNumber,
+      programName: existing.program.programName,
+      plates: existing.program.plates.map((plate) => ({
+        plate: plate.plate,
+        orders: plate.orders.map((order) => ({
+          orderUid: order.orderUid,
+          teeth: order.teeth.map((item) => ({ ...item })),
+        })),
+      })),
     };
-    const written = writeProgram(existing.fileName, program);
+    const inserted = insertTooth(program, plateId, orderUid, tooth);
+    if (!inserted.ok) {
+      return inserted;
+    }
+    const preserved = { ...existing.raw };
+    const written = writeProgram(existing.fileName, program, preserved);
     if (!written.ok) {
       return written;
     }
+    const saved = written.program.testPoints.find((item) => item.id === tooth.id);
     return {
       ok: true,
       mode: 'append',
       fileName: written.fileName,
       program: written.program,
-      point,
+      point: saved,
     };
   }
 
@@ -256,13 +272,11 @@ function teachPoint(opts) {
 
 module.exports = {
   PROGRAMS_DIR,
-  MAX_TEST_POINTS,
   ensureProgramsDir,
   sanitizeFileName,
   fileNameFromProgramName,
   listPrograms,
   readProgram,
   writeProgram,
-  nextSequenceNumber,
   teachPoint,
 };

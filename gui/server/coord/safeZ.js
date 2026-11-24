@@ -19,7 +19,7 @@ function finiteNumber(value) {
  * @param {Array<{z?: number}>} points plate-frame program points
  * @returns {{ ok: true, maxPointZ: number } | { ok: false, code: string, error: string }}
  */
-function computeMaxPlatePointZ(points) {
+function computeMaxPlatePointZ(points, clearance = 0) {
   const list = Array.isArray(points) ? points : [];
   if (list.length === 0) {
     return {
@@ -28,6 +28,7 @@ function computeMaxPlatePointZ(points) {
       error: 'Kein Prüfprogramm geladen. Die Safe-Z-Höhe kann nicht berechnet werden.',
     };
   }
+  const offset = finiteNumber(clearance) ?? 0;
   let maxZ = null;
   for (const p of list) {
     const z = finiteNumber(p && p.z);
@@ -38,8 +39,9 @@ function computeMaxPlatePointZ(points) {
         error: 'Prüfpunkt ohne gültige Z-Koordinate — Safe-Z kann nicht berechnet werden.',
       };
     }
-    if (maxZ === null || z > maxZ) {
-      maxZ = z;
+    const approach = z + offset;
+    if (maxZ === null || approach > maxZ) {
+      maxZ = approach;
     }
   }
   return { ok: true, maxPointZ: maxZ };
@@ -74,7 +76,7 @@ function computeProbeZPlate(calibration) {
  * @param {number} safeZBuffer
  * @returns {{ ok: true, maxPointZ: number, safeZBuffer: number, safeZPlate: number } | { ok: false, code: string, error: string }}
  */
-function computeSafeZPlate(points, safeZBuffer) {
+function computeSafeZPlate(points, safeZBuffer, clearance = 0) {
   const buffer = finiteNumber(safeZBuffer);
   if (buffer === null || !(buffer > 0)) {
     return {
@@ -83,7 +85,7 @@ function computeSafeZPlate(points, safeZBuffer) {
       error: 'safe_z_buffer fehlt oder ist ungültig (muss > 0 mm sein)',
     };
   }
-  const max = computeMaxPlatePointZ(points);
+  const max = computeMaxPlatePointZ(points, clearance);
   if (!max.ok) {
     return max;
   }
@@ -127,8 +129,8 @@ function computeSafeZMachine(calibration, safeZPlate) {
 /**
  * Full resolve: plate points + optional probe + buffer + calibration → machine Safe-Z.
  */
-function resolveProgramSafeZ(points, safeZBuffer, calibration) {
-  const plate = computeSafeZPlate(points, safeZBuffer);
+function resolveProgramSafeZ(points, safeZBuffer, calibration, clearance = 0) {
+  const plate = computeSafeZPlate(points, safeZBuffer, clearance);
   if (!plate.ok) {
     return plate;
   }

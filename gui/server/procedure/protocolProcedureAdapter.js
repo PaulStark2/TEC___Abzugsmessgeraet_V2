@@ -168,17 +168,35 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
   function buildResultsFromObserved(finalProcessState) {
     const program = programStore.getProgram();
     const rawCurves = forcePathStore.getCurves();
+    const clearance = Number(machineConfigStore.load().point_z_clearance_mm);
+    const offset = Number.isFinite(clearance) ? clearance : 0;
+    const runPoints = Array.isArray(points) ? points : [];
     const pointNames = {};
-    const points = program && Array.isArray(program.testPoints) ? program.testPoints : [];
-    for (let i = 0; i < points.length; ++i) {
-      pointNames[i] = points[i].name || `Punkt ${i + 1}`;
+    const pointIdentities = {};
+    for (let i = 0; i < runPoints.length; ++i) {
+      const point = runPoints[i];
+      pointNames[i] = point.name || `Zahn ${point.toothNumber || i + 1}`;
+      pointIdentities[i] = {
+        name: pointNames[i],
+        buildJobNumber: program ? program.buildJobNumber || program.programName : null,
+        plate: point.plate || null,
+        orderUid: point.orderUid || null,
+        toothNumber: point.toothNumber != null ? point.toothNumber : null,
+        x: point.x,
+        y: point.y,
+        z: point.z,
+        zApproach: Number(point.z) + offset,
+      };
     }
     const analysis = analyzeForcePaths(rawCurves, {
-      programName: program ? program.programName : null,
+      programName: program ? program.programName || program.buildJobNumber : null,
+      buildJobNumber: program ? program.buildJobNumber || null : null,
       pointNames,
+      pointIdentities,
     });
     return {
-      programName: program ? program.programName : null,
+      programName: program ? program.programName || program.buildJobNumber : null,
+      buildJobNumber: program ? program.buildJobNumber || null : null,
       mode: params ? params.mode : null,
       completedAt: new Date().toISOString(),
       backend: 'protocol',
@@ -287,6 +305,9 @@ function createProtocolProcedureAdapter(machineClient, options = {}) {
       observedRows.push({
         sequenceNumber: point ? point.sequenceNumber : idx + 1,
         name: point ? point.name : `Punkt ${idx + 1}`,
+        plate: point ? point.plate : null,
+        orderUid: point ? point.orderUid : null,
+        toothNumber: point ? point.toothNumber : null,
         x: point ? point.x : machineStatus.x,
         y: point ? point.y : machineStatus.y,
         z: point ? point.z : machineStatus.z,

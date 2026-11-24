@@ -5,16 +5,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Isolate writes: temporarily point PROGRAMS_DIR via monkeypatch after require.
 const programFiles = require('./programFiles');
 
 function withTempProgramsDir(fn) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tec-programs-'));
   const originalDir = programFiles.PROGRAMS_DIR;
-  // programFiles closes over PROGRAMS_DIR constant — reimplement via ensure + resolve by
-  // writing through teachPoint after chdir-style override is not available.
-  // Instead exercise teach/read via the module after swapping fs targets by writing into
-  // the real PROGRAMS_DIR under a unique prefix, then cleaning up.
   const prefix = `test_${Date.now()}_`;
   try {
     fn(prefix, () => {
@@ -42,32 +37,50 @@ withTempProgramsDir((prefix, cleanup) => {
   try {
     const create = programFiles.teachPoint({
       mode: 'create',
-      programName: `${prefix}Demo`,
-      pointName: 'Punkt A',
-      plate: { x: 1, y: 2, z: -3 },
+      buildJobNumber: `${prefix}Demo`,
+      plateId: 'A',
+      orderUid: 'ORD-1',
+      toothNumber: 33,
+      pose: { x: 1, y: 2, z: -3 },
     });
     assert.strictEqual(create.ok, true, create.error || 'create failed');
     assert.strictEqual(create.fileName, `${prefix}Demo.json`);
-    assert.strictEqual(create.point.sequenceNumber, 1);
+    assert.strictEqual(create.point.toothNumber, 33);
+    assert.strictEqual(create.point.z, -3);
+    assert.strictEqual(create.program.buildJobNumber, `${prefix}Demo`);
 
     const append = programFiles.teachPoint({
       mode: 'append',
       fileName: create.fileName,
-      pointName: 'Punkt B',
-      plate: { x: 4, y: 5, z: -6 },
+      plateId: 'A',
+      orderUid: 'ORD-1',
+      toothNumber: 34,
+      pose: { x: 4, y: 5, z: -6 },
     });
     assert.strictEqual(append.ok, true, append.error || 'append failed');
-    assert.strictEqual(append.point.sequenceNumber, 2);
+    assert.strictEqual(append.point.toothNumber, 34);
     assert.strictEqual(append.program.testPoints.length, 2);
+
+    const dupTooth = programFiles.teachPoint({
+      mode: 'append',
+      fileName: create.fileName,
+      plateId: 'A',
+      orderUid: 'ORD-1',
+      toothNumber: 33,
+      pose: { x: 0, y: 0, z: 0 },
+    });
+    assert.strictEqual(dupTooth.ok, false);
 
     const listed = programFiles.listPrograms().filter((f) => f.fileName.startsWith(prefix));
     assert.ok(listed.some((f) => f.fileName === create.fileName && f.pointCount === 2));
 
     const dup = programFiles.teachPoint({
       mode: 'create',
-      programName: `${prefix}Demo`,
-      pointName: 'X',
-      plate: { x: 0, y: 0, z: 0 },
+      buildJobNumber: `${prefix}Demo`,
+      plateId: 'A',
+      orderUid: 'ORD-1',
+      toothNumber: 11,
+      pose: { x: 0, y: 0, z: 0 },
     });
     assert.strictEqual(dup.ok, false);
 

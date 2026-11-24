@@ -12,9 +12,10 @@ function finiteNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-export function computeSafeZPlate(points, safeZBuffer) {
+export function computeSafeZPlate(points, safeZBuffer, clearance = 0) {
   const list = Array.isArray(points) ? points : [];
   const buffer = finiteNumber(safeZBuffer);
+  const offset = finiteNumber(clearance) ?? 0;
   if (buffer === null || !(buffer > 0)) {
     return null;
   }
@@ -27,8 +28,9 @@ export function computeSafeZPlate(points, safeZBuffer) {
     if (z === null) {
       return null;
     }
-    if (maxPointZ === null || z > maxPointZ) {
-      maxPointZ = z;
+    const approach = z + offset;
+    if (maxPointZ === null || approach > maxPointZ) {
+      maxPointZ = approach;
     }
   }
   return {
@@ -38,8 +40,8 @@ export function computeSafeZPlate(points, safeZBuffer) {
   };
 }
 
-export function resolveProgramSafeZ(points, safeZBuffer, calibration) {
-  const plate = computeSafeZPlate(points, safeZBuffer);
+export function resolveProgramSafeZ(points, safeZBuffer, calibration, clearance = 0) {
+  const plate = computeSafeZPlate(points, safeZBuffer, clearance);
   if (!plate) {
     return null;
   }

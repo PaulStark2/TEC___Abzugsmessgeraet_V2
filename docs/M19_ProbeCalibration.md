@@ -109,8 +109,8 @@ plate teach. **Independent** of PreClamp `force.*` search params.
 | `refine_passes` | 0 | Extra full two-chord passes from found center |
 | `approach_distance` | 15 mm | Coarse Z standoff above stored center |
 
-`MachineConfig` wire size is **372** bytes (includes Kraft-Weg sampling fields +
-`homing_approach_distance` + `a_homing_fast`).
+`MachineConfig` wire size is **376** bytes (`point_z_clearance_mm` appended after the
+previous 372-byte payload).
 Codec: `communication/PayloadCodec.cpp`, `gui/server/protocol/m12Codec.js`;
 constant `kMachineConfigPayloadWireSize` in `ProtocolSpec.hpp`.
 

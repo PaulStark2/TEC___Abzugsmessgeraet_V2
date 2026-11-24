@@ -6,6 +6,7 @@
  */
 
 const { startSmokeServer } = require('./lib/smokeServer');
+const { rawJob } = require('../server/program/sampleJob');
 const { derivePointProgress } = require('../server/procedure/procedureProgress');
 const { formatLimitWarnings } = require('../server/display/limitWarnings');
 const { MessageId } = require('../server/protocol/protocolTypes');
@@ -20,21 +21,11 @@ function sleep(ms) {
 }
 
 function makeProgram(pointCount) {
-  const testPoints = [];
+  const teeth = [];
   for (let i = 1; i <= pointCount; i += 1) {
-    testPoints.push({
-      name: `P${i}`,
-      sequenceNumber: i,
-      x: i,
-      y: 0,
-      z: 0,
-    });
+    teeth.push({ toothNumber: i, x: i, y: 0, z: 0 });
   }
-  return {
-    version: 1,
-    programName: `Prog${pointCount}`,
-    testPoints,
-  };
+  return rawJob(teeth, { buildJobNumber: `Prog${pointCount}` });
 }
 
 async function waitProcedure(request, predicate, timeoutMs, label) {

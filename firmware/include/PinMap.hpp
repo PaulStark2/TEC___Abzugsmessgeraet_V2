@@ -65,7 +65,9 @@
 #define PIN_LIM_ZN_PORT GPIOA
 #define PIN_LIM_ZN_PIN GPIO_PIN_12
 
-// E-Stop input: High = active. Hardware also cuts motor/pneumatic power.
+// E-Stop input: Low = active (fail-safe). The switch removes the sense voltage;
+// the internal pull-down holds an open line Low. High = released / run.
+// Hardware also cuts motor/pneumatic power. No software debounce.
 #define PIN_ESTOP_PORT GPIOA
 #define PIN_ESTOP_PIN GPIO_PIN_9
 

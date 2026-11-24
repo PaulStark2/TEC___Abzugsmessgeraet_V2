@@ -292,6 +292,7 @@ function testMachineConfigRoundtrip() {
   assert.ok(nearEqual(decoded.force_path_dz_fine_mm, 0.005));
   assert.ok(nearEqual(decoded.force_near_target_frac, 0.8));
   assert.ok(nearEqual(decoded.phase3_v_insert_fine, 0.5));
+  assert.ok(nearEqual(decoded.point_z_clearance_mm, 2));
   assert.ok(nearEqual(decoded.force_range_N, 30));
   assert.ok(nearEqual(decoded.force_hard_limit_N, 30));
   assert.ok(nearEqual(decoded.force_hard_limit_x_N, 30));

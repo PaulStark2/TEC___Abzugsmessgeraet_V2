@@ -5,6 +5,7 @@
  */
 
 const { startSmokeServer } = require('./lib/smokeServer');
+const { rawJob } = require('../server/program/sampleJob');
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -29,14 +30,17 @@ async function run() {
   const { request, stop } = server;
 
   try {
-    const upload = await request('POST', '/api/program/upload', {
-      version: 1,
-      programName: 'G8Smoke',
-      testPoints: [
-        { name: 'P1', sequenceNumber: 1, x: 0, y: 0, z: 0 },
-        { name: 'P2', sequenceNumber: 2, x: 5, y: 0, z: 0 },
-      ],
-    });
+    const upload = await request(
+      'POST',
+      '/api/program/upload',
+      rawJob(
+        [
+          { toothNumber: 11, x: 0, y: 0, z: 0 },
+          { toothNumber: 12, x: 5, y: 0, z: 0 },
+        ],
+        { buildJobNumber: 'G8Smoke' }
+      )
+    );
     assert(upload.status === 200 && upload.body.ok, 'upload');
 
     const put = await request('PUT', '/api/program/selection', { selectAll: true });

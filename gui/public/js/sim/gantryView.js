@@ -25,13 +25,13 @@ const DEFAULT_GEOMETRY = {
 };
 
 const COLORS = {
-  background: 0x12151a,
+  background: 0x17222f,
   rails: 0x6f7783,
   bridge: 0x5b9fd4,
   carriage: 0x9aa0a6,
   column: 0x8fa8bd,
   tcp: 0xffb300,
-  floor: 0x2a2f37,
+  floor: 0x243244,
   limit: 0xe57373,
   probeDisc: 0xf0c040,
   probeStem: 0x90a4ae,

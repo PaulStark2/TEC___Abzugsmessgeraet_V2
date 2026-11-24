@@ -10,6 +10,7 @@
  */
 
 const http = require('http');
+const { rawJob } = require('../server/program/sampleJob');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -230,14 +231,13 @@ async function homeMachine(base) {
 }
 
 async function prepareProgram(base) {
-  await request(base, 'POST', '/api/program/upload', {
-    version: 1,
-    programName: 'DiagE2E',
-    testPoints: [
-      { name: 'A', sequenceNumber: 1, x: 1, y: 0, z: 0 },
-      { name: 'B', sequenceNumber: 2, x: 3, y: 0, z: 0 },
+  await request(base, 'POST', '/api/program/upload', rawJob(
+    [
+      { toothNumber: 11, x: 1, y: 0, z: 0 },
+      { toothNumber: 12, x: 3, y: 0, z: 0 },
     ],
-  });
+    { buildJobNumber: 'DiagE2E' }
+  ));
   await request(base, 'PUT', '/api/program/selection', { selectAll: true });
   await request(base, 'POST', '/api/program/selection/confirm', null);
 }

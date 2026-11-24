@@ -180,6 +180,11 @@ ConfigValidationError validateMachineConfig(const MachineConfig& config)
     {
         return ConfigValidationError::SafeZInvalid;
     }
+    if (!std::isfinite(config.motion.point_z_clearance_mm) || config.motion.point_z_clearance_mm < 0.0f ||
+        config.motion.point_z_clearance_mm > SafetyLimits::kMaxPointZClearanceMm)
+    {
+        return ConfigValidationError::SafeZInvalid;
+    }
 
     if (config.force.force_filter < 0.0f || config.force.force_filter > SafetyLimits::kMaxForceFilter)
     {
