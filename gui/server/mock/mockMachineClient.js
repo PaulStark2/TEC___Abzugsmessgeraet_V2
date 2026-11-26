@@ -118,6 +118,10 @@ function createMockMachineClient() {
     return beginMotion({ x: 0, y: 0, z: 0 }, 'Homing');
   }
 
+  function manualHold() {
+    return { ok: true, status: getStatus() };
+  }
+
   function forceTare() {
     return { ok: true, status: getStatus() };
   }
@@ -228,6 +232,7 @@ function createMockMachineClient() {
     pause,
     resume,
     stop,
+    manualHold,
   };
 }
 

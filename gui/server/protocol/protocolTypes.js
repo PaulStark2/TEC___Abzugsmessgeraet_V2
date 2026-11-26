@@ -64,6 +64,7 @@ const MessageId = Object.freeze({
   CmdApproachCalibPoint: 0x61,
   CmdSetRotationPoints: 0x62,
   CmdStartTestOrAge: 0x63,
+  CmdManualHold: 0x64,
   CmdSetProbeCenter: 0x55,
   CmdDefineMcs: 0x56,
   CmdRestoreMcs: 0x57,

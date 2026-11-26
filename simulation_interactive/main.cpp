@@ -188,6 +188,11 @@ static void applyCommand(Machine& machine, const std::string& line)
         machine.stop();
         return;
     }
+    if (command == "manualHold")
+    {
+        machine.renewManualHold();
+        return;
+    }
 }
 
 // Drain available bytes from a client socket into a line buffer; handle full lines.

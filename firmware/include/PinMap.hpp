@@ -67,7 +67,7 @@
 
 // E-Stop input: Low = active (fail-safe). The switch removes the sense voltage;
 // the internal pull-down holds an open line Low. High = released / run.
-// Hardware also cuts motor/pneumatic power. No software debounce.
+// Hardware also cuts motor/pneumatic power. HostIo debounces the level for 10 ms.
 #define PIN_ESTOP_PORT GPIOA
 #define PIN_ESTOP_PIN GPIO_PIN_9
 

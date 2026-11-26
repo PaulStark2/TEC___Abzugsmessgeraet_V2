@@ -84,6 +84,11 @@ void CommandDispatcher::dispatch(const tecomm::DecodedFrame& frame, tecomm::Deco
         appendAck(message_id, tecomm::AckResultCode::Ok, out);
         break;
 
+    case tecomm::MessageId::CmdManualHold:
+        machine_.renewManualHold();
+        appendAck(message_id, tecomm::AckResultCode::Ok, out);
+        break;
+
     case tecomm::MessageId::CmdStop:
     {
         const MachineState before = machine_.machineState();
@@ -980,6 +985,7 @@ bool CommandDispatcher::isFaultGuarded(uint8_t message_id) const
     switch (static_cast<tecomm::MessageId>(message_id))
     {
     case tecomm::MessageId::CmdNop:
+    case tecomm::MessageId::CmdManualHold:
     case tecomm::MessageId::CmdClearFault:
     case tecomm::MessageId::CmdEnableFaultManual:
     case tecomm::MessageId::CmdRequestStatus:

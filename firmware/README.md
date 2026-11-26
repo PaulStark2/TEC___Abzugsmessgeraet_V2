@@ -39,7 +39,7 @@ Einmessen spec: [docs/M19_ProbeCalibration.md](../docs/M19_ProbeCalibration.md).
 |------|--------|
 | Logic | High = triggered (+Max = Homing-Referenz) |
 | Noise | Stepper EMI on long wires → spikes (~2 V); Core used to accept **one** High sample |
-| Firmware | **10 ms** stable High/Low debounce in `HostIo` before publishing limits (E-Stop undebounced) |
+| Firmware | **10 ms** stable High/Low debounce in `HostIo` before publishing limits |
 
 ### E-Stop (PA9)
 
@@ -48,10 +48,10 @@ Einmessen spec: [docs/M19_ProbeCalibration.md](../docs/M19_ProbeCalibration.md).
 | Switch | Removes the sense voltage (open = stop) |
 | Logic | **Low = E-Stop**, High = released |
 | GPIO | Input + pull-down, so an open wire reads Low |
-| Firmware | `e_stop = !pinHigh(PA9)`, no debounce |
-
-Core still sees a logical `e_stop` flag. Simulation and the GUI are unchanged.
+| Firmware | `e_stop` follows `!pinHigh(PA9)` after **10 ms** stable High/Low in `HostIo` |
 | Hardware | Keep **≤4.7 kΩ** (better **1–2.2 kΩ**) pull-down to MCU GND; short twisted pair; away from STEP/DIR; optional **RC** (~100 Ω + 10–100 nF) at the pin; stronger filter / Schmitt if still dirty |
+
+Core still sees a logical `e_stop` flag. Simulation and the GUI are unchanged. A dip shorter than 10 ms does not latch Fault. A held Low (button or open wire) does, 10 ms after the pin goes Low. The hardware power cut does not wait for this filter.
 
 At `v_homing = 5 mm/s`, 10 ms ≈ 0.05 mm past the switch — acceptable. Spikes below VIH (~2.31 V @ 3.3 V) can still false-trigger if peaks are narrower/higher than the scope shows or GND bounces.
 
@@ -79,11 +79,13 @@ SFU machine.
 | **`USART2`** (default) | PA2/PA3 | Laptop ST-Link VCP → GUI `PROTOCOL_TRANSPORT=uart` |
 | `USART3` | PC10/PC11 | Pi `/dev/serial0` (Phase 5b) |
 
-115200 8N1. StatusReport **50 Hz** (**44 B** wire, inkl. `abort_reason` u16 — siehe
+115200 8N1. StatusReport **10 Hz** (**44 B** wire, inkl. `abort_reason` u16 — siehe
 [`docs/HMI_Messages.md`](../docs/HMI_Messages.md)), `MsgRawAdc` **10 Hz**. During TestOrAge
 (test mode) the same status push also drains `MsgForcePathChunk` (`0xA2`, Kraft-Weg
 samples; see `docs/Measurement_Evaluation.md`). GUI sends **CmdNop 10 Hz** when the
-session is live.
+session is live. Dauerhalt sends `CmdManualHold` (`0x64`) while the button is held.
+The controller stops that motion if the permit lapses for 300 ms, so a lost STOP
+cannot run the axis out to the far target.
 
 ### UART stalls / sticky jog / hung calibration (important)
 

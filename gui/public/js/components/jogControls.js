@@ -4,6 +4,8 @@ import { sendCommand, fetchMachineConfig, fetchMachineStatus } from '../api.js';
 
 /** Far target distance for Dauerhalt (mm). Soft limits / STOP end the move. */
 const HOLD_TRAVEL_MM = 1000;
+/** Renew the controller permit while the button is held. Core stops after 300 ms without one. */
+const HOLD_REFRESH_MS = 100;
 
 /**
  * Snap a typed jog step to a positive multiple of minStep (at least 1× min).
@@ -113,6 +115,9 @@ export function bindJogAxes(root, opts) {
   let minStepMm = 0.1;
   let holdActive = false;
   let holdPointerId = null;
+  let holdToken = 0;
+  let holdTimer = null;
+  let holdStopping = false;
 
   function applyModeUi() {
     modeButtons.forEach((btn) => {
@@ -200,21 +205,52 @@ export function bindJogAxes(root, opts) {
     return { x, y, z };
   }
 
+  function clearHoldTimer() {
+    if (holdTimer != null) {
+      clearInterval(holdTimer);
+      holdTimer = null;
+    }
+  }
+
+  function refreshHold() {
+    sendCommand({ command: 'manualHold' }).catch(() => {});
+  }
+
+  function motionStillRunning() {
+    const st = getStatus() || {};
+    return st.machineState === 'Active' || st.motionState === 'Moving';
+  }
+
   async function startHold(axis, direction) {
+    const token = holdToken;
     const pose = await resolvePose();
-    if (!pose) {
-      setFeedback('Keine gültige Position für Dauerhalt', true);
+    if (!pose || token !== holdToken || !holdActive) {
+      if (!pose && token === holdToken) {
+        setFeedback('Keine gültige Position für Dauerhalt', true);
+      }
       return false;
     }
     const { x, y, z } = pose;
     const target = { x, y, z };
     const key = axis.toLowerCase();
     target[key] = target[key] + direction * HOLD_TRAVEL_MM;
+    refreshHold();
+    clearHoldTimer();
+    holdTimer = setInterval(() => {
+      if (!holdActive || token !== holdToken) return;
+      refreshHold();
+    }, HOLD_REFRESH_MS);
     try {
       await sendCommand({ command: 'moveTo', x: target.x, y: target.y, z: target.z });
+      if (token !== holdToken || !holdActive) {
+        clearHoldTimer();
+        sendCommand({ command: 'stop' }).catch(() => {});
+        return false;
+      }
       setFeedback(`Dauerhalt ${axis} ${direction > 0 ? '+' : '−'} …`, false);
       return true;
     } catch (err) {
+      clearHoldTimer();
       setFeedback(err.message || String(err), true);
       return false;
     }
@@ -223,11 +259,39 @@ export function bindJogAxes(root, opts) {
   async function stopHold(message) {
     holdActive = false;
     holdPointerId = null;
+    holdToken += 1;
+    clearHoldTimer();
+    if (holdStopping) return;
+    holdStopping = true;
+    let lastError = null;
     try {
-      await sendCommand({ command: 'stop' });
-      if (message) setFeedback(message, false);
-    } catch (err) {
-      setFeedback(err.message || String(err), true);
+      const until = Date.now() + 2500;
+      while (Date.now() < until) {
+        try {
+          await sendCommand({ command: 'stop' });
+          lastError = null;
+        } catch (err) {
+          lastError = err;
+        }
+        if (!motionStillRunning()) break;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      if (motionStillRunning()) {
+        try {
+          await sendCommand({ command: 'stop' });
+          lastError = null;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      if (lastError && motionStillRunning()) {
+        setFeedback(lastError.message || String(lastError), true);
+      } else if (message) {
+        setFeedback(message, false);
+      }
+    } finally {
+      holdStopping = false;
     }
   }
 
@@ -305,9 +369,11 @@ export function bindJogAxes(root, opts) {
   void loadMinStep();
 
   return () => {
-    if (holdActive) {
-      void sendCommand({ command: 'stop' }).catch(() => {});
+    if (holdActive || holdTimer != null) {
       holdActive = false;
+      holdToken += 1;
+      clearHoldTimer();
+      void sendCommand({ command: 'stop' }).catch(() => {});
     }
     modeButtons.forEach((btn) => btn.removeEventListener('click', onModeClick));
     if (stepInput) {

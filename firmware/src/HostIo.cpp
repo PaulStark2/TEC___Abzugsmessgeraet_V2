@@ -49,6 +49,10 @@ static std::uint32_t g_status_divider = 0;
 // Limit lines pick up stepper EMI (spikes to ~2 V). Core treats a single High
 // sample as +max during homing — debounce at 1 kHz before publishing.
 static constexpr std::uint8_t kLimitDebounceMs = 10;
+// E-Stop (PA9) sees the same EMI as the limits. One Low sample latches Fault,
+// so require the same 10 ms stable level. Hardware still cuts motor and air
+// immediately.
+static constexpr std::uint8_t kEstopDebounceMs = 10;
 // Probe NC on PA5: same EMI class as limits; undebounced Low spikes latch a
 // false Messtaster contact mid-air during Z search (hub height / above disc).
 static constexpr std::uint8_t kProbeDebounceMs = 15;
@@ -65,6 +69,7 @@ static DebouncedLevel g_lim_yn{};
 static DebouncedLevel g_lim_yp{};
 static DebouncedLevel g_lim_zn{};
 static DebouncedLevel g_lim_zp{};
+static DebouncedLevel g_estop{};
 static DebouncedLevel g_probe{};
 
 static bool pinHigh(GPIO_TypeDef* port, std::uint16_t pin)
@@ -181,7 +186,6 @@ static bool enqueueFrame(const simbridge::OutboundFrame& frame)
 static constexpr std::size_t kPendingTxCap = 8;
 static simbridge::OutboundFrame g_pending_tx[kPendingTxCap]{};
 static std::size_t g_pending_tx_n = 0;
-static std::uint8_t g_adc_push_div = 0;
 
 static void flushPendingTx()
 {
@@ -388,8 +392,10 @@ HostInputs sampleInputs(std::uint32_t force_sequence, std::uint32_t heartbeat_se
     inputs.limitZMin = debounceLevel(g_lim_zn, pinHigh(PIN_LIM_ZN_PORT, PIN_LIM_ZN_PIN), kLimitDebounceMs);
     inputs.limitZMax = debounceLevel(g_lim_zp, pinHigh(PIN_LIM_ZP_PORT, PIN_LIM_ZP_PIN), kLimitDebounceMs);
     // E-Stop: Low = active. The switch removes the sense voltage, so an open
-    // or cut line must stop. No debounce — fail fast. Hardware still cuts power.
-    inputs.e_stop = !pinHigh(PIN_ESTOP_PORT, PIN_ESTOP_PIN);
+    // or cut line must stop. Publish only after the raw level holds for 10 ms,
+    // same window as the limit switches. Hardware still cuts power at once.
+    const bool estop_raw = !pinHigh(PIN_ESTOP_PORT, PIN_ESTOP_PIN);
+    inputs.e_stop = debounceLevel(g_estop, estop_raw, kEstopDebounceMs);
     // Level only (NC: Low = contact). Pose/sequence latch is in FirmwareHost.
     // Debounce before publishing — a single EMI Low must not create a rising edge.
     const bool probe_raw_contact = !pinHigh(PIN_PROBE_PORT, PIN_PROBE_PIN);
@@ -483,19 +489,18 @@ void serviceProtocol(FirmwareHost& host)
 
     flushPendingTx();
 
-    // StatusReport 50 Hz; MsgRawAdc 10 Hz. Skip if TX tight or pending replies wait.
+    // StatusReport and MsgRawAdc at 10 Hz. 50 Hz unsolicited TX stalled the ST-Link VCP
+    // (lost ACKs, COM port hang). Skip if TX tight or pending replies wait.
     ++g_status_divider;
-    if (g_status_divider >= 20u)
+    if (g_status_divider >= 100u)
     {
         g_status_divider = 0;
-        const bool include_adc = (++g_adc_push_div % 5u) == 0u;
-        // Status (~49 B) + up to a few ForcePath chunks (~277 B max each) + optional ADC.
-        const std::size_t need = include_adc ? 400u : 350u;
-        if (g_pending_tx_n == 0u && txFreeSpace() >= need)
+        // Status (~49 B) + up to a few ForcePath chunks (~277 B max each) + ADC.
+        if (g_pending_tx_n == 0u && txFreeSpace() >= 400u)
         {
             std::vector<simbridge::OutboundFrame> status;
             status.reserve(10);
-            host.appendStatusPush(status, include_adc);
+            host.appendStatusPush(status, true);
             for (const simbridge::OutboundFrame& frame : status)
             {
                 (void)enqueueFrame(frame);

@@ -227,6 +227,12 @@ async function handleCommand(body) {
       }
       result = await machineClient.resume();
       break;
+    case 'manualHold':
+      if (typeof machineClient.manualHold !== 'function') {
+        return { ok: false, error: 'manualHold not supported by client' };
+      }
+      result = await machineClient.manualHold();
+      break;
     case 'stop':
       if (typeof machineClient.stop !== 'function') {
         return { ok: false, error: 'stop not supported by client' };

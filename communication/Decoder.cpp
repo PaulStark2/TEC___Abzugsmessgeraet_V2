@@ -28,6 +28,7 @@ bool isEmptyCommandId(uint8_t message_id)
     case MessageId::CmdDefineMcs:
     case MessageId::CmdInvalidateHoming:
     case MessageId::CmdForceTare:
+    case MessageId::CmdManualHold:
     case MessageId::CmdRequestStatus:
         return true;
     default:
@@ -78,6 +79,7 @@ bool isKnownMessageId(uint8_t message_id)
     case MessageId::CmdEnableFaultManual:
     case MessageId::CmdApproachCalibPoint:
     case MessageId::CmdSetRotationPoints:
+    case MessageId::CmdManualHold:
     case MessageId::CmdRequestStatus:
     case MessageId::RspAck:
     case MessageId::MsgRawAdc:

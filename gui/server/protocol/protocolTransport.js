@@ -27,28 +27,67 @@ function createUartConnection({ path, baudRate }, onConnect) {
     autoOpen: false,
   });
 
+  // Windows returns "Access denied" if a new open overlaps the previous handle.
+  // release() resolves only after that handle is gone.
+  let releasePromise = null;
+  function release() {
+    if (releasePromise) {
+      return releasePromise;
+    }
+    releasePromise = new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) {
+          return;
+        }
+        done = true;
+        try {
+          port.removeAllListeners();
+        } catch {
+          // ignore
+        }
+        resolve();
+      };
+      const timer = setTimeout(finish, 2000);
+
+      const closeOpenPort = () => {
+        if (!port.isOpen) {
+          clearTimeout(timer);
+          finish();
+          return;
+        }
+        try {
+          port.close(() => {
+            clearTimeout(timer);
+            finish();
+          });
+        } catch {
+          clearTimeout(timer);
+          finish();
+        }
+      };
+
+      if (port.opening) {
+        port.once('open', closeOpenPort);
+        port.once('error', () => {
+          clearTimeout(timer);
+          finish();
+        });
+        return;
+      }
+      closeOpenPort();
+    });
+    return releasePromise;
+  }
+
   const facade = {
     write(buf, cb) {
       return port.write(buf, cb);
     },
     destroy() {
-      try {
-        port.removeAllListeners('data');
-        if (port.isOpen) {
-          port.close(() => {
-            try {
-              port.removeAllListeners();
-            } catch {
-              // ignore
-            }
-          });
-        } else {
-          port.removeAllListeners();
-        }
-      } catch {
-        // ignore
-      }
+      void release();
     },
+    release,
     get destroyed() {
       return !port.isOpen;
     },

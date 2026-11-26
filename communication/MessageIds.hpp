@@ -41,6 +41,7 @@ enum class MessageId : uint8_t
     CmdApproachCalibPoint = 0x61, // u8 point_id: 1=KM … 4=K3, 5=probe
     CmdSetRotationPoints = 0x62, // 9×float32: k1.xyz, k2.xyz, k3.xyz
     CmdStartTestOrAge = 0x63, // empty — hand-mode SeatToForce + TestOrAge iterations
+    CmdManualHold = 0x64, // empty — Dauerhalt keepalive; motion stops if it lapses
     CmdRequestStatus = 0x7F,
 
     // Controller -> Host responses.

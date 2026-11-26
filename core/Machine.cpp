@@ -1426,12 +1426,41 @@ void Machine::advanceKinematics(float dt)
     }
 }
 
+void Machine::renewManualHold()
+{
+    manual_hold_active_ = true;
+    manual_hold_age_s_ = 0.0f;
+}
+
+void Machine::tickManualHold(float dt)
+{
+    if (!manual_hold_active_)
+    {
+        return;
+    }
+    manual_hold_age_s_ += dt;
+    if (manual_hold_age_s_ < kManualHoldTimeout_s)
+    {
+        return;
+    }
+    manual_hold_active_ = false;
+    const bool moving = machine_state_ == MachineState::Active ||
+                        (machine_state_ == MachineState::Fault && fault_manual_active_ &&
+                         motion_planner_.motionState() != MotionState::AtTarget);
+    if (moving)
+    {
+        stop();
+    }
+}
+
 void Machine::tick(float dt)
 {
     if (dt <= 0.0f)
     {
         return;
     }
+
+    tickManualHold(dt);
 
     if (machine_state_ == MachineState::Fault)
     {
@@ -1607,6 +1636,7 @@ void Machine::resume()
 
 void Machine::stop()
 {
+    manual_hold_active_ = false;
     if (machine_state_ == MachineState::Stopped)
     {
         return;
@@ -1616,6 +1646,9 @@ void Machine::stop()
         // Fault-manual: stop the current jog but keep recovery armed.
         if (fault_manual_active_)
         {
+            stored_target_x_ = motion_planner_.x();
+            stored_target_y_ = motion_planner_.y();
+            stored_target_z_ = motion_planner_.z();
             motion_planner_.stopMotion();
         }
         return;

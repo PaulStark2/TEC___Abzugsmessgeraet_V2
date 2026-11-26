@@ -44,7 +44,9 @@ const { latchMeasuredHome } = require('../coord/homeMarker');
 
 const DEFAULT_JOG_STEP = 1;
 const RECONNECT_DELAY_MS_TCP = 2000;
-const RECONNECT_DELAY_MS_UART = 4000; // Windows needs longer after SerialPort.close
+const RECONNECT_DELAY_MS_UART = 1000;
+const UART_REOPEN_SETTLE_MS = 300;
+const UART_RECONNECT_DELAY_MAX_MS = 8000;
 const NOP_INTERVAL_MS = 100; // CmdNop 10 Hz while session is live
 const MACHINE_UNAVAILABLE = 'Machine connection unavailable';
 const STATUS_STALE_MS = 1000; // UART: if status still flows, ACK timeout ≠ link dead
@@ -127,6 +129,7 @@ function createProtocolMachineClient(options = {}) {
       (isUart ? 5000 : 3000)
   );
   const reconnectDelayMs = isUart ? RECONNECT_DELAY_MS_UART : RECONNECT_DELAY_MS_TCP;
+  let nextReconnectDelayMs = reconnectDelayMs;
 
   let status = createDefaultStatus(false);
   let socket = null;
@@ -135,6 +138,7 @@ function createProtocolMachineClient(options = {}) {
   let sessionReady = false;
   let closed = false;
   let reconnectTimer = null;
+  let connectChain = Promise.resolve();
   let nopTimer = null;
   let lastStatusAtMs = 0;
   const streamBuffer = new FrameStreamBuffer();
@@ -601,14 +605,26 @@ function createProtocolMachineClient(options = {}) {
     });
   }
 
+  function noteTransportError(err) {
+    const message = String((err && err.message) || '');
+    if (!isUart || !/access denied/i.test(message)) {
+      return;
+    }
+    nextReconnectDelayMs = Math.min(nextReconnectDelayMs * 2, UART_RECONNECT_DELAY_MAX_MS);
+    console.error(
+      `ProtocolMachineClient: ${serialPath} is still busy, retrying in ${nextReconnectDelayMs} ms`
+    );
+  }
+
   function scheduleReconnect() {
     if (closed || reconnectTimer) {
       return;
     }
+    const delayMs = nextReconnectDelayMs;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
-    }, reconnectDelayMs);
+    }, delayMs);
   }
 
   function attachSocketHandlers(s) {
@@ -627,8 +643,14 @@ function createProtocolMachineClient(options = {}) {
 
     s.on('error', (err) => {
       console.error(`ProtocolMachineClient error: ${err.message}`);
-      if (s === socket) {
-        markDisconnected(MACHINE_UNAVAILABLE);
+      if (s !== socket) {
+        return;
+      }
+      noteTransportError(err);
+      markDisconnected(MACHINE_UNAVAILABLE);
+      // A failed open emits error and no close. Without this the client stays down.
+      if (!closed) {
+        scheduleReconnect();
       }
     });
 
@@ -639,7 +661,9 @@ function createProtocolMachineClient(options = {}) {
     });
 
     s.on('close', () => {
-      if (s !== socket && socket !== null) {
+      // Ignore the close from a port we are already replacing. Otherwise every
+      // reopen schedules another reconnect and the session drops again.
+      if (s !== socket) {
         return;
       }
       socket = null;
@@ -653,18 +677,31 @@ function createProtocolMachineClient(options = {}) {
     });
   }
 
-  function connect() {
+  async function openConnection() {
     if (closed) {
       return;
     }
-    if (socket) {
-      const old = socket;
-      socket = null;
+    const previous = socket;
+    socket = null;
+    if (previous) {
       try {
-        old.destroy();
+        if (typeof previous.release === 'function') {
+          await previous.release();
+        } else {
+          previous.destroy();
+        }
       } catch {
         // ignore
       }
+    }
+    if (closed) {
+      return;
+    }
+    if (isUart) {
+      await new Promise((resolve) => setTimeout(resolve, UART_REOPEN_SETTLE_MS));
+    }
+    if (closed) {
+      return;
     }
 
     connected = false;
@@ -684,6 +721,7 @@ function createProtocolMachineClient(options = {}) {
           // Link is up; mutating commands wait until first status report.
           connected = true;
           sessionReady = false;
+          nextReconnectDelayMs = reconnectDelayMs;
           status = { ...status, connected: false };
           if (transport === 'uart' || transport === 'serial') {
             console.log(
@@ -702,6 +740,20 @@ function createProtocolMachineClient(options = {}) {
 
     socket = s;
     attachSocketHandlers(s);
+  }
+
+  function connect() {
+    if (closed) {
+      return;
+    }
+    connectChain = connectChain
+      .then(() => openConnection())
+      .catch((err) => {
+        console.error(`ProtocolMachineClient connect failed: ${err.message || err}`);
+        if (!closed) {
+          scheduleReconnect();
+        }
+      });
   }
 
   async function moveTo(x, y, z) {
@@ -753,6 +805,17 @@ function createProtocolMachineClient(options = {}) {
       return { ok: false, error: 'Failed to encode PROCEDURE_DECISION' };
     }
     return sendFrameAndWait(MessageId.CmdProcedureDecision, encoded.frame);
+  }
+
+  async function manualHold() {
+    if (!isLiveSession()) {
+      return { ok: false, error: MACHINE_UNAVAILABLE, status: getStatus() };
+    }
+    const encoded = encodeEmptyMessage(MessageId.CmdManualHold);
+    if (!encoded.ok) {
+      return { ok: false, error: 'Failed to encode MANUAL_HOLD' };
+    }
+    return sendFrameAndWait(MessageId.CmdManualHold, encoded.frame);
   }
 
   async function stop() {
@@ -1173,7 +1236,11 @@ function createProtocolMachineClient(options = {}) {
       const s = socket;
       socket = null;
       try {
-        s.destroy();
+        if (typeof s.release === 'function') {
+          void s.release();
+        } else {
+          s.destroy();
+        }
       } catch {
         // ignore
       }
@@ -1189,6 +1256,7 @@ function createProtocolMachineClient(options = {}) {
     resume,
     sendProcedureDecision,
     stop,
+    manualHold,
     jog,
     pneumaticOpen,
     pneumaticClose,

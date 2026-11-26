@@ -544,6 +544,7 @@ function isEmptyCommandId(messageId) {
     case MessageId.CmdDefineMcs:
     case MessageId.CmdInvalidateHoming:
     case MessageId.CmdForceTare:
+    case MessageId.CmdManualHold:
     case MessageId.CmdRequestStatus:
       return true;
     default:

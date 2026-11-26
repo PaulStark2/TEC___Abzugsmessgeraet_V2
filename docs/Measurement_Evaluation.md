@@ -117,7 +117,7 @@ Streaming ist opportunistisch. Simulation und STM32-Firmware drainen den Recorde
 
 ### Host-Pflicht (STM32)
 
-Die Firmware muss `MsgForcePathChunk` mitsenden. Status allein reicht nicht: der Recorder füllt sich sonst und verwirft Samples. Umsetzung: `FirmwareHost::appendForcePathChunks` im Status-Push-Pfad (`HostIo`, typisch 50 Hz).
+Die Firmware muss `MsgForcePathChunk` mitsenden. Status allein reicht nicht: der Recorder füllt sich sonst und verwirft Samples. Umsetzung: `FirmwareHost::appendForcePathChunks` im Status-Push-Pfad (`HostIo`, 10 Hz).
 
 ## Auswertung auf dem Host
 

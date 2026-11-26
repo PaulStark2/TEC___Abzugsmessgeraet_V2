@@ -136,6 +136,10 @@ function createSimMachineClient(options = {}) {
     return sendLine({ type: 'command', command: 'stop' });
   }
 
+  function manualHold() {
+    return sendLine({ type: 'command', command: 'manualHold' });
+  }
+
   // No tick(): Core host advances Machine; JS must not simulate pose.
   function close() {
     if (reconnectTimer) {
@@ -157,6 +161,7 @@ function createSimMachineClient(options = {}) {
     pause,
     resume,
     stop,
+    manualHold,
     close,
   };
 }

@@ -337,6 +337,50 @@ int main()
         }
     }
 
+    // Dauerhalt: a move with a lapsed permit stops. A plain moveTo does not.
+    {
+        Machine m;
+        m.moveTo(100.0f, 0.0f, 0.0f);
+        m.renewManualHold();
+        for (int i = 0; i < 7; ++i)
+        {
+            tickWithForce(m, 0.05f);
+        }
+        if (m.machineState() != MachineState::Stopped)
+        {
+            return 34;
+        }
+        if (!(m.x() < 50.0f))
+        {
+            return 35;
+        }
+    }
+    {
+        Machine m;
+        m.moveTo(10.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 20 && m.machineState() != MachineState::Idle; ++i)
+        {
+            tickWithForce(m, 0.5f);
+        }
+        if (m.machineState() != MachineState::Idle || !nearEqual(m.x(), 10.0f))
+        {
+            return 36;
+        }
+    }
+    {
+        Machine m;
+        m.moveTo(100.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 20; ++i)
+        {
+            m.renewManualHold();
+            tickWithForce(m, 0.1f);
+        }
+        if (m.machineState() != MachineState::Active)
+        {
+            return 37;
+        }
+    }
+
     // All Machine tests passed.
     return 0;
 }

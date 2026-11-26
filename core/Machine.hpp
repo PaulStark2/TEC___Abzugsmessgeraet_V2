@@ -214,6 +214,8 @@ public:
     bool spreaderBusy() const;
     SpreaderState spreaderState() const;
 
+    // Dauerhalt permit. Motion in progress stops if renewals lapse (lost STOP / dead link).
+    void renewManualHold();
     void setCommunicationWatchdogEnabled(bool enabled);
     bool communicationWatchdogEnabled() const;
     float hostHeartbeatAge() const;
@@ -225,6 +227,8 @@ public:
     bool consumeProbeTrigger(TestPoint& pose_out);
 
 private:
+    void tickManualHold(float dt);
+
     enum class ForceControlPhase
     {
         NormalZApproach,
@@ -298,6 +302,9 @@ private:
     bool have_force_sample_;
     bool force_sample_fresh_;
     bool comm_watchdog_enabled_;
+    bool manual_hold_active_ = false;
+    float manual_hold_age_s_ = 0.0f;
+    static constexpr float kManualHoldTimeout_s = 0.30f;
     bool heartbeat_fresh_;
     float heartbeat_age_s_;
     std::uint32_t last_heartbeat_sequence_;
