@@ -5,8 +5,9 @@ import { applyMessageSummary, applyStatus, setConnectionStatus, wireGlobalStop }
 import { wireFaultPanel } from './components/faultPanel.js';
 import { startRouter, navigate } from './router.js';
 import { createStartupHomingController, MCS_REQUIRED_MESSAGE } from './homingGate.js';
+import { installSessionLock } from './sessionLock.js';
 
-document.addEventListener('DOMContentLoaded', () => {
+function startApp() {
   setConnectionStatus('GUI läuft — verbinde Live-Status…', false);
   wireGlobalStop();
   wireFaultPanel();
@@ -41,4 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof window !== 'undefined') {
     window.__guiSendCommand = sendCommand;
   }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  installSessionLock(startApp);
 });

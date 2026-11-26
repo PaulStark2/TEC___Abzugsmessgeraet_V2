@@ -452,6 +452,51 @@ export async function clearCurrentResults() {
   return result;
 }
 
+export async function fetchSession() {
+  const response = await fetch('/api/session', { method: 'GET' });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('Die Anmeldung ist gerade nicht erreichbar.');
+  }
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || 'Die Anmeldung ist gerade nicht erreichbar.');
+  }
+  return result;
+}
+
+export async function loginSession(username, password) {
+  const response = await fetch('/api/session/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  try {
+    return await response.json();
+  } catch {
+    return { ok: false, error: 'Anmeldung fehlgeschlagen' };
+  }
+}
+
+export async function logoutSession() {
+  const response = await fetch('/api/session/logout', { method: 'POST' });
+  try {
+    return await response.json();
+  } catch {
+    return { ok: response.ok };
+  }
+}
+
+export async function shutdownSystem() {
+  const response = await fetch('/api/system/shutdown', { method: 'POST' });
+  try {
+    return await response.json();
+  } catch {
+    return { ok: false, error: 'Herunterfahren konnte nicht gestartet werden.' };
+  }
+}
+
 export async function fetchParameterCatalog() {
   const response = await fetch('/api/parameters/catalog', { method: 'GET' });
   return response.json();

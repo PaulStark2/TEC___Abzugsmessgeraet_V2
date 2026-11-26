@@ -61,7 +61,13 @@ body {
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
+  gap: 0.75rem;
   margin-top: 0.1rem;
+}
+
+.btn-logout {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
 }
 
 .app-header__logo {
@@ -137,6 +143,87 @@ body {
 .btn-stop-global {
   flex-shrink: 0;
   min-width: 5.5rem;
+}
+
+.session-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--bg);
+}
+
+.session-lock[hidden] {
+  display: none;
+}
+
+.session-lock__card {
+  width: min(28rem, 100%);
+  padding: 1.5rem 1.4rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.session-lock__logo {
+  display: block;
+  max-width: 12rem;
+  max-height: 2.6rem;
+  margin-bottom: 1rem;
+}
+
+.session-lock__card h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.45rem;
+  font-weight: 600;
+}
+
+.session-lock__lead {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.session-lock__card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.session-lock__card input {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.session-lock__error {
+  min-height: 1.3em;
+  margin: 0 0 0.75rem;
+  color: #e57373;
+}
+
+.session-lock__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.session-lock__confirm {
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.session-lock__confirm p {
+  margin: 0 0 0.65rem;
 }
 
 .app-layout {

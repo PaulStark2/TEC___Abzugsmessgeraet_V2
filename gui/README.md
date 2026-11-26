@@ -178,6 +178,9 @@ Weitere Env-Vars:
 | `PROTOCOL_SERIAL_PATH` | — | z. B. `COM5` (ST-Link VCP) oder `/dev/serial0` |
 | `PROTOCOL_SERIAL_BAUD` | `115200` | UART Baudrate |
 | `PROTOCOL_ACK_TIMEOUT_MS` | `3000` | Wartezeit auf RSP_ACK/NACK |
+| `GUI_USERNAME` | `bediener` | Anmeldebildschirm der HMI. Am Gerät setzen, nicht den Entwicklungsstandard lassen. |
+| `GUI_PASSWORD` | `tec-admin` | Passwort dieses Kontos. Getrennt vom Parametrier-Passwort. |
+| `ALLOW_SYSTEM_POWER` | aus | `1` erlaubt „Herunterfahren“ über `sudo -n /sbin/shutdown`. Nur auf dem Gerät. |
 
 **STM32 bring-up (Phase 5a)** — Firmware auf Nucleo flashen (`TEC_HOST_UART=USART2`), dann:
 

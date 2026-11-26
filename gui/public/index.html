@@ -17,9 +17,38 @@
         <p id="gui-status" class="gui-status">GUI startet…</p>
       </div>
       <div class="app-header__brand">
+        <button type="button" id="btn-logout" class="btn-logout">Abmelden</button>
         <img class="app-header__logo" src="/brand/fidentis-logo.png" alt="FIDENTIS" />
       </div>
     </header>
+
+    <div id="session-lock" class="session-lock">
+      <form id="session-login-form" class="session-lock__card">
+        <img class="session-lock__logo" src="/brand/fidentis-logo.png" alt="FIDENTIS" />
+        <h1>Zugprüfstand</h1>
+        <p class="session-lock__lead">Bitte anmelden, um die Anlage zu bedienen.</p>
+        <label>
+          Benutzer
+          <input id="session-username" name="username" type="text" autocomplete="username" required />
+        </label>
+        <label>
+          Passwort
+          <input id="session-password" name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <p id="session-error" class="session-lock__error" role="alert"></p>
+        <div class="session-lock__actions">
+          <button type="submit">Anmelden</button>
+          <button type="button" id="session-shutdown">Herunterfahren</button>
+        </div>
+        <div id="session-shutdown-confirm" class="session-lock__confirm" hidden>
+          <p>Gerät jetzt herunterfahren?</p>
+          <div class="session-lock__actions">
+            <button type="button" id="session-shutdown-yes">Ja, herunterfahren</button>
+            <button type="button" id="session-shutdown-no">Abbrechen</button>
+          </div>
+        </div>
+      </form>
+    </div>
 
     <div id="status-bar" class="status-bar" aria-label="Maschinenstatus">
       <dl class="status-bar-grid">

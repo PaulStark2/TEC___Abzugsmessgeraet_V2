@@ -30,6 +30,12 @@ const { plantProbeDiscCenterOnly } = require('./coord/physicalGeometry');
 const simPlantStore = require('./config/simPlantStore');
 const messageStore = require('./messages/messageStore');
 const { ingestStatus } = require('./messages/statusIngest');
+const { createGuiSession, isSessionExemptMutation } = require('./session/guiSession');
+const {
+  evaluateShutdown,
+  requestShutdown,
+  SHUTDOWN_FAILED_MESSAGE,
+} = require('./session/shutdownPolicy');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -407,6 +413,7 @@ const procedureService = createProcedureService(machineClient, { plantClient });
 // (environment VARIABLE PARAMETER_MENU_PASSWORD).
 const PARAMETER_MENU_PASSWORD = process.env.PARAMETER_MENU_PASSWORD || 'tec-admin';
 let parametersUnlocked = false;
+const guiSession = createGuiSession(process.env);
 /** After plant reconnect, push persisted SimUI settings once. */
 let plantSettingsRestored = false;
 
@@ -529,6 +536,61 @@ function buildSummaryFromProgram(normalizedProgram) {
 
 const server = http.createServer(async (req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
+
+  if (req.method === 'GET' && urlPath === '/api/session') {
+    sendJson(res, 200, { ok: true, authenticated: guiSession.isAuthenticated() });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/session/login') {
+    try {
+      const body = await readJsonBody(req);
+      const accepted = guiSession.login(body.username, body.password);
+      if (!accepted) {
+        sendJson(res, 401, { ok: false, error: 'Anmeldung fehlgeschlagen' });
+        return;
+      }
+      sendJson(res, 200, { ok: true, authenticated: true });
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'Anmeldung fehlgeschlagen' });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/session/logout') {
+    guiSession.logout();
+    parametersUnlocked = false;
+    sendJson(res, 200, { ok: true, authenticated: false });
+    return;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/system/shutdown') {
+    const procedureState =
+      procedureService.getStatus && procedureService.getStatus().state
+        ? procedureService.getStatus().state
+        : 'idle';
+    const decision = evaluateShutdown({
+      allowSystemPower: process.env.ALLOW_SYSTEM_POWER === '1',
+      procedureState,
+    });
+    if (!decision.ok) {
+      sendJson(res, decision.status, { ok: false, error: decision.error });
+      return;
+    }
+    try {
+      await requestShutdown();
+      sendJson(res, 200, { ok: true });
+    } catch (err) {
+      console.error('[shutdown]', err && err.message ? err.message : err);
+      sendJson(res, 500, { ok: false, error: SHUTDOWN_FAILED_MESSAGE });
+    }
+    return;
+  }
+
+  if (!guiSession.isAuthenticated() && !isSessionExemptMutation(req.method, urlPath)) {
+    sendJson(res, 401, { ok: false, error: 'Anmeldung erforderlich' });
+    return;
+  }
 
   if (req.method === 'POST' && urlPath === '/api/command') {
     let body;
