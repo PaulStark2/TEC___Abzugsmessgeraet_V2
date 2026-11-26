@@ -14,6 +14,14 @@
 
 * {
   box-sizing: border-box;
+  /* Touch kiosk: swipe still scrolls, the bar stays hidden. */
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 body {
